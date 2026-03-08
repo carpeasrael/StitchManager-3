@@ -1,0 +1,91 @@
+export interface Folder {
+  id: number;
+  name: string;
+  path: string;
+  parentId: number | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EmbroideryFile {
+  id: number;
+  folderId: number;
+  filename: string;
+  filepath: string;
+  name: string | null;
+  theme: string | null;
+  description: string | null;
+  license: string | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  stitchCount: number | null;
+  colorCount: number | null;
+  fileSizeBytes: number | null;
+  thumbnailPath: string | null;
+  aiAnalyzed: boolean;
+  aiConfirmed: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FileFormat {
+  id: number;
+  fileId: number;
+  format: string;
+  formatVersion: string | null;
+  filepath: string;
+  fileSizeBytes: number | null;
+  parsed: boolean;
+}
+
+export interface ThreadColor {
+  id: number;
+  fileId: number;
+  sortOrder: number;
+  colorHex: string;
+  colorName: string | null;
+  brand: string | null;
+  brandCode: string | null;
+  isAi: boolean;
+}
+
+export interface Tag {
+  id: number;
+  name: string;
+  createdAt: string;
+}
+
+export interface AiAnalysisResult {
+  id: number;
+  fileId: number;
+  provider: string;
+  model: string;
+  parsedName: string | null;
+  parsedTheme: string | null;
+  parsedDesc: string | null;
+  parsedTags: string[] | null;
+  parsedColors: string[] | null;
+  accepted: boolean;
+  analyzedAt: string;
+}
+
+export interface FileUpdate {
+  name?: string;
+  theme?: string;
+  description?: string;
+  license?: string;
+}
+
+export type ThemeMode = "hell" | "dunkel";
+
+export interface State {
+  folders: Folder[];
+  selectedFolderId: number | null;
+  files: EmbroideryFile[];
+  selectedFileId: number | null;
+  searchQuery: string;
+  formatFilter: string | null;
+  settings: Record<string, string>;
+  theme: ThemeMode;
+}

@@ -1,0 +1,71 @@
+.app-layout {
+  display: grid;
+  grid-template-rows: 28px 48px 1fr 22px;
+  grid-template-columns: var(--sidebar-width, 240px) var(--center-width, 480px) 1fr;
+  grid-template-areas:
+    "menu    menu    menu"
+    "toolbar toolbar toolbar"
+    "sidebar center  right"
+    "status  status  status";
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--font-size-body);
+}
+
+.app-menu {
+  grid-area: menu;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--spacing-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+}
+
+.app-toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: 0 var(--spacing-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-sidebar {
+  grid-area: sidebar;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border-light);
+  padding: var(--spacing-3);
+}
+
+.app-center {
+  grid-area: center;
+  overflow-y: auto;
+  background: var(--color-bg);
+  border-right: 1px solid var(--color-border-light);
+  padding: var(--spacing-3);
+}
+
+.app-right {
+  grid-area: right;
+  overflow-y: auto;
+  background: var(--color-surface);
+  padding: var(--spacing-4);
+}
+
+.app-status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--spacing-3);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border-light);
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+}

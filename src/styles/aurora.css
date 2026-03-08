@@ -1,0 +1,77 @@
+:root,
+[data-theme="hell"] {
+  /* Colors */
+  --color-bg: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-elevated: #ffffff;
+  --color-text: #111111;
+  --color-text-secondary: #44474f;
+  --color-muted: #7b7c80;
+  --color-muted-light: #b4b7bd;
+  --color-accent: #0a84ff;
+  --color-accent-strong: #086dd6;
+  --color-accent-10: #e8f2ff;
+  --color-accent-20: #cee6ff;
+  --color-border: #d1d5db;
+  --color-border-light: #e5e7eb;
+  --color-status-green: #51cf66;
+  --color-status-green-bg: #dcfce7;
+  --color-status-green-text: #2f9e44;
+  --color-status-red: #ff6b6b;
+
+  /* Typography */
+  --font-family: "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-size-display: 20px;
+  --font-size-heading: 15px;
+  --font-size-body: 13px;
+  --font-size-label: 13px;
+  --font-size-section: 10px;
+  --font-size-caption: 11px;
+
+  /* Spacing */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-12: 48px;
+
+  /* Border Radius */
+  --radius-input: 6px;
+  --radius-card: 8px;
+  --radius-dialog: 12px;
+  --radius-button: 8px;
+  --radius-pill: 999px;
+  --radius-swatch: 4px;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.10);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="dunkel"] {
+  --color-bg: #0f0f10;
+  --color-surface: #1f1f23;
+  --color-elevated: #242428;
+  --color-text: #f5f5f7;
+  --color-text-secondary: #a0a3ab;
+  --color-muted: #5c5e63;
+  --color-muted-light: #45474c;
+  --color-accent: #2d7ff9;
+  --color-accent-strong: #4a94ff;
+  --color-accent-10: rgba(45, 127, 249, 0.12);
+  --color-accent-20: rgba(45, 127, 249, 0.20);
+  --color-border: #2e2e35;
+  --color-border-light: #27272e;
+  --color-status-green: #51cf66;
+  --color-status-green-bg: rgba(81, 207, 102, 0.12);
+  --color-status-green-text: #69db7c;
+  --color-status-red: #ff6b6b;
+
+  --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.20);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.40);
+}

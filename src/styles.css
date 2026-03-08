@@ -1,10 +1,5 @@
-:root {
-  font-family: "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #111111;
-  background-color: #f5f5f7;
-}
+@import "./styles/aurora.css";
+@import "./styles/layout.css";
 
 *,
 *::before,
