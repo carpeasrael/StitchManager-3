@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Rust
+src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Claude Code (local only)
+CLAUDE.md
+.claude/
+
+# Example embroidery files (not tracked)
+example files/
+
+# Temporary icon source
+app-icon.png
