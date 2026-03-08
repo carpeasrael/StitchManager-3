@@ -42,8 +42,7 @@ fn parse_header_number(data: &[u8], value_offset: usize, value_len: usize) -> Op
 }
 
 /// Decode a DST balanced-ternary triplet into (dx, dy) displacements.
-#[allow(dead_code)]
-fn decode_dst_triplet(b0: u8, b1: u8, b2: u8) -> (i32, i32) {
+pub fn decode_dst_triplet(b0: u8, b1: u8, b2: u8) -> (i32, i32) {
     let bit = |byte: u8, pos: u8| -> i32 { ((byte >> pos) & 1) as i32 };
 
     let dx = bit(b2, 2) * 81 - bit(b2, 3) * 81

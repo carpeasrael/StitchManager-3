@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SearchBar } from "./components/SearchBar";
 import { FilterChips } from "./components/FilterChips";
 import { FileList } from "./components/FileList";
+import { MetadataPanel } from "./components/MetadataPanel";
 import { listen } from "@tauri-apps/api/event";
 import Database from "@tauri-apps/plugin-sql";
 import type { ThemeMode } from "./types/index";
@@ -114,6 +115,11 @@ function initComponents(): void {
   const centerEl = document.querySelector<HTMLElement>(".app-center");
   if (centerEl) {
     new FileList(centerEl);
+  }
+
+  const rightEl = document.querySelector<HTMLElement>(".app-right");
+  if (rightEl) {
+    new MetadataPanel(rightEl);
   }
 }
 

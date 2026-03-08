@@ -1,1 +1,1 @@
-// Service modules — will be added in Sprint 3+
+pub mod thumbnail;

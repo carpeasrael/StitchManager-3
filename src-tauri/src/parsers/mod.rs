@@ -1,5 +1,7 @@
 pub mod dst;
+pub mod jef;
 pub mod pes;
+pub mod vp3;
 
 use serde::Serialize;
 
@@ -40,10 +42,14 @@ pub trait EmbroideryParser: Send + Sync {
 pub fn get_parser(extension: &str) -> Option<&'static dyn EmbroideryParser> {
     static PES_PARSER: pes::PesParser = pes::PesParser;
     static DST_PARSER: dst::DstParser = dst::DstParser;
+    static JEF_PARSER: jef::JefParser = jef::JefParser;
+    static VP3_PARSER: vp3::Vp3Parser = vp3::Vp3Parser;
 
     match extension.to_lowercase().as_str() {
         "pes" => Some(&PES_PARSER),
         "dst" => Some(&DST_PARSER),
+        "jef" => Some(&JEF_PARSER),
+        "vp3" => Some(&VP3_PARSER),
         _ => None,
     }
 }
@@ -71,8 +77,20 @@ mod tests {
     }
 
     #[test]
+    fn test_get_parser_jef() {
+        let parser = get_parser("jef").unwrap();
+        assert!(parser.supported_extensions().contains(&"jef"));
+    }
+
+    #[test]
+    fn test_get_parser_vp3() {
+        let parser = get_parser("vp3").unwrap();
+        assert!(parser.supported_extensions().contains(&"vp3"));
+    }
+
+    #[test]
     fn test_get_parser_unknown() {
         assert!(get_parser("png").is_none());
-        assert!(get_parser("jef").is_none()); // Not yet implemented
+        assert!(get_parser("xxx").is_none());
     }
 }
