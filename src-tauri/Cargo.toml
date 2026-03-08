@@ -20,3 +20,16 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-log = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+notify = "6"
+image = "0.25"
+walkdir = "2"
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "1"
+byteorder = "1"
+log = "0.4"

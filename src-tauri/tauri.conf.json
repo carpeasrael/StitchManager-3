@@ -12,10 +12,13 @@
   "app": {
     "windows": [
       {
-        "title": "StitchManager",
+        "title": "StichMan",
         "width": 1440,
         "height": 900,
+        "minWidth": 960,
+        "minHeight": 640,
         "resizable": true,
+        "decorations": true,
         "fullscreen": false
       }
     ],
