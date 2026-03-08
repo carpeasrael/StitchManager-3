@@ -64,8 +64,8 @@ export interface AiAnalysisResult {
   parsedName: string | null;
   parsedTheme: string | null;
   parsedDesc: string | null;
-  parsedTags: string[] | null;
-  parsedColors: string[] | null;
+  parsedTags: string | null;
+  parsedColors: string | null;
   accepted: boolean;
   analyzedAt: string;
 }

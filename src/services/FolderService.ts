@@ -1,0 +1,36 @@
+import { invoke } from "@tauri-apps/api/core";
+import type { Folder } from "../types/index";
+
+export async function getAll(): Promise<Folder[]> {
+  return invoke<Folder[]>("get_folders");
+}
+
+export async function create(
+  name: string,
+  path: string,
+  parentId?: number | null
+): Promise<Folder> {
+  return invoke<Folder>("create_folder", {
+    name,
+    path,
+    parentId: parentId ?? null,
+  });
+}
+
+export async function update(
+  folderId: number,
+  name?: string
+): Promise<Folder> {
+  return invoke<Folder>("update_folder", {
+    folderId,
+    name: name ?? null,
+  });
+}
+
+export async function remove(folderId: number): Promise<void> {
+  return invoke<void>("delete_folder", { folderId });
+}
+
+export async function getFileCount(folderId: number): Promise<number> {
+  return invoke<number>("get_folder_file_count", { folderId });
+}

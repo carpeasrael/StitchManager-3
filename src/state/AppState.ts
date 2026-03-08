@@ -20,7 +20,9 @@ class AppStateClass {
   get<K extends keyof State>(key: K): State[K] {
     const value = this.state[key];
     if (Array.isArray(value)) {
-      return [...value] as State[K];
+      return value.map((item) =>
+        item !== null && typeof item === "object" ? { ...item } : item
+      ) as State[K];
     }
     if (value !== null && typeof value === "object") {
       return { ...value } as State[K];

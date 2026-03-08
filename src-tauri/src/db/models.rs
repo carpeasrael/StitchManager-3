@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 // Rust-side Tauri commands serialize these as JSON booleans via serde.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SchemaVersion {
     pub version: i32,
     pub applied_at: String,
@@ -13,6 +14,7 @@ pub struct SchemaVersion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Folder {
     pub id: i64,
     pub name: String,
@@ -24,6 +26,7 @@ pub struct Folder {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EmbroideryFile {
     pub id: i64,
     pub folder_id: i64,
@@ -46,6 +49,7 @@ pub struct EmbroideryFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileFormat {
     pub id: i64,
     pub file_id: i64,
@@ -57,6 +61,7 @@ pub struct FileFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileThreadColor {
     pub id: i64,
     pub file_id: i64,
@@ -69,6 +74,7 @@ pub struct FileThreadColor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Tag {
     pub id: i64,
     pub name: String,
@@ -76,12 +82,14 @@ pub struct Tag {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileTag {
     pub file_id: i64,
     pub tag_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiAnalysisResult {
     pub id: i64,
     pub file_id: i64,
@@ -99,6 +107,7 @@ pub struct AiAnalysisResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Setting {
     pub key: String,
     pub value: String,
@@ -106,6 +115,7 @@ pub struct Setting {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomFieldDefinition {
     pub id: i64,
     pub name: String,
@@ -117,6 +127,7 @@ pub struct CustomFieldDefinition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomFieldValue {
     pub file_id: i64,
     pub field_id: i64,

@@ -1,5 +1,6 @@
 @import "./styles/aurora.css";
 @import "./styles/layout.css";
+@import "./styles/components.css";
 
 *,
 *::before,
