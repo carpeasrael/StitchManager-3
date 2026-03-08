@@ -130,6 +130,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-log",
  "tauri-plugin-sql",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "uuid",

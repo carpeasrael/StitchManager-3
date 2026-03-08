@@ -2,6 +2,9 @@ import "./styles.css";
 import { appState } from "./state/AppState";
 import { EventBus } from "./state/EventBus";
 import { Sidebar } from "./components/Sidebar";
+import { SearchBar } from "./components/SearchBar";
+import { FilterChips } from "./components/FilterChips";
+import { FileList } from "./components/FileList";
 import { listen } from "@tauri-apps/api/event";
 import Database from "@tauri-apps/plugin-sql";
 import type { ThemeMode } from "./types/index";
@@ -57,6 +60,10 @@ let tauriBridgeCleanup: UnlistenFn[] = [];
 async function initTauriBridge(): Promise<void> {
   tauriBridgeCleanup = await Promise.all([
     listen("scan:progress", (e) => EventBus.emit("scan:progress", e.payload)),
+    listen("scan:file-found", (e) =>
+      EventBus.emit("scan:file-found", e.payload)
+    ),
+    listen("scan:complete", (e) => EventBus.emit("scan:complete", e.payload)),
     listen("ai:complete", (e) => EventBus.emit("ai:complete", e.payload)),
     listen("batch:progress", (e) =>
       EventBus.emit("batch:progress", e.payload)
@@ -88,6 +95,25 @@ function initComponents(): void {
   const sidebarEl = document.querySelector<HTMLElement>(".app-sidebar");
   if (sidebarEl) {
     new Sidebar(sidebarEl);
+  }
+
+  const toolbarEl = document.querySelector<HTMLElement>(".app-toolbar");
+  if (toolbarEl) {
+    toolbarEl.innerHTML = "";
+    const searchContainer = document.createElement("div");
+    searchContainer.className = "toolbar-search";
+    toolbarEl.appendChild(searchContainer);
+    new SearchBar(searchContainer);
+
+    const filterContainer = document.createElement("div");
+    filterContainer.className = "toolbar-filters";
+    toolbarEl.appendChild(filterContainer);
+    new FilterChips(filterContainer);
+  }
+
+  const centerEl = document.querySelector<HTMLElement>(".app-center");
+  if (centerEl) {
+    new FileList(centerEl);
   }
 }
 

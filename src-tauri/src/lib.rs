@@ -41,6 +41,13 @@ pub fn run() {
             commands::folders::update_folder,
             commands::folders::delete_folder,
             commands::folders::get_folder_file_count,
+            commands::scanner::scan_directory,
+            commands::scanner::import_files,
+            commands::files::get_files,
+            commands::files::get_file,
+            commands::files::get_file_formats,
+            commands::files::get_file_colors,
+            commands::files::get_file_tags,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
