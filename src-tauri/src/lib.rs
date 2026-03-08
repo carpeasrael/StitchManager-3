@@ -48,6 +48,7 @@ pub fn run() {
             commands::files::get_file_formats,
             commands::files::get_file_colors,
             commands::files::get_file_tags,
+            commands::scanner::parse_embroidery_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

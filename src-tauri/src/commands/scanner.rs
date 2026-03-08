@@ -6,6 +6,7 @@ use crate::DbState;
 use crate::db::models::EmbroideryFile;
 use crate::db::queries::{FILE_SELECT, row_to_file};
 use crate::error::{lock_db, AppError};
+use crate::parsers::{self, ParsedFileInfo};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3"];
 
@@ -158,6 +159,27 @@ pub fn import_files(
     Ok(imported)
 }
 
+#[tauri::command]
+pub fn parse_embroidery_file(filepath: String) -> Result<ParsedFileInfo, AppError> {
+    let path = std::path::Path::new(&filepath);
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .ok_or_else(|| AppError::Parse {
+            format: "unknown".to_string(),
+            message: format!("No file extension: {filepath}"),
+        })?;
+
+    let parser = parsers::get_parser(&ext).ok_or_else(|| AppError::Parse {
+        format: ext.clone(),
+        message: format!("Unsupported format: {ext}"),
+    })?;
+
+    let data = std::fs::read(&filepath)?;
+    parser.parse(&data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +269,41 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 2, "Duplicate should be ignored");
+    }
+
+    fn example_path(name: &str) -> String {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("example files")
+            .join(name)
+            .to_string_lossy()
+            .to_string()
+    }
+
+    #[test]
+    fn test_parse_embroidery_file_pes() {
+        let info = parse_embroidery_file(example_path("BayrischesHerz.PES")).unwrap();
+        assert_eq!(info.format, "PES");
+        assert!(info.stitch_count.unwrap() > 0);
+    }
+
+    #[test]
+    fn test_parse_embroidery_file_dst() {
+        let info = parse_embroidery_file(example_path("2.DST")).unwrap();
+        assert_eq!(info.format, "DST");
+        assert!(info.stitch_count.unwrap() > 0);
+    }
+
+    #[test]
+    fn test_parse_embroidery_file_unsupported() {
+        let result = parse_embroidery_file("/tmp/test.txt".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_embroidery_file_not_found() {
+        let result = parse_embroidery_file("/tmp/nonexistent_12345.pes".to_string());
+        assert!(result.is_err());
     }
 }
