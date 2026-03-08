@@ -11,7 +11,7 @@
 1. [Zusammenfassung](#1-zusammenfassung)
 2. [Architektur-Uebersicht](#2-architektur-uebersicht)
 3. [Datenbankschema](#3-datenbankschema)
-4. [Backend-Design (Rust / Tauri)](#4-backend-design-rust--tauri)
+4. [Backend-Design (Rust / Tauri)](#4-backend-design-rust--tauri) — inkl. §4.4 Binaere Format-Spezifikationen (DST/PES)
 5. [Frontend-Architektur (TypeScript / Vanilla)](#5-frontend-architektur-typescript--vanilla)
 6. [Design-System-Integration](#6-design-system-integration)
 7. [Implementierungsphasen](#7-implementierungsphasen)
@@ -571,14 +571,345 @@ Implementierungen:
 
 | Format | Crate/Methode | Besonderheiten |
 |---|---|---|
-| **PES** | Eigenimplementierung (`byteorder`) | Eingebettete Thumbnails, Farbpalette mit Marken-Codes |
-| **DST** | Eigenimplementierung | Kein eingebettetes Thumbnail, Farben aus Header extrahierbar |
+| **PES** | Eigenimplementierung (`byteorder`) | Eingebettete Thumbnails (48×38 Monochrom), Farbpalette mit RGB, Marken-Codes und Farbnamen |
+| **DST** | Eigenimplementierung | Kein eingebettetes Thumbnail, **keine Farbinformationen** — nur Anzahl Farbwechsel |
 | **JEF** | Eigenimplementierung | Janome-spezifische Farbpalette |
 | **VP3** | Eigenimplementierung | Pfaff/Viking-Format, komplexe Farbsektionen |
 
 Fuer Formate ohne eingebettetes Thumbnail wird der `image`-Crate verwendet, um aus den Stich-Koordinaten ein synthetisches Vorschaubild zu rendern.
 
-### 4.4 AI-Client
+### 4.4 Binaere Format-Spezifikationen (Reverse-Engineered)
+
+Die folgenden Spezifikationen wurden durch Reverse-Engineering der Beispieldateien in `example files/` gewonnen und gegen alle Testdateien validiert. Detaillierte Analyse-Protokolle liegen in `basic/dst_format_analysis.md` und `basic/pes_format_analysis.md`.
+
+#### 4.4.1 DST-Format (Tajima)
+
+**Dateiaufbau:**
+
+```
+[ 512-Byte Header ] [ Stich-Daten (3-Byte-Triplets) ] [ 0x1A ]
+```
+
+**Header (512 Bytes, ASCII-Felder mit festen Offsets):**
+
+| Offset | Label | Breite | Beschreibung |
+|--------|-------|--------|--------------|
+| 0 | `LA:` | 16 Zeichen + CR | Design-Label (rechtsseitig mit Leerzeichen aufgefuellt) |
+| 20 | `ST:` | 7 Zeichen + CR | Stichzahl (Gesamtanzahl Triplets inkl. END) |
+| 31 | `CO:` | 3 Zeichen + CR | Anzahl Farbwechsel (0 = 1 Farbe, N = N+1 Farben) |
+| 38 | `+X:` | 5 Zeichen + CR | Maximale positive X-Ausdehnung (in 0.1mm) |
+| 47 | `-X:` | 5 Zeichen + CR | Maximale negative X-Ausdehnung (in 0.1mm) |
+| 56 | `+Y:` | 5 Zeichen + CR | Maximale positive Y-Ausdehnung (in 0.1mm) |
+| 65 | `-Y:` | 5 Zeichen + CR | Maximale negative Y-Ausdehnung (in 0.1mm) |
+| 74 | `AX:` | 6 Zeichen + CR | Endposition X (vorzeichenbehaftet) |
+| 84 | `AY:` | 6 Zeichen + CR | Endposition Y (vorzeichenbehaftet) |
+| 114 | `PD:` | 6 Zeichen + CR | Reserviert (immer `******`) |
+| 124 | | 1 Byte | `0x1A` Header-Terminator |
+| 125 | | 387 Bytes | Padding mit `0x20` bis Offset 511 |
+
+**Dimensionsberechnung:**
+```
+Breite (mm) = (+X + -X) × 0.1
+Hoehe  (mm) = (+Y + -Y) × 0.1
+```
+
+**Stich-Codierung (3-Byte-Triplets, Balanced-Ternary):**
+
+Jeder Stich-Befehl ist exakt 3 Bytes. Die Verschiebung wird mit gewichteten Bits (1, 3, 9, 27, 81) codiert — jeweils ein Bit fuer positiv und eins fuer negativ pro Gewicht. Bereich pro Achse: −121 bis +121 Einheiten (= −12.1 bis +12.1 mm).
+
+```rust
+// Rust-Implementierung: DST-Triplet dekodieren
+fn decode_dst_triplet(b0: u8, b1: u8, b2: u8) -> (i32, i32) {
+    let bit = |byte: u8, pos: u8| -> i32 { ((byte >> pos) & 1) as i32 };
+
+    let dx = bit(b2,2)*81 - bit(b2,3)*81
+           + bit(b1,2)*27 - bit(b1,3)*27
+           + bit(b0,2)*9  - bit(b0,3)*9
+           + bit(b1,0)*3  - bit(b1,1)*3
+           + bit(b0,0)*1  - bit(b0,1)*1;
+
+    let dy = bit(b2,5)*81 - bit(b2,4)*81
+           + bit(b1,5)*27 - bit(b1,4)*27
+           + bit(b0,5)*9  - bit(b0,4)*9
+           + bit(b1,7)*3  - bit(b1,6)*3
+           + bit(b0,7)*1  - bit(b0,6)*1;
+
+    (dx, dy)
+}
+```
+
+**Bit-Layout Byte 0:**
+
+| Bit | Gewicht | Achse | Bit | Gewicht | Achse |
+|-----|---------|-------|-----|---------|-------|
+| 7 | +1 | Y | 3 | −9 | X |
+| 6 | −1 | Y | 2 | +9 | X |
+| 5 | +9 | Y | 1 | −1 | X |
+| 4 | −9 | Y | 0 | +1 | X |
+
+**Bit-Layout Byte 1:**
+
+| Bit | Gewicht | Achse | Bit | Gewicht | Achse |
+|-----|---------|-------|-----|---------|-------|
+| 7 | +3 | Y | 3 | −27 | X |
+| 6 | −3 | Y | 2 | +27 | X |
+| 5 | +27 | Y | 1 | −3 | X |
+| 4 | −27 | Y | 0 | +3 | X |
+
+**Bit-Layout Byte 2:**
+
+| Bit | Bedeutung |
+|-----|-----------|
+| 7 | JUMP-Flag (Sprungstich) |
+| 6 | FARBWECHSEL-Flag |
+| 5 | +81 Y |
+| 4 | −81 Y |
+| 3 | −81 X |
+| 2 | +81 X |
+| 1 | Immer 1 (Formatmarker) |
+| 0 | Immer 1 (Formatmarker) |
+
+**Befehlstypen:**
+
+| Byte 2 | Binaer | Typ | Beschreibung |
+|--------|--------|-----|--------------|
+| `0x03` | `00000011` | Normalstich | Nadel durchsticht Stoff |
+| `0x83` | `10000011` | Sprungstich | Bewegung ohne Durchstich |
+| `0xC3` | `11000011` | Farbwechsel | Immer `00 00 C3` (Nullverschiebung) |
+| `0xF3` | `11110011` | Ende | Immer `00 00 F3`, danach `0x1A` |
+
+**Wichtige DST-Einschraenkungen:**
+- **Keine Farbinformationen** — nur die Anzahl der Farbwechsel ist gespeichert. Farben muessen extern zugeordnet werden (Bediener oder Begleitdatei).
+- **Kein eingebettetes Thumbnail** — Vorschaubild muss aus Stich-Koordinaten gerendert werden.
+- **Label auf 16 Zeichen begrenzt** und oft abgeschnitten.
+- Trimmung wird durch 2+ aufeinanderfolgende Sprungstiche signalisiert (kein expliziter Trim-Befehl).
+
+**Dateigrössen-Formel:**
+```
+Dateigroesse = 512 + ST × 3 + 1
+```
+
+---
+
+#### 4.4.2 PES-Format (Brother, Version 6.0)
+
+**Dateiaufbau:**
+
+```
+┌──────────────────────────┐
+│ PES-Header-Sektion       │  (variable Laenge)
+│  - Magic + Version       │
+│  - PEC-Offset-Pointer    │
+│  - Design-Metadaten      │
+│  - Farbtabelle (PES)     │
+│  - CEmbOne-Objekt        │
+│  - CSewSeg-Stichvektoren │
+├──────────────────────────┤
+│ PEC-Sektion              │  (ab PEC-Offset)
+│  - PEC-Label (19 Bytes)  │
+│  - Farbpaletten-Indizes  │
+│  - Grafik-Header         │
+│  - Stich-Daten (kompakt) │
+│  - Thumbnail-Bilder      │
+│  - RGB-Farbwerte (Tail)  │
+└──────────────────────────┘
+```
+
+**PES-Datei-Header (Bytes 0–11):**
+
+| Offset | Groesse | Typ | Beschreibung |
+|--------|---------|-----|--------------|
+| 0 | 4 | ASCII | Magic: `#PES` |
+| 4 | 4 | ASCII | Version: `0060` (= v6.0) |
+| 8 | 4 | uint32 LE | Absoluter Byte-Offset zur PEC-Sektion |
+
+**Design-Name:**
+
+| Offset | Groesse | Typ | Beschreibung |
+|--------|---------|-----|--------------|
+| 16 | 1 | uint8 | Laenge des Designnamens (N) |
+| 17 | N | ASCII | Designname (z.B. `"BayrischesHerz.JAN"`) |
+
+**PES-Farbobjekte (nach Hoop-Parametern):**
+
+Anzahl Farben als `uint16 LE` bei Offset `17 + name_len + 8 + 63`. Danach folgt pro Farbe:
+
+```
+[1 Byte]   Code-Laenge (L1)
+[L1 Bytes] Thread-Katalogcode (ASCII, z.B. "001", "225")
+[3 Bytes]  RGB-Farbwert (R, G, B)
+[1 Byte]   Separator (0x00)
+[1 Byte]   Typ-Flag (immer 0x0A)
+[3 Bytes]  Padding (0x00)
+[1 Byte]   Farbname-Laenge (L2)
+[L2 Bytes] Farbname (ASCII, z.B. "Ocean Blue", "Crimson")
+[1 Byte]   Markenname-Laenge (L3)
+[L3 Bytes] Markenname (ASCII, z.B. "Janome", "Janome Polyester")
+[1 Byte]   Separator (0x00)
+```
+
+**Verifizierte Farbpalette aus den Beispieldateien:**
+
+| Code | RGB | Name | Marke |
+|------|-----|------|-------|
+| 001 | (255,255,255) | White | Janome |
+| 002 | (0,0,0) | Black | Janome Polyester |
+| 202 | (240,51,31) | Vermilion | Janome |
+| 204 | (255,255,23) | Yellow | Janome |
+| 206 | (26,132,45) | Bright Green | Janome |
+| 207 | (11,47,132) | Blue | Janome |
+| 208 | (171,90,150) | Purple | Janome |
+| 210 | (252,242,148) | Pale Yellow | Janome |
+| 211 | (249,153,183) | Pale Pink | Janome |
+| 218 | (127,194,28) | Yellow Green | Janome |
+| 222 | (56,108,174) | Ocean Blue | Janome |
+| 225 | (255,0,0) | Red | Janome |
+| 234 | (249,103,107) | Coral | Janome Polyester |
+| 250 | (76,191,143) | Emerald Green | Janome |
+| 265 | (243,54,137) | Crimson | Janome |
+
+**CEmbOne-Objekt (Bounding Box + Transformation):**
+
+Nach den Farbobjekten folgt ein `CEmbOne`-Objekt mit:
+- Bounding Box: `left, top, right, bottom` (4× int16 LE, Einheit: 0.1mm im Hoop-Koordinatensystem)
+- 2×2 Affine Transformationsmatrix (4× float32 LE, in Beispielen immer Identitaet)
+- Translation: X, Y (2× float32 LE, typisch `1000.0, 1000.0` fuer Hoop-Mittelpunkt)
+
+---
+
+**PEC-Sektion (ab PEC-Offset):**
+
+**PEC-Header (512 Bytes):**
+
+| Offset | Groesse | Beschreibung |
+|--------|---------|--------------|
+| 0 | 3 | Magic: `"LA:"` |
+| 3 | 16 | Design-Label (16 Zeichen, rechtsseitig mit Leerzeichen) |
+| 19 | 1 | CR (`0x0D`) |
+| 34 | 1 | Thumbnail-Breite in Bytes (`0x06` = 48 Pixel) |
+| 35 | 1 | Thumbnail-Hoehe in Zeilen (`0x26` = 38 Zeilen) |
+| **48** | **1** | **Anzahl Farben minus 1** |
+| 49 | N | PEC-Palettenindizes (1 Byte pro Farbe) |
+| 49+N | ... | Padding mit `0x20` bis Byte 511 |
+
+**PEC-Palettenindex → RGB-Zuordnung (verifiziert):**
+
+| Index | Farbe | RGB |
+|-------|-------|-----|
+| 1 | Blue | (14, 31, 124) |
+| 4 | Ocean Blue | (56, 108, 174) |
+| 5 | Red | (237, 23, 31) |
+| 9 | Purple | (145, 95, 172) |
+| 13 | Yellow | (255, 255, 0) |
+| 14 | Yellow Green | (112, 188, 31) |
+| 20 | Black | (0, 0, 0) |
+| 25 | Coral | (255, 102, 102) |
+| 28 | Vermilion | (206, 59, 10) |
+| 29 | White | (255, 255, 255) |
+| 37 | Emerald Green | (76, 191, 143) |
+| 43 | Pale Pink | (250, 150, 180) |
+| 45 | Pale Violet | (180, 160, 200) |
+| 53 | Baby Blue | (175, 210, 220) |
+| 56 | Bright Green | (39, 133, 56) |
+
+**Grafik-Header (PEC+512, 20 Bytes):**
+
+| Offset | Groesse | Typ | Beschreibung |
+|--------|---------|-----|--------------|
+| 2 | 3 | uint24 LE | **Stich-Datenlaenge** in Bytes |
+| 8 | 2 | uint16 LE | **Designbreite** in 0.1mm |
+| 10 | 2 | uint16 LE | **Designhoehe** in 0.1mm |
+| 12 | 2 | uint16 LE | Hoop-Anzeigebreite (immer 480) |
+| 14 | 2 | uint16 LE | Hoop-Anzeigehoehe (immer 432) |
+| 16 | 2 | custom | X-Ursprungs-Offset (Codierung: `(high - 0x90) × 256 + low`) |
+| 18 | 2 | custom | Y-Ursprungs-Offset (Codierung: `(high - 0x90) × 256 + low`) |
+
+**PEC-Stich-Codierung (ab PEC+532):**
+
+Jeder Stich besteht aus einer X- und einer Y-Verschiebung. Es gibt zwei Codierungsformen:
+
+**Kurzform (1 Byte pro Achse):** Wenn Bit 7 = 0:
+```
+0x00..0x3F → Verschiebung  0 bis +63
+0x40..0x7F → Verschiebung −64 bis −1   (7-Bit-Zweierkomplement)
+```
+
+**Langform (2 Bytes pro Achse):** Wenn Bit 7 = 1:
+```rust
+// Rust-Implementierung
+let high = data[pos];     // Bit 7 = 1 (Langform-Marker)
+let low  = data[pos + 1]; // Bit 5 von high = Jump/Trim-Flag
+let is_jump = (high & 0x20) != 0;
+let raw = ((high as i32 & 0x0F) << 8) | low as i32;  // 12-Bit unsigned
+let displacement = if raw >= 0x800 { raw - 0x1000 } else { raw };
+// Bereich: −2048 bis +2047 (0.1mm-Einheiten)
+```
+
+Ein Stich kann Kurz- und Langform mischen (z.B. kurzes X + langes Y = 3 Bytes).
+
+**Spezialbefehle:**
+
+| Byte-Folge | Laenge | Beschreibung |
+|------------|--------|--------------|
+| `0xFE 0xB0 XX` | **3 Bytes** | Farbwechsel (XX = Padding, wird konsumiert) |
+| `0xFF` | 1 Byte | Ende der Stichdaten |
+
+> **KRITISCH:** Der Farbwechsel-Befehl ist **3 Bytes** lang, nicht 2. Das dritte Byte (`XX`) muss mitgelesen werden, sonst gerät der gesamte Decoder aus der Ausrichtung. Dies wurde gegen alle 13 Testdateien verifiziert.
+
+**Eingebettete Thumbnail-Bilder:**
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Position | PEC-Offset + 532 + Stich-Datenlaenge |
+| Anzahl | Anzahl Farben + 1 (Uebersicht + je 1 pro Farbe) |
+| Groesse | 48 × 38 Pixel = 228 Bytes pro Bild |
+| Format | 1 Bit pro Pixel, MSB-first, monochrom |
+| Skalierung | Auf 192 × 152 px hochskalieren fuer Anzeige |
+
+```rust
+// Rust-Implementierung: PEC-Thumbnail extrahieren
+fn extract_pec_thumbnail(data: &[u8], pec_offset: usize, stitch_len: usize) -> Vec<u8> {
+    let thumb_start = pec_offset + 532 + stitch_len;
+    let mut pixels = vec![0u8; 48 * 38]; // Grayscale
+    for row in 0..38 {
+        for byte_idx in 0..6 {
+            let b = data[thumb_start + row * 6 + byte_idx];
+            for bit in 0..8 {
+                if b & (0x80 >> bit) != 0 {
+                    pixels[row * 48 + byte_idx * 8 + bit] = 255;
+                }
+            }
+        }
+    }
+    pixels
+}
+```
+
+**RGB-Farbwerte am Dateiende:**
+
+Die letzten `num_colors × 3 + 2` Bytes der Datei enthalten die RGB-Werte aller Farben in Reihenfolge, gefolgt von 2 Null-Bytes. Diese stimmen exakt mit den PES-Farbobjekten ueberein und bieten einen schnellen Zugriff ohne vollstaendiges PES-Header-Parsing.
+
+---
+
+#### 4.4.3 Zusammenfassung: Parser-Implementierungsstrategie
+
+| Aspekt | DST | PES |
+|--------|-----|-----|
+| Header-Parsing | ASCII-Felder an festen Offsets | Binaer, variabel, PEC-Offset als Anker |
+| Dimensionen | Aus Header: `(+X + −X) × 0.1 mm` | Aus Grafik-Header: uint16 LE × 0.1 mm |
+| Stichzahl | Header-Feld `ST:` oder Triplets zaehlen | Stich-Daten dekodieren und zaehlen |
+| Farben | **Nicht vorhanden** — nur Wechselanzahl (`CO:`) | Vollstaendig: RGB, Name, Marke, Katalogcode |
+| Farbwechsel-Erkennung | Triplet `00 00 C3` | Bytefolge `FE B0 XX` (3 Bytes!) |
+| Thumbnail | Nicht vorhanden → aus Stichen rendern | Eingebettet (48×38 monochrom, 228 Bytes) |
+| Endmarker | `00 00 F3` + `0x1A` | `0xFF` |
+| Primaere Fehlerquelle | Ternary-Bit-Mapping falsch | Farbwechsel als 2 statt 3 Bytes lesen |
+
+**Empfehlung fuer die Rust-Implementierung:**
+1. PES zuerst implementieren — reichhaltigere Metadaten, eingebettetes Thumbnail, einfacher zu validieren
+2. DST-Parser validieren, indem berechnete Ausdehnung gegen Header-Felder (+X/−X/+Y/−Y) geprueft wird
+3. Fuer DST-Dateien ohne Farbinfo: Standardpalette oder KI-basierte Farbzuordnung aus dem gerenderten Vorschaubild
+
+### 4.5 AI-Client
 
 Der AI-Client unterstuetzt zwei Provider:
 
@@ -605,7 +936,7 @@ impl AiClient {
 
 Der Prompt wird mit Datei-Metadaten (Abmessungen, Stichzahl, Farben) angereichert und zusammen mit dem Thumbnail-Bild an das Vision-Modell gesendet.
 
-### 4.5 Thumbnail-Generierung
+### 4.6 Thumbnail-Generierung
 
 ```rust
 pub struct ThumbnailGenerator {
@@ -622,11 +953,12 @@ impl ThumbnailGenerator {
 ```
 
 Strategie:
-1. **PES**: Eingebettetes Thumbnail extrahieren, auf Zielgroesse skalieren
-2. **Andere Formate**: Stich-Koordinaten parsen, in ein `image::RgbaImage` rendern, speichern
-3. Thumbnails werden im `{metadata_root}/thumbnails/`-Verzeichnis gecacht
+1. **PES**: Eingebettetes 48×38 Monochrom-Thumbnail aus PEC-Sektion extrahieren (siehe §4.4.2), auf 192×192 px skalieren. Alternativ: farbiges Thumbnail aus Stich-Koordinaten + PES-Farbobjekten rendern.
+2. **DST**: Kein eingebettetes Thumbnail vorhanden (siehe §4.4.1). Stich-Koordinaten aus Balanced-Ternary dekodieren, in ein `image::RgbaImage` rendern. Farbwechsel markieren, aber Standardfarben verwenden (DST speichert keine RGB-Werte).
+3. **Andere Formate**: Stich-Koordinaten parsen, in ein `image::RgbaImage` rendern, speichern
+4. Thumbnails werden im `{metadata_root}/thumbnails/`-Verzeichnis gecacht
 
-### 4.6 Error-Handling
+### 4.7 Error-Handling
 
 Zentraler Fehlertyp mit `thiserror`:
 
@@ -1004,18 +1336,19 @@ Akzeptanzkriterien:
 
 Aufgaben:
 - [ ] `EmbroideryParser`-Trait und Registry
-- [ ] `parsers/pes.rs` — PES-Header, Stiche, Farben, eingebettetes Thumbnail
-- [ ] `parsers/dst.rs` — Tajima-DST-Format, Stich-Befehle
+- [ ] `parsers/pes.rs` — PES-Header + PEC-Sektion gemaess §4.4.2: Magic/Version/PEC-Offset, Farbobjekte (Code, RGB, Name, Marke), PEC-Stich-Dekodierung (Kurz-/Langform), Farbwechsel (3-Byte `FE B0 XX`), Thumbnail-Extraktion (48×38 Monochrom)
+- [ ] `parsers/dst.rs` — Tajima-DST gemaess §4.4.1: 512-Byte-Header parsen, Balanced-Ternary-Stich-Dekodierung, Befehlserkennung (Normal/Jump/Color Change/End)
 - [ ] `parsers/jef.rs` — Janome-JEF-Format, Farbpalette
 - [ ] `parsers/vp3.rs` — Viking-VP3-Format, Farbsektionen
 - [ ] `services/thumbnail.rs` — Thumbnail-Generierung und Caching
 - [ ] `MetadataPanel`-Komponente: Vorschau, Formular, Farb-Swatches
 
 Akzeptanzkriterien:
-- PES-Dateien: Abmessungen, Stichzahl, Farben, Thumbnail korrekt extrahiert
-- DST-Dateien: Abmessungen und Stichzahl korrekt berechnet
+- PES-Dateien: Abmessungen stimmen mit Grafik-Header ueberein (uint16 LE × 0.1mm), Stichzahl durch Dekodierung verifiziert, Farben mit RGB + Name + Marke extrahiert, eingebettetes 48×38-Thumbnail korrekt gelesen
+- DST-Dateien: Berechnete Ausdehnung (kumulative dx/dy) stimmt mit Header-Feldern +X/−X/+Y/−Y ueberein (Validierung gegen alle Testdateien), Stichzahl = Anzahl Triplets
+- DST-Limitation: Keine Farb-RGB-Werte extrahierbar — nur `CO:`-Feld (Anzahl Farbwechsel). UI zeigt Platzhalter-Farben oder KI-generierte Zuordnung.
 - Thumbnails werden generiert und im MetadataPanel angezeigt
-- Farb-Swatches mit Hex-Werten und Markennamen
+- Farb-Swatches mit Hex-Werten und Markennamen (PES) bzw. Platzhalter (DST)
 
 ### Phase 4: Metadaten & Tags (Wochen 8–9)
 
@@ -1140,7 +1473,7 @@ Akzeptanzkriterien:
 
 | Risiko | Wahrscheinlichkeit | Auswirkung | Mitigation |
 |---|---|---|---|
-| PES-Parser-Bugs (komplexes Binaerformat) | Mittel | Hoch | Testdateien aus v1, Unit-Tests pro Format-Variante |
+| PES-Parser-Bugs (komplexes Binaerformat) | Mittel | Hoch | Binaerformat dokumentiert (§4.4.2), **kritisch:** Farbwechsel = 3 Bytes (`FE B0 XX`), nicht 2. Validierung: Stich-Bounds gegen Grafik-Header pruefen. 13 Testdateien in `example files/` vorhanden. |
 | AI-API-Inkompatibilitaeten (Ollama-Versionen) | Niedrig | Mittel | Abstraktes Provider-Interface, Verbindungstest |
 | CSS-Rendering-Unterschiede (WebView-Versionen) | Niedrig | Niedrig | WebView2 (Windows) / WebKit (macOS/Linux) testen |
 | Performance bei >1000 Dateien | Mittel | Mittel | Virtuelles Scrolling, paginierte DB-Queries |

@@ -1,0 +1,41 @@
+{
+  "filename": "BayrischesHerz.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "BayrischesHerz.JAN",
+  "label": "Bayrisch",
+  "stitch_count": 3799,
+  "jump_count": 13,
+  "num_colors": 2,
+  "colors": [
+    {
+      "code": "001",
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "name": "White",
+      "brand": "Janome"
+    },
+    {
+      "code": "222",
+      "rgb": [
+        56,
+        108,
+        174
+      ],
+      "name": "Ocean Blue",
+      "brand": "Janome"
+    }
+  ],
+  "pec_palette_indices": [
+    29,
+    4
+  ],
+  "width_mm": 60.7,
+  "height_mm": 50.3,
+  "file_size_bytes": 25259,
+  "preview_image": "BayrischesHerz_preview.png",
+  "thumbnail_image": "BayrischesHerz_thumbnail.png"
+}

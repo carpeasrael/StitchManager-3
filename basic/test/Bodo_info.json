@@ -1,0 +1,74 @@
+{
+  "filename": "Bodo.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "Bodo.JAN",
+  "label": "Bodo.JAN",
+  "stitch_count": 3004,
+  "jump_count": 15,
+  "num_colors": 5,
+  "colors": [
+    {
+      "code": "214",
+      "rgb": [
+        177,
+        112,
+        78
+      ],
+      "name": "Brown",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "223",
+      "rgb": [
+        227,
+        196,
+        180
+      ],
+      "name": "Beige Gray",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "260",
+      "rgb": [
+        51,
+        32,
+        10
+      ],
+      "name": "Dark Sepia",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "205",
+      "rgb": [
+        72,
+        26,
+        5
+      ],
+      "name": "Dark Brown",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "002",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "name": "Black",
+      "brand": "Janome Polyester"
+    }
+  ],
+  "pec_palette_indices": [
+    49,
+    54,
+    24,
+    50,
+    20
+  ],
+  "width_mm": 46.0,
+  "height_mm": 49.9,
+  "file_size_bytes": 21879,
+  "preview_image": "Bodo_preview.png",
+  "thumbnail_image": "Bodo_thumbnail.png"
+}

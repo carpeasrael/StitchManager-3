@@ -1,0 +1,74 @@
+{
+  "filename": "Erdbeere.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "Erdbeere.JAN",
+  "label": "Erdbeere",
+  "stitch_count": 2369,
+  "jump_count": 12,
+  "num_colors": 5,
+  "colors": [
+    {
+      "code": "202",
+      "rgb": [
+        240,
+        51,
+        31
+      ],
+      "name": "Vermilion",
+      "brand": "Janome"
+    },
+    {
+      "code": "218",
+      "rgb": [
+        127,
+        194,
+        28
+      ],
+      "name": "Yellow Green",
+      "brand": "Janome"
+    },
+    {
+      "code": "206",
+      "rgb": [
+        26,
+        132,
+        45
+      ],
+      "name": "Bright Green",
+      "brand": "Janome"
+    },
+    {
+      "code": "218",
+      "rgb": [
+        127,
+        194,
+        28
+      ],
+      "name": "Yellow Green",
+      "brand": "Janome"
+    },
+    {
+      "code": "210",
+      "rgb": [
+        252,
+        242,
+        148
+      ],
+      "name": "Pale Yellow",
+      "brand": "Janome"
+    }
+  ],
+  "pec_palette_indices": [
+    28,
+    14,
+    56,
+    14,
+    34
+  ],
+  "width_mm": 40.1,
+  "height_mm": 44.9,
+  "file_size_bytes": 17948,
+  "preview_image": "Erdbeere_preview.png",
+  "thumbnail_image": "Erdbeere_thumbnail.png"
+}

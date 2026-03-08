@@ -1,0 +1,14 @@
+{
+  "filename": "2.DST",
+  "format": "DST (Tajima)",
+  "label": "2",
+  "stitch_count": 27120,
+  "jump_count": 129,
+  "color_changes": 5,
+  "num_colors": 6,
+  "colors": "Not stored in DST format",
+  "width_mm": 101.8,
+  "height_mm": 127.2,
+  "file_size_bytes": 82278,
+  "preview_image": "2_preview.png"
+}

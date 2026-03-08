@@ -1,0 +1,52 @@
+{
+  "filename": "BrezelHerzen.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "BrezelHerzen.JAN",
+  "label": "BrezelHe",
+  "stitch_count": 2612,
+  "jump_count": 11,
+  "num_colors": 3,
+  "colors": [
+    {
+      "code": "214",
+      "rgb": [
+        177,
+        112,
+        78
+      ],
+      "name": "Brown",
+      "brand": "Janome"
+    },
+    {
+      "code": "222",
+      "rgb": [
+        56,
+        108,
+        174
+      ],
+      "name": "Ocean Blue",
+      "brand": "Janome"
+    },
+    {
+      "code": "220",
+      "rgb": [
+        229,
+        229,
+        229
+      ],
+      "name": "Silver Gray",
+      "brand": "Janome"
+    }
+  ],
+  "pec_palette_indices": [
+    49,
+    4,
+    29
+  ],
+  "width_mm": 66.7,
+  "height_mm": 49.8,
+  "file_size_bytes": 18517,
+  "preview_image": "BrezelHerzen_preview.png",
+  "thumbnail_image": "BrezelHerzen_thumbnail.png"
+}

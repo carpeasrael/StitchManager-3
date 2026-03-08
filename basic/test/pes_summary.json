@@ -1,0 +1,865 @@
+[
+  {
+    "filename": "BayrischesHerz.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "BayrischesHerz.JAN",
+    "label": "Bayrisch",
+    "stitch_count": 3799,
+    "jump_count": 13,
+    "num_colors": 2,
+    "colors": [
+      {
+        "code": "001",
+        "rgb": [
+          255,
+          255,
+          255
+        ],
+        "name": "White",
+        "brand": "Janome"
+      },
+      {
+        "code": "222",
+        "rgb": [
+          56,
+          108,
+          174
+        ],
+        "name": "Ocean Blue",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      29,
+      4
+    ],
+    "width_mm": 60.7,
+    "height_mm": 50.3,
+    "file_size_bytes": 25259,
+    "preview_image": "BayrischesHerz_preview.png",
+    "thumbnail_image": "BayrischesHerz_thumbnail.png"
+  },
+  {
+    "filename": "Blaetter_Puschen.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Blaetter_Puschen.JAN",
+    "label": "Blaetter",
+    "stitch_count": 3118,
+    "jump_count": 4,
+    "num_colors": 4,
+    "colors": [
+      {
+        "code": "003",
+        "rgb": [
+          228,
+          195,
+          93
+        ],
+        "name": "Gold",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "274",
+        "rgb": [
+          252,
+          178,
+          87
+        ],
+        "name": "Tangerine",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "271",
+        "rgb": [
+          203,
+          138,
+          26
+        ],
+        "name": "Yellow Ocher",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "214",
+        "rgb": [
+          177,
+          112,
+          78
+        ],
+        "name": "Brown",
+        "brand": "Janome Polyester"
+      }
+    ],
+    "pec_palette_indices": [
+      35,
+      33,
+      26,
+      49
+    ],
+    "width_mm": 72.7,
+    "height_mm": 49.4,
+    "file_size_bytes": 21692,
+    "preview_image": "Blaetter_Puschen_preview.png",
+    "thumbnail_image": "Blaetter_Puschen_thumbnail.png"
+  },
+  {
+    "filename": "Bodo.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Bodo.JAN",
+    "label": "Bodo.JAN",
+    "stitch_count": 3004,
+    "jump_count": 15,
+    "num_colors": 5,
+    "colors": [
+      {
+        "code": "214",
+        "rgb": [
+          177,
+          112,
+          78
+        ],
+        "name": "Brown",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "223",
+        "rgb": [
+          227,
+          196,
+          180
+        ],
+        "name": "Beige Gray",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "260",
+        "rgb": [
+          51,
+          32,
+          10
+        ],
+        "name": "Dark Sepia",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "205",
+        "rgb": [
+          72,
+          26,
+          5
+        ],
+        "name": "Dark Brown",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "002",
+        "rgb": [
+          0,
+          0,
+          0
+        ],
+        "name": "Black",
+        "brand": "Janome Polyester"
+      }
+    ],
+    "pec_palette_indices": [
+      49,
+      54,
+      24,
+      50,
+      20
+    ],
+    "width_mm": 46.0,
+    "height_mm": 49.9,
+    "file_size_bytes": 21879,
+    "preview_image": "Bodo_preview.png",
+    "thumbnail_image": "Bodo_thumbnail.png"
+  },
+  {
+    "filename": "Boot.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Boot.JAN",
+    "label": "Boot.JAN",
+    "stitch_count": 2493,
+    "jump_count": 5,
+    "num_colors": 6,
+    "colors": [
+      {
+        "code": "225",
+        "rgb": [
+          255,
+          0,
+          0
+        ],
+        "name": "Red",
+        "brand": "Janome"
+      },
+      {
+        "code": "207",
+        "rgb": [
+          11,
+          47,
+          132
+        ],
+        "name": "Blue",
+        "brand": "Janome"
+      },
+      {
+        "code": "220",
+        "rgb": [
+          229,
+          229,
+          229
+        ],
+        "name": "Silver Gray",
+        "brand": "Janome"
+      },
+      {
+        "code": "225",
+        "rgb": [
+          255,
+          0,
+          0
+        ],
+        "name": "Red",
+        "brand": "Janome"
+      },
+      {
+        "code": "207",
+        "rgb": [
+          11,
+          47,
+          132
+        ],
+        "name": "Blue",
+        "brand": "Janome"
+      },
+      {
+        "code": "225",
+        "rgb": [
+          255,
+          0,
+          0
+        ],
+        "name": "Red",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      5,
+      1,
+      29,
+      5,
+      1,
+      5
+    ],
+    "width_mm": 50.0,
+    "height_mm": 50.0,
+    "file_size_bytes": 18822,
+    "preview_image": "Boot_preview.png",
+    "thumbnail_image": "Boot_thumbnail.png"
+  },
+  {
+    "filename": "BrezelHerzen.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "BrezelHerzen.JAN",
+    "label": "BrezelHe",
+    "stitch_count": 2612,
+    "jump_count": 11,
+    "num_colors": 3,
+    "colors": [
+      {
+        "code": "214",
+        "rgb": [
+          177,
+          112,
+          78
+        ],
+        "name": "Brown",
+        "brand": "Janome"
+      },
+      {
+        "code": "222",
+        "rgb": [
+          56,
+          108,
+          174
+        ],
+        "name": "Ocean Blue",
+        "brand": "Janome"
+      },
+      {
+        "code": "220",
+        "rgb": [
+          229,
+          229,
+          229
+        ],
+        "name": "Silver Gray",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      49,
+      4,
+      29
+    ],
+    "width_mm": 66.7,
+    "height_mm": 49.8,
+    "file_size_bytes": 18517,
+    "preview_image": "BrezelHerzen_preview.png",
+    "thumbnail_image": "BrezelHerzen_thumbnail.png"
+  },
+  {
+    "filename": "Diamant.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Diamant.JAN",
+    "label": "Diamant.",
+    "stitch_count": 2251,
+    "jump_count": 6,
+    "num_colors": 4,
+    "colors": [
+      {
+        "code": "249",
+        "rgb": [
+          93,
+          174,
+          148
+        ],
+        "name": "Aquamarine",
+        "brand": "Janome"
+      },
+      {
+        "code": "250",
+        "rgb": [
+          76,
+          191,
+          143
+        ],
+        "name": "Emerald Green",
+        "brand": "Janome"
+      },
+      {
+        "code": "227",
+        "rgb": [
+          152,
+          214,
+          189
+        ],
+        "name": "Pale Aqua",
+        "brand": "Janome"
+      },
+      {
+        "code": "251",
+        "rgb": [
+          0,
+          119,
+          114
+        ],
+        "name": "Peacock Green",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      39,
+      37,
+      31,
+      3
+    ],
+    "width_mm": 59.7,
+    "height_mm": 45.0,
+    "file_size_bytes": 16528,
+    "preview_image": "Diamant_preview.png",
+    "thumbnail_image": "Diamant_thumbnail.png"
+  },
+  {
+    "filename": "Diamant_S.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Diamant_S.JAN",
+    "label": "Diamant_",
+    "stitch_count": 783,
+    "jump_count": 2,
+    "num_colors": 4,
+    "colors": [
+      {
+        "code": "249",
+        "rgb": [
+          93,
+          174,
+          148
+        ],
+        "name": "Aquamarine",
+        "brand": "Janome"
+      },
+      {
+        "code": "250",
+        "rgb": [
+          76,
+          191,
+          143
+        ],
+        "name": "Emerald Green",
+        "brand": "Janome"
+      },
+      {
+        "code": "227",
+        "rgb": [
+          152,
+          214,
+          189
+        ],
+        "name": "Pale Aqua",
+        "brand": "Janome"
+      },
+      {
+        "code": "251",
+        "rgb": [
+          0,
+          119,
+          114
+        ],
+        "name": "Peacock Green",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      39,
+      37,
+      31,
+      3
+    ],
+    "width_mm": 26.7,
+    "height_mm": 22.1,
+    "file_size_bytes": 7581,
+    "preview_image": "Diamant_S_preview.png",
+    "thumbnail_image": "Diamant_S_thumbnail.png"
+  },
+  {
+    "filename": "Diamanten.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Diamanten.JAN",
+    "label": "Diamante",
+    "stitch_count": 1862,
+    "jump_count": 14,
+    "num_colors": 4,
+    "colors": [
+      {
+        "code": "249",
+        "rgb": [
+          93,
+          174,
+          148
+        ],
+        "name": "Aquamarine",
+        "brand": "Janome"
+      },
+      {
+        "code": "250",
+        "rgb": [
+          76,
+          191,
+          143
+        ],
+        "name": "Emerald Green",
+        "brand": "Janome"
+      },
+      {
+        "code": "227",
+        "rgb": [
+          152,
+          214,
+          189
+        ],
+        "name": "Pale Aqua",
+        "brand": "Janome"
+      },
+      {
+        "code": "251",
+        "rgb": [
+          0,
+          119,
+          114
+        ],
+        "name": "Peacock Green",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      39,
+      37,
+      31,
+      3
+    ],
+    "width_mm": 37.9,
+    "height_mm": 49.8,
+    "file_size_bytes": 14538,
+    "preview_image": "Diamanten_preview.png",
+    "thumbnail_image": "Diamanten_thumbnail.png"
+  },
+  {
+    "filename": "Donut.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Donut.JAN",
+    "label": "Donut.JA",
+    "stitch_count": 4190,
+    "jump_count": 17,
+    "num_colors": 5,
+    "colors": [
+      {
+        "code": "211",
+        "rgb": [
+          249,
+          153,
+          183
+        ],
+        "name": "Pale Pink",
+        "brand": "Janome"
+      },
+      {
+        "code": "208",
+        "rgb": [
+          171,
+          90,
+          150
+        ],
+        "name": "Purple",
+        "brand": "Janome"
+      },
+      {
+        "code": "210",
+        "rgb": [
+          252,
+          242,
+          148
+        ],
+        "name": "Pale Yellow",
+        "brand": "Janome"
+      },
+      {
+        "code": "217",
+        "rgb": [
+          101,
+          194,
+          200
+        ],
+        "name": "Sky",
+        "brand": "Janome"
+      },
+      {
+        "code": "211",
+        "rgb": [
+          249,
+          153,
+          183
+        ],
+        "name": "Pale Pink",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      43,
+      9,
+      34,
+      31,
+      43
+    ],
+    "width_mm": 50.4,
+    "height_mm": 50.0,
+    "file_size_bytes": 29008,
+    "preview_image": "Donut_preview.png",
+    "thumbnail_image": "Donut_thumbnail.png"
+  },
+  {
+    "filename": "Edelweiss.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Edelweiss.JAN",
+    "label": "Edelweis",
+    "stitch_count": 1524,
+    "jump_count": 14,
+    "num_colors": 2,
+    "colors": [
+      {
+        "code": "001",
+        "rgb": [
+          255,
+          255,
+          255
+        ],
+        "name": "White",
+        "brand": "Janome"
+      },
+      {
+        "code": "204",
+        "rgb": [
+          255,
+          255,
+          23
+        ],
+        "name": "Yellow",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      29,
+      13
+    ],
+    "width_mm": 39.1,
+    "height_mm": 29.9,
+    "file_size_bytes": 11653,
+    "preview_image": "Edelweiss_preview.png",
+    "thumbnail_image": "Edelweiss_thumbnail.png"
+  },
+  {
+    "filename": "Einhorn.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Einhorn.JAN",
+    "label": "Einhorn.",
+    "stitch_count": 2424,
+    "jump_count": 23,
+    "num_colors": 11,
+    "colors": [
+      {
+        "code": "220",
+        "rgb": [
+          229,
+          229,
+          229
+        ],
+        "name": "Silver Gray",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "209",
+        "rgb": [
+          172,
+          156,
+          199
+        ],
+        "name": "Pale Violet",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "217",
+        "rgb": [
+          101,
+          194,
+          200
+        ],
+        "name": "Sky",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "250",
+        "rgb": [
+          76,
+          191,
+          143
+        ],
+        "name": "Emerald Green",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "210",
+        "rgb": [
+          252,
+          242,
+          148
+        ],
+        "name": "Pale Yellow",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "234",
+        "rgb": [
+          249,
+          103,
+          107
+        ],
+        "name": "Coral",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "211",
+        "rgb": [
+          249,
+          153,
+          183
+        ],
+        "name": "Pale Pink",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "228",
+        "rgb": [
+          178,
+          225,
+          227
+        ],
+        "name": "Baby Blue",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "209",
+        "rgb": [
+          172,
+          156,
+          199
+        ],
+        "name": "Pale Violet",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "223",
+        "rgb": [
+          227,
+          196,
+          180
+        ],
+        "name": "Beige Gray",
+        "brand": "Janome Polyester"
+      },
+      {
+        "code": "002",
+        "rgb": [
+          0,
+          0,
+          0
+        ],
+        "name": "Black",
+        "brand": "Janome Polyester"
+      }
+    ],
+    "pec_palette_indices": [
+      29,
+      45,
+      31,
+      37,
+      34,
+      25,
+      43,
+      53,
+      45,
+      54,
+      20
+    ],
+    "width_mm": 51.0,
+    "height_mm": 44.0,
+    "file_size_bytes": 21421,
+    "preview_image": "Einhorn_preview.png",
+    "thumbnail_image": "Einhorn_thumbnail.png"
+  },
+  {
+    "filename": "Erdbeere.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "Erdbeere.JAN",
+    "label": "Erdbeere",
+    "stitch_count": 2369,
+    "jump_count": 12,
+    "num_colors": 5,
+    "colors": [
+      {
+        "code": "202",
+        "rgb": [
+          240,
+          51,
+          31
+        ],
+        "name": "Vermilion",
+        "brand": "Janome"
+      },
+      {
+        "code": "218",
+        "rgb": [
+          127,
+          194,
+          28
+        ],
+        "name": "Yellow Green",
+        "brand": "Janome"
+      },
+      {
+        "code": "206",
+        "rgb": [
+          26,
+          132,
+          45
+        ],
+        "name": "Bright Green",
+        "brand": "Janome"
+      },
+      {
+        "code": "218",
+        "rgb": [
+          127,
+          194,
+          28
+        ],
+        "name": "Yellow Green",
+        "brand": "Janome"
+      },
+      {
+        "code": "210",
+        "rgb": [
+          252,
+          242,
+          148
+        ],
+        "name": "Pale Yellow",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      28,
+      14,
+      56,
+      14,
+      34
+    ],
+    "width_mm": 40.1,
+    "height_mm": 44.9,
+    "file_size_bytes": 17948,
+    "preview_image": "Erdbeere_preview.png",
+    "thumbnail_image": "Erdbeere_thumbnail.png"
+  },
+  {
+    "filename": "FAppliHerz.PES",
+    "format": "PES (Brother)",
+    "version": "0060",
+    "design_name": "FAppliHerz.JAN",
+    "label": "FAppliHe",
+    "stitch_count": 288,
+    "jump_count": 1,
+    "num_colors": 1,
+    "colors": [
+      {
+        "code": "265",
+        "rgb": [
+          243,
+          54,
+          137
+        ],
+        "name": "Crimson",
+        "brand": "Janome"
+      }
+    ],
+    "pec_palette_indices": [
+      25
+    ],
+    "width_mm": 57.2,
+    "height_mm": 50.3,
+    "file_size_bytes": 3266,
+    "preview_image": "FAppliHerz_preview.png",
+    "thumbnail_image": "FAppliHerz_thumbnail.png"
+  }
+]

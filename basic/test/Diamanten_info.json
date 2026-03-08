@@ -1,0 +1,63 @@
+{
+  "filename": "Diamanten.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "Diamanten.JAN",
+  "label": "Diamante",
+  "stitch_count": 1862,
+  "jump_count": 14,
+  "num_colors": 4,
+  "colors": [
+    {
+      "code": "249",
+      "rgb": [
+        93,
+        174,
+        148
+      ],
+      "name": "Aquamarine",
+      "brand": "Janome"
+    },
+    {
+      "code": "250",
+      "rgb": [
+        76,
+        191,
+        143
+      ],
+      "name": "Emerald Green",
+      "brand": "Janome"
+    },
+    {
+      "code": "227",
+      "rgb": [
+        152,
+        214,
+        189
+      ],
+      "name": "Pale Aqua",
+      "brand": "Janome"
+    },
+    {
+      "code": "251",
+      "rgb": [
+        0,
+        119,
+        114
+      ],
+      "name": "Peacock Green",
+      "brand": "Janome"
+    }
+  ],
+  "pec_palette_indices": [
+    39,
+    37,
+    31,
+    3
+  ],
+  "width_mm": 37.9,
+  "height_mm": 49.8,
+  "file_size_bytes": 14538,
+  "preview_image": "Diamanten_preview.png",
+  "thumbnail_image": "Diamanten_thumbnail.png"
+}

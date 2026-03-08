@@ -1,0 +1,63 @@
+{
+  "filename": "Blaetter_Puschen.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "Blaetter_Puschen.JAN",
+  "label": "Blaetter",
+  "stitch_count": 3118,
+  "jump_count": 4,
+  "num_colors": 4,
+  "colors": [
+    {
+      "code": "003",
+      "rgb": [
+        228,
+        195,
+        93
+      ],
+      "name": "Gold",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "274",
+      "rgb": [
+        252,
+        178,
+        87
+      ],
+      "name": "Tangerine",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "271",
+      "rgb": [
+        203,
+        138,
+        26
+      ],
+      "name": "Yellow Ocher",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "214",
+      "rgb": [
+        177,
+        112,
+        78
+      ],
+      "name": "Brown",
+      "brand": "Janome Polyester"
+    }
+  ],
+  "pec_palette_indices": [
+    35,
+    33,
+    26,
+    49
+  ],
+  "width_mm": 72.7,
+  "height_mm": 49.4,
+  "file_size_bytes": 21692,
+  "preview_image": "Blaetter_Puschen_preview.png",
+  "thumbnail_image": "Blaetter_Puschen_thumbnail.png"
+}

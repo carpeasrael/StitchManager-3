@@ -1,0 +1,74 @@
+{
+  "filename": "Donut.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "Donut.JAN",
+  "label": "Donut.JA",
+  "stitch_count": 4190,
+  "jump_count": 17,
+  "num_colors": 5,
+  "colors": [
+    {
+      "code": "211",
+      "rgb": [
+        249,
+        153,
+        183
+      ],
+      "name": "Pale Pink",
+      "brand": "Janome"
+    },
+    {
+      "code": "208",
+      "rgb": [
+        171,
+        90,
+        150
+      ],
+      "name": "Purple",
+      "brand": "Janome"
+    },
+    {
+      "code": "210",
+      "rgb": [
+        252,
+        242,
+        148
+      ],
+      "name": "Pale Yellow",
+      "brand": "Janome"
+    },
+    {
+      "code": "217",
+      "rgb": [
+        101,
+        194,
+        200
+      ],
+      "name": "Sky",
+      "brand": "Janome"
+    },
+    {
+      "code": "211",
+      "rgb": [
+        249,
+        153,
+        183
+      ],
+      "name": "Pale Pink",
+      "brand": "Janome"
+    }
+  ],
+  "pec_palette_indices": [
+    43,
+    9,
+    34,
+    31,
+    43
+  ],
+  "width_mm": 50.4,
+  "height_mm": 50.0,
+  "file_size_bytes": 29008,
+  "preview_image": "Donut_preview.png",
+  "thumbnail_image": "Donut_thumbnail.png"
+}

@@ -1,0 +1,30 @@
+{
+  "filename": "FAppliHerz.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "FAppliHerz.JAN",
+  "label": "FAppliHe",
+  "stitch_count": 288,
+  "jump_count": 1,
+  "num_colors": 1,
+  "colors": [
+    {
+      "code": "265",
+      "rgb": [
+        243,
+        54,
+        137
+      ],
+      "name": "Crimson",
+      "brand": "Janome"
+    }
+  ],
+  "pec_palette_indices": [
+    25
+  ],
+  "width_mm": 57.2,
+  "height_mm": 50.3,
+  "file_size_bytes": 3266,
+  "preview_image": "FAppliHerz_preview.png",
+  "thumbnail_image": "FAppliHerz_thumbnail.png"
+}

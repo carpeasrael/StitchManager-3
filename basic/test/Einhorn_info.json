@@ -1,0 +1,140 @@
+{
+  "filename": "Einhorn.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "Einhorn.JAN",
+  "label": "Einhorn.",
+  "stitch_count": 2424,
+  "jump_count": 23,
+  "num_colors": 11,
+  "colors": [
+    {
+      "code": "220",
+      "rgb": [
+        229,
+        229,
+        229
+      ],
+      "name": "Silver Gray",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "209",
+      "rgb": [
+        172,
+        156,
+        199
+      ],
+      "name": "Pale Violet",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "217",
+      "rgb": [
+        101,
+        194,
+        200
+      ],
+      "name": "Sky",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "250",
+      "rgb": [
+        76,
+        191,
+        143
+      ],
+      "name": "Emerald Green",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "210",
+      "rgb": [
+        252,
+        242,
+        148
+      ],
+      "name": "Pale Yellow",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "234",
+      "rgb": [
+        249,
+        103,
+        107
+      ],
+      "name": "Coral",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "211",
+      "rgb": [
+        249,
+        153,
+        183
+      ],
+      "name": "Pale Pink",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "228",
+      "rgb": [
+        178,
+        225,
+        227
+      ],
+      "name": "Baby Blue",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "209",
+      "rgb": [
+        172,
+        156,
+        199
+      ],
+      "name": "Pale Violet",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "223",
+      "rgb": [
+        227,
+        196,
+        180
+      ],
+      "name": "Beige Gray",
+      "brand": "Janome Polyester"
+    },
+    {
+      "code": "002",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "name": "Black",
+      "brand": "Janome Polyester"
+    }
+  ],
+  "pec_palette_indices": [
+    29,
+    45,
+    31,
+    37,
+    34,
+    25,
+    43,
+    53,
+    45,
+    54,
+    20
+  ],
+  "width_mm": 51.0,
+  "height_mm": 44.0,
+  "file_size_bytes": 21421,
+  "preview_image": "Einhorn_preview.png",
+  "thumbnail_image": "Einhorn_thumbnail.png"
+}

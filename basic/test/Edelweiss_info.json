@@ -1,0 +1,41 @@
+{
+  "filename": "Edelweiss.PES",
+  "format": "PES (Brother)",
+  "version": "0060",
+  "design_name": "Edelweiss.JAN",
+  "label": "Edelweis",
+  "stitch_count": 1524,
+  "jump_count": 14,
+  "num_colors": 2,
+  "colors": [
+    {
+      "code": "001",
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "name": "White",
+      "brand": "Janome"
+    },
+    {
+      "code": "204",
+      "rgb": [
+        255,
+        255,
+        23
+      ],
+      "name": "Yellow",
+      "brand": "Janome"
+    }
+  ],
+  "pec_palette_indices": [
+    29,
+    13
+  ],
+  "width_mm": 39.1,
+  "height_mm": 29.9,
+  "file_size_bytes": 11653,
+  "preview_image": "Edelweiss_preview.png",
+  "thumbnail_image": "Edelweiss_thumbnail.png"
+}
