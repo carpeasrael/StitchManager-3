@@ -63,6 +63,7 @@
   grid-area: status;
   display: flex;
   align-items: center;
+  gap: var(--spacing-3);
   padding: 0 var(--spacing-3);
   background: var(--color-surface);
   border-top: 1px solid var(--color-border-light);

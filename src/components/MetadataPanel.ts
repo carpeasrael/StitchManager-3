@@ -1,10 +1,35 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { EventBus } from "../state/EventBus";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import * as FileService from "../services/FileService";
-import type { EmbroideryFile, ThreadColor, FileFormat } from "../types/index";
+import * as SettingsService from "../services/SettingsService";
+import type {
+  EmbroideryFile,
+  ThreadColor,
+  FileFormat,
+  Tag,
+  FileUpdate,
+  CustomFieldDef,
+} from "../types/index";
+
+interface FormSnapshot {
+  name: string;
+  theme: string;
+  description: string;
+  license: string;
+  tags: string[];
+}
 
 export class MetadataPanel extends Component {
+  private currentFile: EmbroideryFile | null = null;
+  private currentTags: Tag[] = [];
+  private allTags: Tag[] = [];
+  private customFields: CustomFieldDef[] = [];
+  private snapshot: FormSnapshot | null = null;
+  private dirty = false;
+  private saving = false;
+
   constructor(container: HTMLElement) {
     super(container);
     this.subscribe(
@@ -16,21 +41,87 @@ export class MetadataPanel extends Component {
   private async onSelectionChanged(): Promise<void> {
     const fileId = appState.get("selectedFileId");
     if (fileId === null) {
+      this.currentFile = null;
+      this.currentTags = [];
+      this.snapshot = null;
+      this.dirty = false;
       this.render();
       return;
     }
 
     try {
-      const [file, formats, colors] = await Promise.all([
+      const [file, formats, colors, tags, allTags, customFields] = await Promise.all([
         FileService.getFile(fileId),
         FileService.getFormats(fileId),
         FileService.getColors(fileId),
+        FileService.getTags(fileId),
+        FileService.getAllTags(),
+        SettingsService.getCustomFields(),
       ]);
-      this.renderFileInfo(file, formats, colors);
+      this.currentFile = file;
+      this.currentTags = tags;
+      this.allTags = allTags;
+      this.customFields = customFields;
+      this.snapshot = this.takeSnapshot(file, tags);
+      this.dirty = false;
+      this.renderFileInfo(file, formats, colors, tags);
     } catch (e) {
       console.warn("Failed to load file details:", e);
       this.renderError();
     }
+  }
+
+  private takeSnapshot(file: EmbroideryFile, tags: Tag[]): FormSnapshot {
+    return {
+      name: file.name || "",
+      theme: file.theme || "",
+      description: file.description || "",
+      license: file.license || "",
+      tags: tags.map((t) => t.name).sort(),
+    };
+  }
+
+  private checkDirty(): void {
+    if (!this.snapshot) {
+      this.dirty = false;
+      return;
+    }
+    const current = this.getCurrentFormValues();
+    this.dirty =
+      current.name !== this.snapshot.name ||
+      current.theme !== this.snapshot.theme ||
+      current.description !== this.snapshot.description ||
+      current.license !== this.snapshot.license ||
+      current.tags.join(",") !== this.snapshot.tags.join(",");
+
+    const saveBtn = this.el.querySelector<HTMLButtonElement>(".metadata-save-btn");
+    if (saveBtn) {
+      saveBtn.disabled = !this.dirty || this.saving;
+    }
+  }
+
+  private getCurrentFormValues(): FormSnapshot {
+    const getValue = (name: string): string => {
+      const el = this.el.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        `[data-field="${name}"]`
+      );
+      return el ? el.value : "";
+    };
+
+    const tagChips = this.el.querySelectorAll<HTMLElement>(".tag-chip");
+    const tags: string[] = [];
+    tagChips.forEach((chip) => {
+      const name = chip.dataset.tag;
+      if (name) tags.push(name);
+    });
+
+    return {
+      name: getValue("name"),
+      theme: getValue("theme"),
+      description: getValue("description"),
+      license: getValue("license"),
+      tags: tags.sort(),
+    };
   }
 
   render(): void {
@@ -47,7 +138,8 @@ export class MetadataPanel extends Component {
   private renderFileInfo(
     file: EmbroideryFile,
     formats: FileFormat[],
-    colors: ThreadColor[]
+    colors: ThreadColor[],
+    tags: Tag[]
   ): void {
     this.el.innerHTML = "";
 
@@ -71,7 +163,66 @@ export class MetadataPanel extends Component {
     }
     wrapper.appendChild(thumbSection);
 
-    // File info section
+    // Editable form section
+    const formSection = document.createElement("div");
+    formSection.className = "metadata-section";
+
+    const formHeader = document.createElement("div");
+    formHeader.className = "metadata-section-header";
+    formHeader.textContent = "Metadaten";
+    formSection.appendChild(formHeader);
+
+    const form = document.createElement("div");
+    form.className = "metadata-form";
+
+    this.addFormField(form, "Name", "name", file.name || "", "text");
+    this.addFormField(form, "Thema", "theme", file.theme || "", "text");
+    this.addFormField(
+      form,
+      "Beschreibung",
+      "description",
+      file.description || "",
+      "textarea"
+    );
+    this.addFormField(form, "Lizenz", "license", file.license || "", "text");
+
+    formSection.appendChild(form);
+    wrapper.appendChild(formSection);
+
+    // Tags section
+    const tagSection = document.createElement("div");
+    tagSection.className = "metadata-section";
+
+    const tagHeader = document.createElement("div");
+    tagHeader.className = "metadata-section-header";
+    tagHeader.textContent = "Tags";
+    tagSection.appendChild(tagHeader);
+
+    this.renderTagEditor(tagSection, tags);
+    wrapper.appendChild(tagSection);
+
+    // Custom fields section
+    if (this.customFields.length > 0) {
+      const customSection = document.createElement("div");
+      customSection.className = "metadata-section";
+
+      const customHeader = document.createElement("div");
+      customHeader.className = "metadata-section-header";
+      customHeader.textContent = "Benutzerdefinierte Felder";
+      customSection.appendChild(customHeader);
+
+      const customForm = document.createElement("div");
+      customForm.className = "metadata-form";
+
+      for (const field of this.customFields) {
+        this.renderCustomField(customForm, field);
+      }
+
+      customSection.appendChild(customForm);
+      wrapper.appendChild(customSection);
+    }
+
+    // Read-only info section
     const infoSection = document.createElement("div");
     infoSection.className = "metadata-section";
 
@@ -83,7 +234,7 @@ export class MetadataPanel extends Component {
     const infoGrid = document.createElement("div");
     infoGrid.className = "metadata-info-grid";
 
-    this.addInfoRow(infoGrid, "Name", file.name || file.filename);
+    this.addInfoRow(infoGrid, "Dateiname", file.filename);
     this.addInfoRow(infoGrid, "Format", this.getFormatLabel(file.filename));
 
     if (formats.length > 0 && formats[0].formatVersion) {
@@ -111,7 +262,11 @@ export class MetadataPanel extends Component {
     }
 
     if (file.fileSizeBytes !== null) {
-      this.addInfoRow(infoGrid, "Dateigröße", this.formatSize(file.fileSizeBytes));
+      this.addInfoRow(
+        infoGrid,
+        "Dateigröße",
+        this.formatSize(file.fileSizeBytes)
+      );
     }
 
     infoSection.appendChild(infoGrid);
@@ -176,7 +331,302 @@ export class MetadataPanel extends Component {
     }
 
     wrapper.appendChild(colorSection);
+
+    // Save button
+    const saveBar = document.createElement("div");
+    saveBar.className = "metadata-save-bar";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "metadata-save-btn";
+    saveBtn.textContent = "Speichern";
+    saveBtn.disabled = true;
+    saveBtn.addEventListener("click", () => this.save());
+    saveBar.appendChild(saveBtn);
+
+    wrapper.appendChild(saveBar);
+
     this.el.appendChild(wrapper);
+  }
+
+  private addFormField(
+    container: HTMLElement,
+    label: string,
+    field: string,
+    value: string,
+    type: "text" | "textarea"
+  ): void {
+    const group = document.createElement("div");
+    group.className = "metadata-form-group";
+
+    const labelEl = document.createElement("label");
+    labelEl.className = "metadata-form-label";
+    labelEl.textContent = label;
+    group.appendChild(labelEl);
+
+    if (type === "textarea") {
+      const textarea = document.createElement("textarea");
+      textarea.className = "metadata-form-input metadata-form-textarea";
+      textarea.dataset.field = field;
+      textarea.value = value;
+      textarea.rows = 3;
+      textarea.addEventListener("input", () => this.checkDirty());
+      group.appendChild(textarea);
+    } else {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "metadata-form-input";
+      input.dataset.field = field;
+      input.value = value;
+      input.addEventListener("input", () => this.checkDirty());
+      group.appendChild(input);
+    }
+
+    container.appendChild(group);
+  }
+
+  private renderTagEditor(container: HTMLElement, tags: Tag[]): void {
+    const tagEditor = document.createElement("div");
+    tagEditor.className = "tag-editor";
+
+    const chipContainer = document.createElement("div");
+    chipContainer.className = "tag-chip-container";
+
+    for (const tag of tags) {
+      this.addTagChip(chipContainer, tag.name);
+    }
+
+    tagEditor.appendChild(chipContainer);
+
+    // Tag input with autocomplete
+    const inputWrapper = document.createElement("div");
+    inputWrapper.className = "tag-input-wrapper";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "tag-input";
+    input.placeholder = "Tag hinzufügen...";
+
+    const suggestions = document.createElement("div");
+    suggestions.className = "tag-suggestions";
+    suggestions.style.display = "none";
+
+    input.addEventListener("input", () => {
+      const val = input.value.trim().toLowerCase();
+      if (val.length === 0) {
+        suggestions.style.display = "none";
+        return;
+      }
+
+      const currentTags = new Set(
+        Array.from(
+          chipContainer.querySelectorAll<HTMLElement>(".tag-chip")
+        ).map((c) => c.dataset.tag || "")
+      );
+
+      const matches = this.allTags.filter(
+        (t) =>
+          t.name.toLowerCase().includes(val) && !currentTags.has(t.name)
+      );
+
+      if (matches.length === 0) {
+        suggestions.style.display = "none";
+        return;
+      }
+
+      suggestions.innerHTML = "";
+      for (const match of matches.slice(0, 8)) {
+        const item = document.createElement("div");
+        item.className = "tag-suggestion-item";
+        item.textContent = match.name;
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          this.addTagChip(chipContainer, match.name);
+          input.value = "";
+          suggestions.style.display = "none";
+          this.checkDirty();
+        });
+        suggestions.appendChild(item);
+      }
+      suggestions.style.display = "block";
+    });
+
+    input.addEventListener("blur", () => {
+      setTimeout(() => {
+        suggestions.style.display = "none";
+      }, 150);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === ",") {
+        e.preventDefault();
+        const val = input.value.trim().replace(/,$/g, "");
+        if (val) {
+          const currentTags = new Set(
+            Array.from(
+              chipContainer.querySelectorAll<HTMLElement>(".tag-chip")
+            ).map((c) => c.dataset.tag || "")
+          );
+          if (!currentTags.has(val)) {
+            this.addTagChip(chipContainer, val);
+            this.checkDirty();
+          }
+          input.value = "";
+          suggestions.style.display = "none";
+        }
+      }
+    });
+
+    inputWrapper.appendChild(input);
+    inputWrapper.appendChild(suggestions);
+    tagEditor.appendChild(inputWrapper);
+
+    container.appendChild(tagEditor);
+  }
+
+  private addTagChip(container: HTMLElement, tagName: string): void {
+    const chip = document.createElement("span");
+    chip.className = "tag-chip";
+    chip.dataset.tag = tagName;
+
+    const text = document.createElement("span");
+    text.textContent = tagName;
+    chip.appendChild(text);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "tag-chip-remove";
+    removeBtn.textContent = "\u00D7";
+    removeBtn.addEventListener("click", () => {
+      chip.remove();
+      this.checkDirty();
+    });
+    chip.appendChild(removeBtn);
+
+    container.appendChild(chip);
+  }
+
+  private async save(): Promise<void> {
+    if (!this.currentFile || !this.dirty || this.saving) return;
+
+    this.saving = true;
+    const saveBtn = this.el.querySelector<HTMLButtonElement>(".metadata-save-btn");
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Speichern...";
+    }
+
+    try {
+      const values = this.getCurrentFormValues();
+      const updates: FileUpdate = {};
+      let hasUpdates = false;
+
+      if (this.snapshot) {
+        if (values.name !== this.snapshot.name) {
+          updates.name = values.name;
+          hasUpdates = true;
+        }
+        if (values.theme !== this.snapshot.theme) {
+          updates.theme = values.theme;
+          hasUpdates = true;
+        }
+        if (values.description !== this.snapshot.description) {
+          updates.description = values.description;
+          hasUpdates = true;
+        }
+        if (values.license !== this.snapshot.license) {
+          updates.license = values.license;
+          hasUpdates = true;
+        }
+      }
+
+      const tagsChanged =
+        this.snapshot &&
+        values.tags.join(",") !== this.snapshot.tags.join(",");
+
+      if (hasUpdates) {
+        const updatedFile = await FileService.updateFile(
+          this.currentFile.id,
+          updates
+        );
+        this.currentFile = updatedFile;
+
+        // Update the file in appState.files
+        const files = appState.get("files");
+        const idx = files.findIndex((f) => f.id === updatedFile.id);
+        if (idx >= 0) {
+          files[idx] = updatedFile;
+          appState.set("files", files);
+        }
+      }
+
+      if (tagsChanged) {
+        const newTags = await FileService.setTags(
+          this.currentFile.id,
+          values.tags
+        );
+        this.currentTags = newTags;
+      }
+
+      this.snapshot = this.takeSnapshot(this.currentFile, this.currentTags);
+      this.dirty = false;
+
+      EventBus.emit("file:saved", { fileId: this.currentFile.id });
+
+      if (saveBtn) {
+        saveBtn.textContent = "Gespeichert!";
+        setTimeout(() => {
+          if (saveBtn) saveBtn.textContent = "Speichern";
+        }, 1500);
+      }
+    } catch (e) {
+      console.warn("Failed to save file:", e);
+      if (saveBtn) {
+        saveBtn.textContent = "Fehler!";
+        setTimeout(() => {
+          if (saveBtn) saveBtn.textContent = "Speichern";
+        }, 2000);
+      }
+    } finally {
+      this.saving = false;
+      this.checkDirty();
+    }
+  }
+
+  private renderCustomField(container: HTMLElement, field: CustomFieldDef): void {
+    const group = document.createElement("div");
+    group.className = "metadata-form-group";
+
+    const label = document.createElement("label");
+    label.className = "metadata-form-label";
+    label.textContent = field.name;
+    group.appendChild(label);
+
+    if (field.fieldType === "select" && field.options) {
+      const select = document.createElement("select");
+      select.className = "metadata-form-input";
+      select.dataset.customField = String(field.id);
+
+      const emptyOpt = document.createElement("option");
+      emptyOpt.value = "";
+      emptyOpt.textContent = "— Auswählen —";
+      select.appendChild(emptyOpt);
+
+      for (const opt of field.options.split(",")) {
+        const option = document.createElement("option");
+        option.value = opt.trim();
+        option.textContent = opt.trim();
+        select.appendChild(option);
+      }
+
+      group.appendChild(select);
+    } else {
+      const input = document.createElement("input");
+      input.type = field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text";
+      input.className = "metadata-form-input";
+      input.dataset.customField = String(field.id);
+      group.appendChild(input);
+    }
+
+    container.appendChild(group);
   }
 
   private renderError(): void {

@@ -14,6 +14,7 @@ pub struct DbState(pub(crate) Mutex<rusqlite::Connection>);
 
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:stitch_manager.db", vec![])
@@ -48,6 +49,17 @@ pub fn run() {
             commands::files::get_file_formats,
             commands::files::get_file_colors,
             commands::files::get_file_tags,
+            commands::files::update_file,
+            commands::files::delete_file,
+            commands::files::set_file_tags,
+            commands::files::get_all_tags,
+            commands::files::get_thumbnail,
+            commands::settings::get_setting,
+            commands::settings::set_setting,
+            commands::settings::get_all_settings,
+            commands::settings::get_custom_fields,
+            commands::settings::create_custom_field,
+            commands::settings::delete_custom_field,
             commands::scanner::parse_embroidery_file,
         ])
         .run(tauri::generate_context!())

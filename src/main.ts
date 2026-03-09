@@ -6,6 +6,8 @@ import { SearchBar } from "./components/SearchBar";
 import { FilterChips } from "./components/FilterChips";
 import { FileList } from "./components/FileList";
 import { MetadataPanel } from "./components/MetadataPanel";
+import { Toolbar } from "./components/Toolbar";
+import { StatusBar } from "./components/StatusBar";
 import { listen } from "@tauri-apps/api/event";
 import Database from "@tauri-apps/plugin-sql";
 import type { ThemeMode } from "./types/index";
@@ -110,6 +112,11 @@ function initComponents(): void {
     filterContainer.className = "toolbar-filters";
     toolbarEl.appendChild(filterContainer);
     new FilterChips(filterContainer);
+
+    const actionsContainer = document.createElement("div");
+    actionsContainer.className = "toolbar-actions-container";
+    toolbarEl.appendChild(actionsContainer);
+    new Toolbar(actionsContainer);
   }
 
   const centerEl = document.querySelector<HTMLElement>(".app-center");
@@ -120,6 +127,11 @@ function initComponents(): void {
   const rightEl = document.querySelector<HTMLElement>(".app-right");
   if (rightEl) {
     new MetadataPanel(rightEl);
+  }
+
+  const statusEl = document.querySelector<HTMLElement>(".app-status");
+  if (statusEl) {
+    new StatusBar(statusEl);
   }
 }
 

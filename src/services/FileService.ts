@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   EmbroideryFile,
   FileFormat,
+  FileUpdate,
   ThreadColor,
   Tag,
 } from "../types/index";
@@ -32,4 +33,30 @@ export async function getColors(fileId: number): Promise<ThreadColor[]> {
 
 export async function getTags(fileId: number): Promise<Tag[]> {
   return invoke<Tag[]>("get_file_tags", { fileId });
+}
+
+export async function updateFile(
+  fileId: number,
+  updates: FileUpdate
+): Promise<EmbroideryFile> {
+  return invoke<EmbroideryFile>("update_file", { fileId, updates });
+}
+
+export async function deleteFile(fileId: number): Promise<void> {
+  return invoke<void>("delete_file", { fileId });
+}
+
+export async function setTags(
+  fileId: number,
+  tagNames: string[]
+): Promise<Tag[]> {
+  return invoke<Tag[]>("set_file_tags", { fileId, tagNames });
+}
+
+export async function getAllTags(): Promise<Tag[]> {
+  return invoke<Tag[]>("get_all_tags");
+}
+
+export async function getThumbnail(fileId: number): Promise<string> {
+  return invoke<string>("get_thumbnail", { fileId });
 }

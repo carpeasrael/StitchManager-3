@@ -77,6 +77,16 @@ export interface FileUpdate {
   license?: string;
 }
 
+export interface CustomFieldDef {
+  id: number;
+  name: string;
+  fieldType: string;
+  options: string | null;
+  required: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface State {

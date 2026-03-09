@@ -400,3 +400,226 @@
   color: var(--color-muted);
   padding: var(--spacing-2) 0;
 }
+
+/* MetadataPanel Form */
+.metadata-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.metadata-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.metadata-form-label {
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.metadata-form-input {
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  font-family: var(--font-family);
+  transition: border-color 0.15s;
+}
+
+.metadata-form-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.metadata-form-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.metadata-save-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--spacing-2);
+}
+
+.metadata-save-btn {
+  padding: var(--spacing-2) var(--spacing-4);
+  border-radius: var(--radius-button);
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.metadata-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.metadata-save-btn:not(:disabled):hover {
+  opacity: 0.9;
+}
+
+/* Tag Editor */
+.tag-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.tag-chip-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-10);
+  border: 1px solid var(--color-accent-20);
+  color: var(--color-accent-strong);
+  font-size: var(--font-size-caption);
+}
+
+.tag-chip-remove {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: var(--font-size-body);
+  padding: 0;
+  line-height: 1;
+}
+
+.tag-chip-remove:hover {
+  color: var(--color-text);
+}
+
+.tag-input-wrapper {
+  position: relative;
+}
+
+.tag-input {
+  width: 100%;
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-caption);
+  font-family: var(--font-family);
+}
+
+.tag-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.tag-input::placeholder {
+  color: var(--color-muted);
+}
+
+.tag-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  max-height: 150px;
+  overflow-y: auto;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.tag-suggestion-item {
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.tag-suggestion-item:hover {
+  background: var(--color-accent-10);
+}
+
+/* Toolbar Actions */
+.toolbar-actions-container {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-btn-icon {
+  font-size: var(--font-size-body);
+}
+
+.toolbar-btn-label {
+  font-size: var(--font-size-caption);
+}
+
+/* StatusBar */
+.status-left,
+.status-center,
+.status-right {
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+}
+
+.status-left {
+  flex-shrink: 0;
+}
+
+.status-center {
+  flex: 1;
+  text-align: center;
+}
+
+.status-right {
+  flex-shrink: 0;
+  text-align: right;
+}

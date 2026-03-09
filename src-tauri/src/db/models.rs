@@ -133,3 +133,12 @@ pub struct CustomFieldValue {
     pub field_id: i64,
     pub value: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileUpdate {
+    pub name: Option<String>,
+    pub theme: Option<String>,
+    pub description: Option<String>,
+    pub license: Option<String>,
+}
