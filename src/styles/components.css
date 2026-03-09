@@ -1082,3 +1082,99 @@
   background: #28a745;
   color: #fff;
 }
+
+/* Batch Dialog */
+.dialog-batch {
+  width: 480px;
+  max-height: 400px;
+}
+
+.batch-step-label {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.batch-progress-bar {
+  height: 8px;
+  background: var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.batch-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.batch-progress-text {
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  text-align: right;
+  margin-bottom: 12px;
+}
+
+.batch-log {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 4px;
+  font-size: var(--font-size-caption);
+  font-family: monospace;
+}
+
+.batch-log-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+.batch-log-entry:nth-child(even) {
+  background: var(--color-surface);
+}
+
+.batch-log-icon {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.batch-log-success .batch-log-icon {
+  color: #28a745;
+}
+
+.batch-log-error .batch-log-icon {
+  color: #dc3545;
+}
+
+.batch-log-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings Legend */
+.settings-legend {
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  background: var(--color-surface);
+  padding: 8px 12px;
+  border-radius: var(--radius-card);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.settings-legend code {
+  background: var(--color-border);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}

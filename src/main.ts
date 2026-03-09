@@ -11,9 +11,14 @@ import { StatusBar } from "./components/StatusBar";
 import { AiPreviewDialog } from "./components/AiPreviewDialog";
 import { AiResultDialog } from "./components/AiResultDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { BatchDialog } from "./components/BatchDialog";
 import { listen } from "@tauri-apps/api/event";
 import Database from "@tauri-apps/plugin-sql";
+import { open } from "@tauri-apps/plugin-dialog";
 import * as FileService from "./services/FileService";
+import * as BatchService from "./services/BatchService";
+import * as AiService from "./services/AiService";
+import * as SettingsService from "./services/SettingsService";
 import type { ThemeMode } from "./types/index";
 
 let dbInstance: Awaited<ReturnType<typeof Database.load>> | null = null;
@@ -120,6 +125,81 @@ function initEventHandlers(): void {
 
   EventBus.on("toolbar:settings", () => {
     SettingsDialog.open();
+  });
+
+  EventBus.on("toolbar:batch-rename", async () => {
+    const fileIds = appState.get("selectedFileIds");
+    if (fileIds.length === 0) return;
+
+    const settings = await SettingsService.getAllSettings();
+    const pattern = settings.rename_pattern || "{name}_{theme}";
+
+    BatchDialog.open("Batch Umbenennen", fileIds.length);
+    try {
+      await BatchService.rename(fileIds, pattern);
+    } catch (e) {
+      console.warn("Batch rename failed:", e);
+    }
+    // Reload files after batch operation
+    const folderId = appState.get("selectedFolderId");
+    const updatedFiles = await FileService.getFiles(folderId);
+    appState.set("files", updatedFiles);
+  });
+
+  EventBus.on("toolbar:batch-organize", async () => {
+    const fileIds = appState.get("selectedFileIds");
+    if (fileIds.length === 0) return;
+
+    const settings = await SettingsService.getAllSettings();
+    const pattern = settings.organize_pattern || "{theme}/{name}";
+
+    BatchDialog.open("Batch Organisieren", fileIds.length);
+    try {
+      await BatchService.organize(fileIds, pattern);
+    } catch (e) {
+      console.warn("Batch organize failed:", e);
+    }
+    const folderId = appState.get("selectedFolderId");
+    const updatedFiles = await FileService.getFiles(folderId);
+    appState.set("files", updatedFiles);
+  });
+
+  EventBus.on("toolbar:batch-export", async () => {
+    const fileIds = appState.get("selectedFileIds");
+    if (fileIds.length === 0) return;
+
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Zielordner f\u00FCr USB-Export w\u00E4hlen",
+    });
+    if (!selected) return;
+
+    const targetPath = typeof selected === "string" ? selected : String(selected);
+    if (!targetPath) return;
+
+    BatchDialog.open("USB-Export", fileIds.length);
+    try {
+      await BatchService.exportUsb(fileIds, targetPath);
+    } catch (e) {
+      console.warn("Batch export failed:", e);
+    }
+  });
+
+  EventBus.on("toolbar:batch-ai", async () => {
+    const fileIds = appState.get("selectedFileIds");
+    if (fileIds.length === 0) return;
+
+    BatchDialog.open("Batch KI-Analyse", fileIds.length);
+    try {
+      await AiService.analyzeBatch(fileIds);
+    } catch (e) {
+      console.warn("Batch AI analysis failed:", e);
+    }
+    // Reload files to reflect AI badge changes
+    const folderId = appState.get("selectedFolderId");
+    const updatedFiles = await FileService.getFiles(folderId);
+    appState.set("files", updatedFiles);
   });
 
   EventBus.on("file:updated", async () => {

@@ -7,6 +7,8 @@ use crate::error::{lock_db, AppError};
 use crate::services::ai_client::{AiClient, AiConfig, AiProvider};
 use crate::DbState;
 
+use super::batch::BatchProgressPayload;
+
 const AI_RESULT_SELECT: &str =
     "SELECT id, file_id, provider, model, prompt_hash, raw_response, \
      parsed_name, parsed_theme, parsed_desc, parsed_tags, parsed_colors, \
@@ -91,10 +93,11 @@ fn load_ai_config(conn: &rusqlite::Connection) -> Result<AiConfig, AppError> {
     })
 }
 
-#[tauri::command]
-pub fn ai_build_prompt(db: State<'_, DbState>, file_id: i64) -> Result<String, AppError> {
-    let conn = lock_db(&db)?;
-
+/// Shared helper to build an AI analysis prompt from file metadata and tags.
+fn build_prompt_for_file(
+    conn: &rusqlite::Connection,
+    file_id: i64,
+) -> Result<String, AppError> {
     let file = conn
         .query_row(
             &format!("{FILE_SELECT} WHERE id = ?1"),
@@ -157,6 +160,12 @@ pub fn ai_build_prompt(db: State<'_, DbState>, file_id: i64) -> Result<String, A
     }
 
     Ok(prompt)
+}
+
+#[tauri::command]
+pub fn ai_build_prompt(db: State<'_, DbState>, file_id: i64) -> Result<String, AppError> {
+    let conn = lock_db(&db)?;
+    build_prompt_for_file(&conn, file_id)
 }
 
 #[tauri::command]
@@ -478,6 +487,138 @@ pub async fn ai_test_connection(db: State<'_, DbState>) -> Result<bool, AppError
 
     let client = AiClient::new(config)?;
     Ok(client.test_connection().await)
+}
+
+#[tauri::command]
+pub async fn ai_analyze_batch(
+    db: State<'_, DbState>,
+    app_handle: AppHandle,
+    file_ids: Vec<i64>,
+) -> Result<Vec<AiAnalysisResult>, AppError> {
+    let total = file_ids.len() as i64;
+    let mut results: Vec<AiAnalysisResult> = Vec::new();
+
+    for (i, file_id) in file_ids.iter().enumerate() {
+        let analyze_result = (|| async {
+            let (prompt, image_base64, config) = {
+                let conn = lock_db(&db)?;
+
+                // Reuse shared prompt builder
+                let prompt = build_prompt_for_file(&conn, *file_id)?;
+
+                // Load thumbnail
+                let thumbnail_path: Option<String> = conn
+                    .query_row(
+                        "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+                        [file_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| match e {
+                        rusqlite::Error::QueryReturnedNoRows => {
+                            AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
+                        }
+                        other => AppError::Database(other),
+                    })?;
+
+                let b64 = match thumbnail_path {
+                    Some(ref path) if !path.is_empty() => {
+                        use base64::Engine;
+                        let data = std::fs::read(path)?;
+                        base64::engine::general_purpose::STANDARD.encode(&data)
+                    }
+                    _ => {
+                        return Err(AppError::Ai(
+                            "Kein Thumbnail verfuegbar fuer KI-Analyse".into(),
+                        ));
+                    }
+                };
+
+                let config = load_ai_config(&conn)?;
+                (prompt, b64, config)
+            };
+
+            // Extract fields before config is consumed
+            let provider_str = config.provider.as_str().to_string();
+            let model_str = config.model.clone();
+
+            // Perform AI analysis (async, without holding lock)
+            let client = AiClient::new(config)?;
+            let ai_response = client.analyze(&image_base64, &prompt).await?;
+
+            // Compute prompt hash
+            use sha2::Digest;
+            let prompt_hash = format!("{:x}", sha2::Sha256::digest(prompt.as_bytes()));
+
+            // Store result in DB
+            let result = {
+                let conn = lock_db(&db)?;
+
+                conn.execute(
+                    "INSERT INTO ai_analysis_results \
+                     (file_id, provider, model, prompt_hash, raw_response, \
+                      parsed_name, parsed_theme, parsed_desc, parsed_tags, parsed_colors) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    rusqlite::params![
+                        file_id,
+                        provider_str,
+                        model_str,
+                        prompt_hash,
+                        ai_response.raw_response,
+                        ai_response.parsed_name,
+                        ai_response.parsed_theme,
+                        ai_response.parsed_desc,
+                        ai_response.parsed_tags,
+                        ai_response.parsed_colors,
+                    ],
+                )?;
+
+                let result_id = conn.last_insert_rowid();
+
+                conn.execute(
+                    "UPDATE embroidery_files SET ai_analyzed = 1, updated_at = datetime('now') WHERE id = ?1",
+                    [file_id],
+                )?;
+
+                conn.query_row(
+                    &format!("{AI_RESULT_SELECT} WHERE id = ?1"),
+                    [result_id],
+                    |row| row_to_ai_result(row),
+                )?
+            };
+
+            Ok::<AiAnalysisResult, AppError>(result)
+        })()
+        .await;
+
+        match analyze_result {
+            Ok(result) => {
+                let _ = app_handle.emit(
+                    "batch:progress",
+                    BatchProgressPayload {
+                        current: (i + 1) as i64,
+                        total,
+                        filename: format!("Datei {file_id}"),
+                        status: "success".to_string(),
+                    },
+                );
+                results.push(result);
+            }
+            Err(e) => {
+                let _ = app_handle.emit(
+                    "batch:progress",
+                    BatchProgressPayload {
+                        current: (i + 1) as i64,
+                        total,
+                        filename: format!("Datei {file_id}"),
+                        status: format!("error: {e}"),
+                    },
+                );
+                // Continue to next file — don't abort batch
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[cfg(test)]

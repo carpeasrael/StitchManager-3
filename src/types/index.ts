@@ -99,11 +99,19 @@ export interface SelectedFields {
 
 export type ThemeMode = "hell" | "dunkel";
 
+export interface BatchResult {
+  total: number;
+  success: number;
+  failed: number;
+  errors: string[];
+}
+
 export interface State {
   folders: Folder[];
   selectedFolderId: number | null;
   files: EmbroideryFile[];
   selectedFileId: number | null;
+  selectedFileIds: number[];
   searchQuery: string;
   formatFilter: string | null;
   settings: Record<string, string>;

@@ -33,3 +33,9 @@ export async function rejectResult(resultId: number): Promise<void> {
 export async function testConnection(): Promise<boolean> {
   return invoke<boolean>("ai_test_connection");
 }
+
+export async function analyzeBatch(
+  fileIds: number[]
+): Promise<AiAnalysisResult[]> {
+  return invoke<AiAnalysisResult[]>("ai_analyze_batch", { fileIds });
+}

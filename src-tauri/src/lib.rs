@@ -61,11 +61,15 @@ pub fn run() {
             commands::settings::create_custom_field,
             commands::settings::delete_custom_field,
             commands::scanner::parse_embroidery_file,
+            commands::batch::batch_rename,
+            commands::batch::batch_organize,
+            commands::batch::batch_export_usb,
             commands::ai::ai_build_prompt,
             commands::ai::ai_analyze_file,
             commands::ai::ai_accept_result,
             commands::ai::ai_reject_result,
             commands::ai::ai_test_connection,
+            commands::ai::ai_analyze_batch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -31,6 +31,7 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
+dirs = "5"
 thiserror = "1"
 byteorder = "1"
 log = "0.4"

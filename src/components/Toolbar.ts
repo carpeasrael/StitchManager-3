@@ -15,6 +15,9 @@ export class Toolbar extends Component {
     this.subscribe(
       appState.on("selectedFileId", () => this.updateButtonStates())
     );
+    this.subscribe(
+      appState.on("selectedFileIds", () => this.updateButtonStates())
+    );
     this.render();
   }
 
@@ -25,7 +28,7 @@ export class Toolbar extends Component {
     actions.className = "toolbar-actions";
 
     actions.appendChild(
-      this.createButton("toolbar-btn-add", "\uD83D\uDCC1", "Ordner hinzufügen", () =>
+      this.createButton("toolbar-btn-add", "\uD83D\uDCC1", "Ordner hinzuf\u00FCgen", () =>
         this.addFolder()
       )
     );
@@ -45,6 +48,31 @@ export class Toolbar extends Component {
     actions.appendChild(
       this.createButton("toolbar-btn-ai", "\u2728", "KI Analyse", () =>
         EventBus.emit("toolbar:ai-analyze")
+      )
+    );
+
+    // Batch actions (shown when multiple files selected)
+    actions.appendChild(
+      this.createButton("toolbar-btn-batch-rename", "\u270F", "Batch Umbenennen", () =>
+        EventBus.emit("toolbar:batch-rename")
+      )
+    );
+
+    actions.appendChild(
+      this.createButton("toolbar-btn-batch-organize", "\uD83D\uDCC2", "Batch Organisieren", () =>
+        EventBus.emit("toolbar:batch-organize")
+      )
+    );
+
+    actions.appendChild(
+      this.createButton("toolbar-btn-batch-export", "\uD83D\uDCE4", "USB-Export", () =>
+        EventBus.emit("toolbar:batch-export")
+      )
+    );
+
+    actions.appendChild(
+      this.createButton("toolbar-btn-batch-ai", "\u2728", "Batch KI", () =>
+        EventBus.emit("toolbar:batch-ai")
       )
     );
 
@@ -87,13 +115,27 @@ export class Toolbar extends Component {
   private updateButtonStates(): void {
     const hasFolder = appState.get("selectedFolderId") !== null;
     const hasFile = appState.get("selectedFileId") !== null;
+    const multiCount = appState.get("selectedFileIds").length;
+    const hasMulti = multiCount > 1;
+
     const scanBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-scan");
-    if (scanBtn) {
-      scanBtn.disabled = !hasFolder;
-    }
+    if (scanBtn) scanBtn.disabled = !hasFolder;
+
     const aiBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-ai");
-    if (aiBtn) {
-      aiBtn.disabled = !hasFile;
+    if (aiBtn) aiBtn.disabled = !hasFile || hasMulti;
+
+    // Batch buttons: visible only when multiple files selected
+    const batchBtns = [
+      ".toolbar-btn-batch-rename",
+      ".toolbar-btn-batch-organize",
+      ".toolbar-btn-batch-export",
+      ".toolbar-btn-batch-ai",
+    ];
+    for (const sel of batchBtns) {
+      const btn = this.el.querySelector<HTMLButtonElement>(sel);
+      if (btn) {
+        btn.style.display = hasMulti ? "" : "none";
+      }
     }
   }
 
@@ -102,7 +144,7 @@ export class Toolbar extends Component {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: "Ordner auswählen",
+        title: "Ordner ausw\u00E4hlen",
       });
       if (!selected) return;
 

@@ -7,6 +7,7 @@ const initialState: State = {
   selectedFolderId: null,
   files: [],
   selectedFileId: null,
+  selectedFileIds: [],
   searchQuery: "",
   formatFilter: null,
   settings: {},

@@ -38,21 +38,86 @@ export class SettingsDialog {
     const body = document.createElement("div");
     body.className = "dialog-body";
 
-    // Tab bar (only KI tab for now)
+    // Tab bar
     const tabBar = document.createElement("div");
     tabBar.className = "dialog-tab-bar";
 
     const aiTab = document.createElement("button");
     aiTab.className = "dialog-tab active";
     aiTab.textContent = "KI-Einstellungen";
+    aiTab.dataset.tab = "ki";
     tabBar.appendChild(aiTab);
+
+    const fileTab = document.createElement("button");
+    fileTab.className = "dialog-tab";
+    fileTab.textContent = "Dateiverwaltung";
+    fileTab.dataset.tab = "files";
+    tabBar.appendChild(fileTab);
 
     body.appendChild(tabBar);
 
     // KI settings form
-    const form = document.createElement("div");
-    form.className = "settings-form";
+    const kiForm = document.createElement("div");
+    kiForm.className = "settings-form settings-tab-content";
+    kiForm.dataset.tabContent = "ki";
+    this.buildKiTab(kiForm, settings);
+    body.appendChild(kiForm);
 
+    // Dateiverwaltung form
+    const filesForm = document.createElement("div");
+    filesForm.className = "settings-form settings-tab-content";
+    filesForm.dataset.tabContent = "files";
+    filesForm.style.display = "none";
+    this.buildFilesTab(filesForm, settings);
+    body.appendChild(filesForm);
+
+    // Tab switching
+    const tabs = tabBar.querySelectorAll<HTMLButtonElement>(".dialog-tab");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        tabs.forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        const tabName = tab.dataset.tab;
+        body.querySelectorAll<HTMLElement>(".settings-tab-content").forEach((c) => {
+          c.style.display = c.dataset.tabContent === tabName ? "" : "none";
+        });
+      });
+    });
+
+    dialog.appendChild(body);
+
+    // Footer
+    const footer = document.createElement("div");
+    footer.className = "dialog-footer";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "dialog-btn dialog-btn-secondary";
+    cancelBtn.textContent = "Abbrechen";
+    cancelBtn.addEventListener("click", () => this.close());
+    footer.appendChild(cancelBtn);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "dialog-btn dialog-btn-primary";
+    saveBtn.textContent = "Speichern";
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Speichere...";
+      // Save both tabs
+      await this.saveSettings(kiForm);
+      await this.saveSettings(filesForm);
+      this.close();
+    });
+    footer.appendChild(saveBtn);
+
+    dialog.appendChild(footer);
+    this.overlay.appendChild(dialog);
+    document.body.appendChild(this.overlay);
+  }
+
+  private buildKiTab(
+    form: HTMLElement,
+    settings: Record<string, string>
+  ): void {
     // Provider
     const providerGroup = this.createFormGroup("Provider");
     const providerSelect = document.createElement("select");
@@ -187,34 +252,65 @@ export class SettingsDialog {
     testGroup.appendChild(testBtn);
     testGroup.appendChild(testStatus);
     form.appendChild(testGroup);
+  }
 
-    body.appendChild(form);
-    dialog.appendChild(body);
+  private buildFilesTab(
+    form: HTMLElement,
+    settings: Record<string, string>
+  ): void {
+    // Platzhalter-Legende
+    const legend = document.createElement("div");
+    legend.className = "settings-legend";
+    legend.innerHTML =
+      "<strong>Platzhalter:</strong> " +
+      "<code>{name}</code> Anzeigename, " +
+      "<code>{theme}</code> Thema, " +
+      "<code>{format}</code> Dateiformat";
+    form.appendChild(legend);
 
-    // Footer
-    const footer = document.createElement("div");
-    footer.className = "dialog-footer";
+    // Umbennungsmuster
+    const renameGroup = this.createFormGroup("Umbennungsmuster");
+    const renameInput = document.createElement("input");
+    renameInput.type = "text";
+    renameInput.className = "settings-input";
+    renameInput.dataset.key = "rename_pattern";
+    renameInput.value = settings.rename_pattern || "{name}_{theme}";
+    renameInput.placeholder = "{name}_{theme}";
+    renameGroup.appendChild(renameInput);
+    form.appendChild(renameGroup);
 
-    const cancelBtn = document.createElement("button");
-    cancelBtn.className = "dialog-btn dialog-btn-secondary";
-    cancelBtn.textContent = "Abbrechen";
-    cancelBtn.addEventListener("click", () => this.close());
-    footer.appendChild(cancelBtn);
+    // Organisationsmuster
+    const organizeGroup = this.createFormGroup("Organisationsmuster");
+    const organizeInput = document.createElement("input");
+    organizeInput.type = "text";
+    organizeInput.className = "settings-input";
+    organizeInput.dataset.key = "organize_pattern";
+    organizeInput.value = settings.organize_pattern || "{theme}/{name}";
+    organizeInput.placeholder = "{theme}/{name}";
+    organizeGroup.appendChild(organizeInput);
+    form.appendChild(organizeGroup);
 
-    const saveBtn = document.createElement("button");
-    saveBtn.className = "dialog-btn dialog-btn-primary";
-    saveBtn.textContent = "Speichern";
-    saveBtn.addEventListener("click", async () => {
-      saveBtn.disabled = true;
-      saveBtn.textContent = "Speichere...";
-      await this.saveSettings(form);
-      this.close();
-    });
-    footer.appendChild(saveBtn);
+    // Bibliotheks-Stammverzeichnis
+    const libraryGroup = this.createFormGroup("Bibliotheks-Stammverzeichnis");
+    const libraryInput = document.createElement("input");
+    libraryInput.type = "text";
+    libraryInput.className = "settings-input";
+    libraryInput.dataset.key = "library_root";
+    libraryInput.value = settings.library_root || "~/Stickdateien";
+    libraryInput.placeholder = "~/Stickdateien";
+    libraryGroup.appendChild(libraryInput);
+    form.appendChild(libraryGroup);
 
-    dialog.appendChild(footer);
-    this.overlay.appendChild(dialog);
-    document.body.appendChild(this.overlay);
+    // Metadaten-Verzeichnis
+    const metaGroup = this.createFormGroup("Metadaten-Verzeichnis");
+    const metaInput = document.createElement("input");
+    metaInput.type = "text";
+    metaInput.className = "settings-input";
+    metaInput.dataset.key = "metadata_root";
+    metaInput.value = settings.metadata_root || "~/Stickdateien/.stichman";
+    metaInput.placeholder = "~/Stickdateien/.stichman";
+    metaGroup.appendChild(metaInput);
+    form.appendChild(metaGroup);
   }
 
   private createFormGroup(label: string): HTMLElement {
