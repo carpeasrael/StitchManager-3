@@ -12,6 +12,9 @@ export class Toolbar extends Component {
     this.subscribe(
       appState.on("selectedFolderId", () => this.updateButtonStates())
     );
+    this.subscribe(
+      appState.on("selectedFileId", () => this.updateButtonStates())
+    );
     this.render();
   }
 
@@ -39,15 +42,11 @@ export class Toolbar extends Component {
       )
     );
 
-    const aiBtn = this.createButton(
-      "toolbar-btn-ai",
-      "\u2728",
-      "KI Analyse",
-      () => EventBus.emit("toolbar:ai-analyze")
+    actions.appendChild(
+      this.createButton("toolbar-btn-ai", "\u2728", "KI Analyse", () =>
+        EventBus.emit("toolbar:ai-analyze")
+      )
     );
-    aiBtn.disabled = true;
-    aiBtn.title = "KI Analyse (kommt in Sprint 8)";
-    actions.appendChild(aiBtn);
 
     const settingsBtn = this.createButton(
       "toolbar-btn-settings",
@@ -87,9 +86,14 @@ export class Toolbar extends Component {
 
   private updateButtonStates(): void {
     const hasFolder = appState.get("selectedFolderId") !== null;
+    const hasFile = appState.get("selectedFileId") !== null;
     const scanBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-scan");
     if (scanBtn) {
       scanBtn.disabled = !hasFolder;
+    }
+    const aiBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-ai");
+    if (aiBtn) {
+      aiBtn.disabled = !hasFile;
     }
   }
 

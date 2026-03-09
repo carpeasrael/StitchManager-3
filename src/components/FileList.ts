@@ -77,6 +77,21 @@ export class FileList extends Component {
       nameEl.textContent = file.name || file.filename;
       info.appendChild(nameEl);
 
+      // AI badge
+      if (file.aiAnalyzed) {
+        const badge = document.createElement("span");
+        if (file.aiConfirmed) {
+          badge.className = "ai-badge ai-badge--confirmed";
+          badge.textContent = "KI";
+          badge.title = "KI-analysiert und best\u00E4tigt";
+        } else {
+          badge.className = "ai-badge ai-badge--pending";
+          badge.textContent = "KI";
+          badge.title = "KI-analysiert, nicht best\u00E4tigt";
+        }
+        nameEl.appendChild(badge);
+      }
+
       const meta = document.createElement("div");
       meta.className = "file-card-meta";
       const parts: string[] = [];

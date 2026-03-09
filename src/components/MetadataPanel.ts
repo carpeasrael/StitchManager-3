@@ -35,6 +35,9 @@ export class MetadataPanel extends Component {
     this.subscribe(
       appState.on("selectedFileId", () => this.onSelectionChanged())
     );
+    this.subscribe(
+      EventBus.on("file:refresh", () => this.onSelectionChanged())
+    );
     this.render();
   }
 
@@ -162,6 +165,33 @@ export class MetadataPanel extends Component {
       thumbSection.appendChild(placeholder);
     }
     wrapper.appendChild(thumbSection);
+
+    // AI analyze button (visible if file has a thumbnail)
+    if (file.thumbnailPath) {
+      const aiBar = document.createElement("div");
+      aiBar.className = "metadata-ai-bar";
+
+      const aiBtn = document.createElement("button");
+      aiBtn.className = "metadata-ai-btn";
+      aiBtn.textContent = "\u2728 KI analysieren";
+      aiBtn.addEventListener("click", () => {
+        EventBus.emit("toolbar:ai-analyze");
+      });
+
+      if (file.aiAnalyzed) {
+        const label = document.createElement("span");
+        label.className = file.aiConfirmed
+          ? "metadata-ai-status metadata-ai-confirmed"
+          : "metadata-ai-status metadata-ai-pending";
+        label.textContent = file.aiConfirmed
+          ? "KI-best\u00E4tigt"
+          : "KI-analysiert";
+        aiBar.appendChild(label);
+      }
+
+      aiBar.appendChild(aiBtn);
+      wrapper.appendChild(aiBar);
+    }
 
     // Editable form section
     const formSection = document.createElement("div");
@@ -291,7 +321,8 @@ export class MetadataPanel extends Component {
 
         const colorBox = document.createElement("div");
         colorBox.className = "metadata-swatch-color";
-        colorBox.style.backgroundColor = color.colorHex;
+        const validHex = /^#[0-9a-fA-F]{6}$/.test(color.colorHex);
+        colorBox.style.backgroundColor = validHex ? color.colorHex : "#cccccc";
         swatch.appendChild(colorBox);
 
         const colorInfo = document.createElement("div");

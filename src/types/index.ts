@@ -61,6 +61,8 @@ export interface AiAnalysisResult {
   fileId: number;
   provider: string;
   model: string;
+  promptHash: string | null;
+  rawResponse: string | null;
   parsedName: string | null;
   parsedTheme: string | null;
   parsedDesc: string | null;
@@ -85,6 +87,14 @@ export interface CustomFieldDef {
   required: boolean;
   sortOrder: number;
   createdAt: string;
+}
+
+export interface SelectedFields {
+  name?: boolean;
+  theme?: boolean;
+  description?: boolean;
+  tags?: boolean;
+  colors?: boolean;
 }
 
 export type ThemeMode = "hell" | "dunkel";

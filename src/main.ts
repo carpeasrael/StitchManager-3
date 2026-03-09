@@ -8,8 +8,12 @@ import { FileList } from "./components/FileList";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { Toolbar } from "./components/Toolbar";
 import { StatusBar } from "./components/StatusBar";
+import { AiPreviewDialog } from "./components/AiPreviewDialog";
+import { AiResultDialog } from "./components/AiResultDialog";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { listen } from "@tauri-apps/api/event";
 import Database from "@tauri-apps/plugin-sql";
+import * as FileService from "./services/FileService";
 import type { ThemeMode } from "./types/index";
 
 let dbInstance: Awaited<ReturnType<typeof Database.load>> | null = null;
@@ -67,7 +71,9 @@ async function initTauriBridge(): Promise<void> {
       EventBus.emit("scan:file-found", e.payload)
     ),
     listen("scan:complete", (e) => EventBus.emit("scan:complete", e.payload)),
+    listen("ai:start", (e) => EventBus.emit("ai:start", e.payload)),
     listen("ai:complete", (e) => EventBus.emit("ai:complete", e.payload)),
+    listen("ai:error", (e) => EventBus.emit("ai:error", e.payload)),
     listen("batch:progress", (e) =>
       EventBus.emit("batch:progress", e.payload)
     ),
@@ -92,6 +98,37 @@ function setupThemeToggle(): void {
     toggleTheme();
   });
   menuEl.appendChild(btn);
+}
+
+function initEventHandlers(): void {
+  EventBus.on("toolbar:ai-analyze", async () => {
+    const fileId = appState.get("selectedFileId");
+    if (fileId === null) return;
+
+    const files = appState.get("files");
+    const file = files.find((f) => f.id === fileId);
+    if (!file) return;
+
+    await AiPreviewDialog.open(fileId, file, async (result) => {
+      await AiResultDialog.open(result, fileId);
+      // Reload files to reflect AI badge changes
+      const folderId = appState.get("selectedFolderId");
+      const updatedFiles = await FileService.getFiles(folderId);
+      appState.set("files", updatedFiles);
+    });
+  });
+
+  EventBus.on("toolbar:settings", () => {
+    SettingsDialog.open();
+  });
+
+  EventBus.on("file:updated", async () => {
+    const folderId = appState.get("selectedFolderId");
+    const updatedFiles = await FileService.getFiles(folderId);
+    appState.set("files", updatedFiles);
+    // Signal MetadataPanel to refresh the currently selected file
+    EventBus.emit("file:refresh");
+  });
 }
 
 function initComponents(): void {
@@ -139,6 +176,7 @@ async function init(): Promise<void> {
   await initTheme();
   await initTauriBridge();
   setupThemeToggle();
+  initEventHandlers();
   initComponents();
 }
 
