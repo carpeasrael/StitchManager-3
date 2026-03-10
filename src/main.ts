@@ -16,7 +16,6 @@ import { ToastContainer } from "./components/Toast";
 import { Splitter } from "./components/Splitter";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
-import Database from "@tauri-apps/plugin-sql";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import * as FileService from "./services/FileService";
@@ -25,30 +24,15 @@ import * as AiService from "./services/AiService";
 import * as SettingsService from "./services/SettingsService";
 import type { ThemeMode } from "./types/index";
 
-let dbInstance: Awaited<ReturnType<typeof Database.load>> | null = null;
-
-async function getDb(): Promise<Awaited<ReturnType<typeof Database.load>>> {
-  if (!dbInstance) {
-    dbInstance = await Database.load("sqlite:stitch_manager.db");
-  }
-  return dbInstance;
-}
-
 async function initTheme(): Promise<void> {
   try {
-    const db = await getDb();
-    const result = await db.select<Array<{ value: string }>>(
-      "SELECT value FROM settings WHERE key = 'theme_mode'"
-    );
+    const settings = await SettingsService.getAllSettings();
     const theme: ThemeMode =
-      result.length > 0 && result[0].value === "dunkel" ? "dunkel" : "hell";
+      settings.theme_mode === "dunkel" ? "dunkel" : "hell";
     applyTheme(theme);
 
     // Apply persisted font size
-    const fontResult = await db.select<Array<{ value: string }>>(
-      "SELECT value FROM settings WHERE key = 'font_size'"
-    );
-    const fontSize = fontResult.length > 0 ? fontResult[0].value : "medium";
+    const fontSize = settings.font_size || "medium";
     applyFontSize(fontSize);
   } catch (e) {
     console.warn("Failed to load theme from DB, using default:", e);
@@ -79,11 +63,7 @@ async function toggleTheme(): Promise<void> {
   applyTheme(next);
 
   try {
-    const db = await getDb();
-    await db.execute(
-      "UPDATE settings SET value = $1, updated_at = datetime('now') WHERE key = 'theme_mode'",
-      [next]
-    );
+    await SettingsService.setSetting("theme_mode", next);
   } catch (e) {
     console.warn("Failed to persist theme to DB:", e);
   }

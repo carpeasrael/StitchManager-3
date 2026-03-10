@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -68,6 +69,43 @@ pub fn apply_pattern(pattern: &str, file: &EmbroideryFile) -> String {
     sanitize_pattern_output(&result)
 }
 
+/// Given a desired path, return a collision-free path by appending `_1`, `_2`, etc.
+/// Checks both the filesystem and a set of already-claimed paths from this batch.
+/// Counter is capped at 100_000 to prevent infinite loops.
+fn dedup_path(
+    path: &std::path::Path,
+    claimed: &mut HashSet<std::path::PathBuf>,
+) -> std::path::PathBuf {
+    let mut candidate = path.to_path_buf();
+    if !candidate.exists() && !claimed.contains(&candidate) {
+        claimed.insert(candidate.clone());
+        return candidate;
+    }
+
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let ext = path.extension().and_then(|s| s.to_str());
+    let parent = path.parent().unwrap_or(std::path::Path::new(""));
+
+    for counter in 1..=100_000u32 {
+        candidate = if let Some(e) = ext {
+            parent.join(format!("{stem}_{counter}.{e}"))
+        } else {
+            parent.join(format!("{stem}_{counter}"))
+        };
+        if !candidate.exists() && !claimed.contains(&candidate) {
+            claimed.insert(candidate.clone());
+            return candidate;
+        }
+    }
+
+    // Fallback: return with max counter suffix (extremely unlikely)
+    claimed.insert(candidate.clone());
+    candidate
+}
+
 #[tauri::command]
 pub async fn batch_rename(
     db: State<'_, DbState>,
@@ -81,11 +119,10 @@ pub async fn batch_rename(
     let mut errors: Vec<String> = Vec::new();
     let pattern_has_format = pattern.contains("{format}");
 
+    // Track claimed target paths within this batch to detect collisions
+    let mut claimed: HashSet<std::path::PathBuf> = HashSet::new();
+
     for (i, file_id) in file_ids.iter().enumerate() {
-        // Note: filesystem rename and DB update are not atomic. If the DB update
-        // fails after a successful rename, the file will have its new name on disk
-        // but the old name in the database. This is acceptable for batch operations
-        // where individual file errors are logged and skipped.
         let result = (|| -> Result<String, AppError> {
             let conn = lock_db(&db)?;
 
@@ -110,28 +147,48 @@ pub async fn batch_rename(
             let base = apply_pattern(&pattern, &file);
 
             // If the pattern already includes {format}, don't append the extension again
-            let new_filename = if pattern_has_format || ext.is_empty() {
+            let desired_filename = if pattern_has_format || ext.is_empty() {
                 base
             } else {
                 format!("{base}.{ext}")
             };
 
-            // Build new filepath
+            // Build desired filepath, then deduplicate against collisions
             let old_path = std::path::Path::new(&file.filepath);
+            let canonical_old = if old_path.exists() {
+                old_path.canonicalize()?
+            } else {
+                old_path.to_path_buf()
+            };
             let parent = old_path.parent().unwrap_or(std::path::Path::new(""));
-            let new_path = parent.join(&new_filename);
+            let desired_path = parent.join(&desired_filename);
+            let new_path = dedup_path(&desired_path, &mut claimed);
+            let new_filename = new_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&desired_filename)
+                .to_string();
 
-            // Rename physical file if it exists
-            if old_path.exists() {
+            // Rename physical file if it exists and target differs
+            let did_rename = if old_path.exists() && canonical_old != new_path {
                 std::fs::rename(old_path, &new_path)?;
-            }
+                true
+            } else {
+                false
+            };
 
-            // Update DB
-            conn.execute(
+            // Update DB — rollback filesystem on failure
+            if let Err(db_err) = conn.execute(
                 "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
                  updated_at = datetime('now') WHERE id = ?3",
                 rusqlite::params![new_filename, new_path.to_string_lossy().as_ref(), file_id],
-            )?;
+            ) {
+                if did_rename {
+                    let _ = std::fs::rename(&new_path, old_path);
+                }
+                claimed.remove(&new_path);
+                return Err(AppError::Database(db_err));
+            }
 
             Ok(new_filename)
         })();
@@ -208,8 +265,18 @@ pub async fn batch_organize(
     let mut failed: i64 = 0;
     let mut errors: Vec<String> = Vec::new();
 
+    // Track claimed target paths within this batch to detect collisions
+    let mut claimed: HashSet<std::path::PathBuf> = HashSet::new();
+
+    // Canonicalize base_dir early — if it doesn't exist, fail fast
+    let canonical_base = base_dir.canonicalize().map_err(|e| {
+        AppError::Validation(format!(
+            "Bibliotheksverzeichnis nicht gefunden: {}: {e}",
+            base_dir.display()
+        ))
+    })?;
+
     for (i, file_id) in file_ids.iter().enumerate() {
-        // Note: filesystem move and DB update are not atomic. See batch_rename comment.
         // Note: folder_id is intentionally not updated — organize is a filesystem-only
         // operation. The file retains its original folder association in the UI.
         let result = (|| -> Result<String, AppError> {
@@ -232,32 +299,54 @@ pub async fn batch_organize(
             let sub_path = apply_pattern(&pattern, &file);
             let target_dir = base_dir.join(&sub_path);
 
-            // Verify the resolved target is still under base_dir
-            let canonical_base = base_dir.canonicalize().unwrap_or_else(|_| base_dir.clone());
-            std::fs::create_dir_all(&target_dir)?;
-            let canonical_target = target_dir.canonicalize()?;
-            if !canonical_target.starts_with(&canonical_base) {
+            // Validate target is under base_dir before creating directories
+            // Normalize by collecting components to resolve any remaining ".." segments
+            let normalized: std::path::PathBuf = target_dir.components().collect();
+            if !normalized.starts_with(&canonical_base) {
                 return Err(AppError::Validation(
                     "Zielpfad liegt ausserhalb der Bibliothek".into(),
                 ));
             }
 
-            let old_path = std::path::Path::new(&file.filepath);
-            let new_path = target_dir.join(&file.filename);
+            std::fs::create_dir_all(&target_dir)?;
 
-            // Move physical file if it exists and isn't already there
-            if old_path.exists() && old_path != new_path {
+            let old_path = std::path::Path::new(&file.filepath);
+            let canonical_old = if old_path.exists() {
+                old_path.canonicalize()?
+            } else {
+                old_path.to_path_buf()
+            };
+            let desired_path = target_dir.join(&file.filename);
+            let new_path = dedup_path(&desired_path, &mut claimed);
+
+            // Move physical file if it exists and target differs
+            let did_rename = if old_path.exists() && canonical_old != new_path {
                 std::fs::rename(old_path, &new_path)?;
+                true
+            } else {
+                false
+            };
+
+            // Update DB — rollback filesystem on failure
+            let new_filename = new_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&file.filename)
+                .to_string();
+
+            if let Err(db_err) = conn.execute(
+                "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
+                 updated_at = datetime('now') WHERE id = ?3",
+                rusqlite::params![new_filename, new_path.to_string_lossy().as_ref(), file_id],
+            ) {
+                if did_rename {
+                    let _ = std::fs::rename(&new_path, old_path);
+                }
+                claimed.remove(&new_path);
+                return Err(AppError::Database(db_err));
             }
 
-            // Update DB
-            conn.execute(
-                "UPDATE embroidery_files SET filepath = ?1, \
-                 updated_at = datetime('now') WHERE id = ?2",
-                rusqlite::params![new_path.to_string_lossy().as_ref(), file_id],
-            )?;
-
-            Ok(file.filename.clone())
+            Ok(new_filename)
         })();
 
         match result {
@@ -315,6 +404,9 @@ pub async fn batch_export_usb(
     let mut failed: i64 = 0;
     let mut errors: Vec<String> = Vec::new();
 
+    // Track claimed target paths within this batch to detect collisions
+    let mut claimed: HashSet<std::path::PathBuf> = HashSet::new();
+
     for (i, file_id) in file_ids.iter().enumerate() {
         let result = (|| -> Result<String, AppError> {
             let conn = lock_db(&db)?;
@@ -341,30 +433,8 @@ pub async fn batch_export_usb(
             }
 
             // Handle filename collisions by appending numeric suffix
-            let mut dest = target_dir.join(&filename);
-            if dest.exists() {
-                let stem = std::path::Path::new(&filename)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(&filename);
-                let ext = std::path::Path::new(&filename)
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
-                let mut counter = 1;
-                loop {
-                    let candidate = if ext.is_empty() {
-                        format!("{stem}_{counter}")
-                    } else {
-                        format!("{stem}_{counter}.{ext}")
-                    };
-                    dest = target_dir.join(&candidate);
-                    if !dest.exists() {
-                        break;
-                    }
-                    counter += 1;
-                }
-            }
+            let desired = target_dir.join(&filename);
+            let dest = dedup_path(&desired, &mut claimed);
 
             std::fs::copy(source, &dest)?;
 
@@ -609,5 +679,60 @@ mod tests {
         assert_eq!(sanitize_path_component("../../passwd"), "__passwd");
         assert_eq!(sanitize_path_component("foo/bar"), "foo_bar");
         assert_eq!(sanitize_path_component("foo\\bar"), "foo_bar");
+    }
+
+    #[test]
+    fn test_dedup_path_no_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("unique_file.pes");
+        let mut claimed = HashSet::new();
+        let result = dedup_path(&path, &mut claimed);
+        assert_eq!(result, path);
+        assert!(claimed.contains(&result));
+    }
+
+    #[test]
+    fn test_dedup_path_batch_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test_dedup.pes");
+        let mut claimed = HashSet::new();
+
+        // First claim succeeds with original name
+        let first = dedup_path(&path, &mut claimed);
+        assert_eq!(first, path);
+
+        // Second claim gets _1 suffix
+        let second = dedup_path(&path, &mut claimed);
+        assert_eq!(second, tmp.path().join("test_dedup_1.pes"));
+
+        // Third claim gets _2 suffix
+        let third = dedup_path(&path, &mut claimed);
+        assert_eq!(third, tmp.path().join("test_dedup_2.pes"));
+    }
+
+    #[test]
+    fn test_dedup_path_no_extension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("noext");
+        let mut claimed = HashSet::new();
+
+        let first = dedup_path(&path, &mut claimed);
+        assert_eq!(first, path);
+
+        let second = dedup_path(&path, &mut claimed);
+        assert_eq!(second, tmp.path().join("noext_1"));
+    }
+
+    #[test]
+    fn test_dedup_path_existing_file_on_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("existing.pes");
+        // Create the file on disk
+        std::fs::write(&path, b"test").unwrap();
+
+        let mut claimed = HashSet::new();
+        let result = dedup_path(&path, &mut claimed);
+        // Should skip the existing file and get _1 suffix
+        assert_eq!(result, tmp.path().join("existing_1.pes"));
     }
 }
