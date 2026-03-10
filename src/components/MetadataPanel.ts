@@ -1,6 +1,7 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
+import { getFormatLabel, formatSize } from "../utils/format";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import * as FileService from "../services/FileService";
 import * as SettingsService from "../services/SettingsService";
@@ -37,6 +38,9 @@ export class MetadataPanel extends Component {
     );
     this.subscribe(
       EventBus.on("file:refresh", () => this.onSelectionChanged())
+    );
+    this.subscribe(
+      EventBus.on("metadata:save", () => this.save())
     );
     this.render();
   }
@@ -161,7 +165,7 @@ export class MetadataPanel extends Component {
     } else {
       const placeholder = document.createElement("div");
       placeholder.className = "metadata-thumbnail-placeholder";
-      placeholder.textContent = this.getFormatLabel(file.filename);
+      placeholder.textContent = getFormatLabel(file.filename);
       thumbSection.appendChild(placeholder);
     }
     wrapper.appendChild(thumbSection);
@@ -265,7 +269,7 @@ export class MetadataPanel extends Component {
     infoGrid.className = "metadata-info-grid";
 
     this.addInfoRow(infoGrid, "Dateiname", file.filename);
-    this.addInfoRow(infoGrid, "Format", this.getFormatLabel(file.filename));
+    this.addInfoRow(infoGrid, "Format", getFormatLabel(file.filename));
 
     if (formats.length > 0 && formats[0].formatVersion) {
       this.addInfoRow(infoGrid, "Version", formats[0].formatVersion);
@@ -295,7 +299,7 @@ export class MetadataPanel extends Component {
       this.addInfoRow(
         infoGrid,
         "Dateigröße",
-        this.formatSize(file.fileSizeBytes)
+        formatSize(file.fileSizeBytes)
       );
     }
 
@@ -686,14 +690,4 @@ export class MetadataPanel extends Component {
     grid.appendChild(row);
   }
 
-  private getFormatLabel(filename: string): string {
-    const ext = filename.split(".").pop();
-    return ext ? ext.toUpperCase() : "";
-  }
-
-  private formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
 }

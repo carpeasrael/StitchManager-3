@@ -106,6 +106,14 @@ export interface BatchResult {
   errors: string[];
 }
 
+export type ToastLevel = "success" | "error" | "info";
+
+export interface Toast {
+  id: string;
+  level: ToastLevel;
+  message: string;
+}
+
 export interface State {
   folders: Folder[];
   selectedFolderId: number | null;
@@ -116,4 +124,5 @@ export interface State {
   formatFilter: string | null;
   settings: Record<string, string>;
   theme: ThemeMode;
+  toasts: Toast[];
 }

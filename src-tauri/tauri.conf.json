@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicoverbruggen/tauri-v2-schema/main/tauri.conf.json",
-  "productName": "StitchManager",
-  "version": "0.1.0",
-  "identifier": "com.carpeasrael.stitchmanager",
+  "productName": "StichMan",
+  "version": "2.0.0",
+  "identifier": "de.carpeasrael.stichman",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

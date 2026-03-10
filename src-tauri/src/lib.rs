@@ -26,7 +26,53 @@ pub fn run() {
             let db_path = app_data_dir.join("stitch_manager.db");
             let conn = db::init_database(&db_path)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+            // Try to auto-start watcher if library_root is set
+            let library_root: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = 'library_root'",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+
             app.manage(DbState(Mutex::new(conn)));
+
+            // Initialize watcher holder
+            let watcher_holder =
+                services::file_watcher::WatcherHolder(Mutex::new(None));
+
+            if let Some(root) = library_root {
+                // Expand ~ to home directory
+                let expanded = if root.starts_with("~/") {
+                    if let Some(home) = dirs::home_dir() {
+                        home.join(&root[2..]).to_string_lossy().to_string()
+                    } else {
+                        root.clone()
+                    }
+                } else {
+                    root.clone()
+                };
+
+                if std::path::Path::new(&expanded).is_dir() {
+                    match services::file_watcher::start_watcher(
+                        &expanded,
+                        app.handle(),
+                    ) {
+                        Ok(state) => {
+                            if let Ok(mut guard) = watcher_holder.0.lock() {
+                                *guard = Some(state);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to start file watcher: {e}");
+                        }
+                    }
+                }
+            }
+
+            app.manage(watcher_holder);
+
             Ok(())
         });
 
@@ -70,6 +116,10 @@ pub fn run() {
             commands::ai::ai_reject_result,
             commands::ai::ai_test_connection,
             commands::ai::ai_analyze_batch,
+            commands::scanner::watcher_auto_import,
+            commands::scanner::watcher_remove_by_paths,
+            services::file_watcher::watcher_start,
+            services::file_watcher::watcher_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

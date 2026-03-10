@@ -138,5 +138,22 @@ Single-file-only workflows are a bottleneck for users managing hundreds or thous
 ### Integration Points
 
 1. **main.ts**: Add event handlers for `toolbar:batch-rename`, `toolbar:batch-organize`, `toolbar:batch-export`, `toolbar:batch-ai`. Each opens appropriate dialog (pattern input or folder picker) then BatchDialog.
-2. **Event bridge**: Add `batch:complete` to Tauri bridge alongside existing `batch:progress`.
+2. **Event bridge**: `batch:progress` bridged from Tauri to EventBus.
 3. **Toolbar**: Batch buttons emit toolbar events; batch button visibility tied to `selectedFileIds.length > 1`.
+
+---
+
+## Closure Summary
+
+**Commit:** `c98a13f` — Implement Sprint 9: Batch operations, multi-select, and USB export
+
+**Solution:** All 6 tickets (S9-T1 through S9-T6) implemented as planned:
+
+- **S9-T1:** `commands/batch.rs` with `batch_rename`, `batch_organize`, `batch_export_usb`, pattern substitution (`{name}`, `{theme}`, `{format}`), path traversal sanitization (`sanitize_path_component`, `sanitize_pattern_output`), canonicalize check in organize, USB filename collision dedup, 7 unit tests.
+- **S9-T2:** `BatchService.ts` with `rename()`, `organize()`, `exportUsb()`.
+- **S9-T3:** `BatchDialog.ts` with progress bar, log view, close button, auto-close after 2s.
+- **S9-T4:** `SettingsDialog.ts` Dateiverwaltung tab with rename/organize patterns, library_root, metadata_root, placeholder legend.
+- **S9-T5:** `ai_analyze_batch` command with shared `build_prompt_for_file()` helper, sequential processing, error resilience.
+- **S9-T6:** Multi-select in FileList (Cmd/Ctrl+click toggle, Shift+click range), `selectedFileIds` state, batch buttons in Toolbar.
+
+**Review:** 4 review agents passed with 0 findings (Round 2). Round 1 identified 10 issues (path traversal, duplicate struct, non-functional cancel, missing CSS, double extension, filename collisions, duplicated prompt logic, dead events, non-atomic ops, folder_id) — all resolved.

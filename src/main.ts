@@ -12,9 +12,13 @@ import { AiPreviewDialog } from "./components/AiPreviewDialog";
 import { AiResultDialog } from "./components/AiResultDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { BatchDialog } from "./components/BatchDialog";
+import { ToastContainer } from "./components/Toast";
+import { Splitter } from "./components/Splitter";
+import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import Database from "@tauri-apps/plugin-sql";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import * as FileService from "./services/FileService";
 import * as BatchService from "./services/BatchService";
 import * as AiService from "./services/AiService";
@@ -39,10 +43,29 @@ async function initTheme(): Promise<void> {
     const theme: ThemeMode =
       result.length > 0 && result[0].value === "dunkel" ? "dunkel" : "hell";
     applyTheme(theme);
+
+    // Apply persisted font size
+    const fontResult = await db.select<Array<{ value: string }>>(
+      "SELECT value FROM settings WHERE key = 'font_size'"
+    );
+    const fontSize = fontResult.length > 0 ? fontResult[0].value : "medium";
+    applyFontSize(fontSize);
   } catch (e) {
     console.warn("Failed to load theme from DB, using default:", e);
     applyTheme("hell");
   }
+}
+
+function applyFontSize(size: string): void {
+  const map: Record<string, string> = {
+    small: "12px",
+    medium: "13px",
+    large: "15px",
+  };
+  document.documentElement.style.setProperty(
+    "--font-size-body",
+    map[size] || map.medium
+  );
 }
 
 function applyTheme(theme: ThemeMode): void {
@@ -82,6 +105,12 @@ async function initTauriBridge(): Promise<void> {
     listen("batch:progress", (e) =>
       EventBus.emit("batch:progress", e.payload)
     ),
+    listen("fs:new-files", (e) =>
+      EventBus.emit("fs:new-files", e.payload)
+    ),
+    listen("fs:files-removed", (e) =>
+      EventBus.emit("fs:files-removed", e.payload)
+    ),
   ]);
 }
 
@@ -116,15 +145,16 @@ function initEventHandlers(): void {
 
     await AiPreviewDialog.open(fileId, file, async (result) => {
       await AiResultDialog.open(result, fileId);
-      // Reload files to reflect AI badge changes
-      const folderId = appState.get("selectedFolderId");
-      const updatedFiles = await FileService.getFiles(folderId);
-      appState.set("files", updatedFiles);
+      await reloadFiles();
     });
   });
 
   EventBus.on("toolbar:settings", () => {
     SettingsDialog.open();
+  });
+
+  EventBus.on("toolbar:save", () => {
+    EventBus.emit("metadata:save");
   });
 
   EventBus.on("toolbar:batch-rename", async () => {
@@ -140,10 +170,7 @@ function initEventHandlers(): void {
     } catch (e) {
       console.warn("Batch rename failed:", e);
     }
-    // Reload files after batch operation
-    const folderId = appState.get("selectedFolderId");
-    const updatedFiles = await FileService.getFiles(folderId);
-    appState.set("files", updatedFiles);
+    await reloadFiles();
   });
 
   EventBus.on("toolbar:batch-organize", async () => {
@@ -159,9 +186,7 @@ function initEventHandlers(): void {
     } catch (e) {
       console.warn("Batch organize failed:", e);
     }
-    const folderId = appState.get("selectedFolderId");
-    const updatedFiles = await FileService.getFiles(folderId);
-    appState.set("files", updatedFiles);
+    await reloadFiles();
   });
 
   EventBus.on("toolbar:batch-export", async () => {
@@ -196,19 +221,129 @@ function initEventHandlers(): void {
     } catch (e) {
       console.warn("Batch AI analysis failed:", e);
     }
-    // Reload files to reflect AI badge changes
-    const folderId = appState.get("selectedFolderId");
-    const updatedFiles = await FileService.getFiles(folderId);
-    appState.set("files", updatedFiles);
+    await reloadFiles();
   });
 
   EventBus.on("file:updated", async () => {
-    const folderId = appState.get("selectedFolderId");
-    const updatedFiles = await FileService.getFiles(folderId);
-    appState.set("files", updatedFiles);
-    // Signal MetadataPanel to refresh the currently selected file
+    await reloadFiles();
     EventBus.emit("file:refresh");
   });
+
+  // Filesystem watcher events
+  EventBus.on("fs:new-files", async (payload) => {
+    const data = payload as { paths: string[] };
+    try {
+      const imported = await invoke<number>("watcher_auto_import", { filePaths: data.paths });
+      if (imported > 0) {
+        ToastContainer.show("info", `${imported} neue Datei(en) importiert`);
+        await reloadFiles();
+      }
+    } catch (e) {
+      console.warn("Watcher auto-import failed:", e);
+    }
+  });
+
+  EventBus.on("fs:files-removed", async (payload) => {
+    const data = payload as { paths: string[] };
+    try {
+      const removed = await invoke<number>("watcher_remove_by_paths", { filePaths: data.paths });
+      if (removed > 0) {
+        ToastContainer.show("info", `${removed} Datei(en) entfernt`);
+        await reloadFiles();
+      }
+    } catch (e) {
+      console.warn("Watcher remove failed:", e);
+    }
+  });
+
+  // Keyboard shortcut handlers
+  EventBus.on("shortcut:save", () => {
+    EventBus.emit("metadata:save");
+  });
+
+  EventBus.on("shortcut:search", () => {
+    const input = document.querySelector<HTMLInputElement>(".search-bar-input");
+    if (input) input.focus();
+  });
+
+  EventBus.on("shortcut:settings", () => {
+    SettingsDialog.open();
+  });
+
+  EventBus.on("shortcut:delete", async () => {
+    const fileId = appState.get("selectedFileId");
+    if (fileId === null) return;
+
+    const files = appState.get("files");
+    const file = files.find((f) => f.id === fileId);
+    if (!file) return;
+
+    if (!confirm(`Datei "${file.name || file.filename}" wirklich loeschen?`)) return;
+
+    try {
+      await invoke("delete_file", { fileId });
+      ToastContainer.show("success", "Datei geloescht");
+      reloadFiles();
+    } catch (e) {
+      console.warn("Failed to delete file:", e);
+      ToastContainer.show("error", "Datei konnte nicht geloescht werden");
+    }
+  });
+
+  EventBus.on("shortcut:prev-file", () => {
+    navigateFile(-1);
+  });
+
+  EventBus.on("shortcut:next-file", () => {
+    navigateFile(1);
+  });
+
+  EventBus.on("shortcut:escape", () => {
+    // Close any open dialog via its own close method (to revert live previews)
+    if (SettingsDialog.isOpen()) {
+      SettingsDialog.dismiss();
+      return;
+    }
+    // For other dialogs, removing the overlay is safe
+    const overlay = document.querySelector(".dialog-overlay");
+    if (overlay) {
+      overlay.remove();
+      return;
+    }
+    // Clear selection
+    appState.set("selectedFileIds", []);
+    appState.set("selectedFileId", null);
+  });
+}
+
+async function reloadFiles(): Promise<void> {
+  const folderId = appState.get("selectedFolderId");
+  const search = appState.get("searchQuery");
+  const formatFilter = appState.get("formatFilter");
+  const updatedFiles = await FileService.getFiles(folderId, search, formatFilter);
+  appState.set("files", updatedFiles);
+}
+
+function navigateFile(direction: number): void {
+  const files = appState.get("files");
+  if (files.length === 0) return;
+
+  const currentId = appState.get("selectedFileId");
+  const currentIndex = currentId !== null
+    ? files.findIndex((f) => f.id === currentId)
+    : -1;
+
+  let newIndex: number;
+  if (currentIndex === -1) {
+    newIndex = direction > 0 ? 0 : files.length - 1;
+  } else {
+    newIndex = currentIndex + direction;
+    if (newIndex < 0) newIndex = 0;
+    if (newIndex >= files.length) newIndex = files.length - 1;
+  }
+
+  appState.set("selectedFileIds", []);
+  appState.set("selectedFileId", files[newIndex].id);
 }
 
 function initComponents(): void {
@@ -250,12 +385,27 @@ function initComponents(): void {
   if (statusEl) {
     new StatusBar(statusEl);
   }
+
+  // Initialize splitters
+  const splitterL = document.querySelector<HTMLElement>(".app-splitter-l");
+  if (splitterL) {
+    new Splitter(splitterL, "--sidebar-width", 180, 400, 240);
+  }
+
+  const splitterR = document.querySelector<HTMLElement>(".app-splitter-r");
+  if (splitterR) {
+    new Splitter(splitterR, "--center-width", 300, 800, 480);
+  }
+
+  // Initialize toast container
+  new ToastContainer();
 }
 
 async function init(): Promise<void> {
   await initTheme();
   await initTauriBridge();
   setupThemeToggle();
+  initShortcuts();
   initEventHandlers();
   initComponents();
 }

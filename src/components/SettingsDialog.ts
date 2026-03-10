@@ -1,17 +1,42 @@
+import { appState } from "../state/AppState";
+import { ToastContainer } from "./Toast";
 import * as SettingsService from "../services/SettingsService";
 import * as AiService from "../services/AiService";
+import { invoke } from "@tauri-apps/api/core";
+import type { ThemeMode, CustomFieldDef } from "../types/index";
 
 export class SettingsDialog {
+  private static instance: SettingsDialog | null = null;
   private overlay: HTMLElement | null = null;
+  private originalTheme: ThemeMode = "hell";
+  private originalFontSize: string = "medium";
+  private originalLibraryRoot: string = "";
 
   static async open(): Promise<void> {
+    if (SettingsDialog.isOpen()) return;
     const dialog = new SettingsDialog();
+    SettingsDialog.instance = dialog;
     await dialog.show();
   }
 
+  static isOpen(): boolean {
+    return SettingsDialog.instance?.overlay !== null && SettingsDialog.instance?.overlay !== undefined;
+  }
+
+  static dismiss(): void {
+    if (SettingsDialog.instance) {
+      SettingsDialog.instance.close();
+      SettingsDialog.instance = null;
+    }
+  }
+
   private async show(): Promise<void> {
-    // Load current settings
     const settings = await SettingsService.getAllSettings();
+    const customFields = await SettingsService.getCustomFields();
+
+    this.originalTheme = appState.get("theme");
+    this.originalFontSize = settings.font_size || "medium";
+    this.originalLibraryRoot = settings.library_root || "";
 
     this.overlay = document.createElement("div");
     this.overlay.className = "dialog-overlay";
@@ -42,34 +67,43 @@ export class SettingsDialog {
     const tabBar = document.createElement("div");
     tabBar.className = "dialog-tab-bar";
 
-    const aiTab = document.createElement("button");
-    aiTab.className = "dialog-tab active";
-    aiTab.textContent = "KI-Einstellungen";
-    aiTab.dataset.tab = "ki";
-    tabBar.appendChild(aiTab);
+    const tabDefs = [
+      { key: "general", label: "Allgemein" },
+      { key: "appearance", label: "Erscheinungsbild" },
+      { key: "ki", label: "KI-Einstellungen" },
+      { key: "files", label: "Dateiverwaltung" },
+      { key: "custom", label: "Benutzerdefiniert" },
+    ];
 
-    const fileTab = document.createElement("button");
-    fileTab.className = "dialog-tab";
-    fileTab.textContent = "Dateiverwaltung";
-    fileTab.dataset.tab = "files";
-    tabBar.appendChild(fileTab);
-
+    for (const def of tabDefs) {
+      const tab = document.createElement("button");
+      tab.className = "dialog-tab" + (def.key === "general" ? " active" : "");
+      tab.textContent = def.label;
+      tab.dataset.tab = def.key;
+      tabBar.appendChild(tab);
+    }
     body.appendChild(tabBar);
 
-    // KI settings form
-    const kiForm = document.createElement("div");
-    kiForm.className = "settings-form settings-tab-content";
-    kiForm.dataset.tabContent = "ki";
+    // Tab contents
+    const generalForm = this.createTabContent("general", true);
+    this.buildGeneralTab(generalForm, settings);
+    body.appendChild(generalForm);
+
+    const appearanceForm = this.createTabContent("appearance");
+    this.buildAppearanceTab(appearanceForm, settings);
+    body.appendChild(appearanceForm);
+
+    const kiForm = this.createTabContent("ki");
     this.buildKiTab(kiForm, settings);
     body.appendChild(kiForm);
 
-    // Dateiverwaltung form
-    const filesForm = document.createElement("div");
-    filesForm.className = "settings-form settings-tab-content";
-    filesForm.dataset.tabContent = "files";
-    filesForm.style.display = "none";
+    const filesForm = this.createTabContent("files");
     this.buildFilesTab(filesForm, settings);
     body.appendChild(filesForm);
+
+    const customForm = this.createTabContent("custom");
+    this.buildCustomTab(customForm, customFields);
+    body.appendChild(customForm);
 
     // Tab switching
     const tabs = tabBar.querySelectorAll<HTMLButtonElement>(".dialog-tab");
@@ -102,16 +136,138 @@ export class SettingsDialog {
     saveBtn.addEventListener("click", async () => {
       saveBtn.disabled = true;
       saveBtn.textContent = "Speichere...";
-      // Save both tabs
-      await this.saveSettings(kiForm);
-      await this.saveSettings(filesForm);
-      this.close();
+      let allOk = true;
+      allOk = (await this.saveSettings(generalForm)) && allOk;
+      allOk = (await this.saveSettings(appearanceForm)) && allOk;
+      allOk = (await this.saveSettings(kiForm)) && allOk;
+      allOk = (await this.saveSettings(filesForm)) && allOk;
+      // Custom fields are saved inline, not via the save button
+
+      if (allOk) {
+        // Restart watcher only if library_root actually changed
+        const libraryInput = generalForm.querySelector<HTMLInputElement>('[data-key="library_root"]');
+        if (libraryInput && libraryInput.value && libraryInput.value !== this.originalLibraryRoot) {
+          try {
+            await invoke("watcher_stop");
+            await invoke("watcher_start", { path: libraryInput.value });
+          } catch (e) {
+            console.warn("Failed to restart watcher:", e);
+          }
+        }
+        ToastContainer.show("success", "Einstellungen gespeichert");
+        this.close(true);
+      } else {
+        ToastContainer.show("error", "Einige Einstellungen konnten nicht gespeichert werden");
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Speichern";
+      }
     });
     footer.appendChild(saveBtn);
 
     dialog.appendChild(footer);
     this.overlay.appendChild(dialog);
     document.body.appendChild(this.overlay);
+  }
+
+  private createTabContent(key: string, visible = false): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "settings-form settings-tab-content";
+    el.dataset.tabContent = key;
+    if (!visible) el.style.display = "none";
+    return el;
+  }
+
+  private buildGeneralTab(
+    form: HTMLElement,
+    settings: Record<string, string>
+  ): void {
+    // Bibliotheks-Stammverzeichnis
+    const libraryGroup = this.createFormGroup("Bibliotheks-Stammverzeichnis");
+    const libraryInput = document.createElement("input");
+    libraryInput.type = "text";
+    libraryInput.className = "settings-input";
+    libraryInput.dataset.key = "library_root";
+    libraryInput.value = settings.library_root || "~/Stickdateien";
+    libraryInput.placeholder = "~/Stickdateien";
+    libraryGroup.appendChild(libraryInput);
+    form.appendChild(libraryGroup);
+
+    // Metadaten-Verzeichnis
+    const metaGroup = this.createFormGroup("Metadaten-Verzeichnis");
+    const metaInput = document.createElement("input");
+    metaInput.type = "text";
+    metaInput.className = "settings-input";
+    metaInput.dataset.key = "metadata_root";
+    metaInput.value = settings.metadata_root || "~/Stickdateien/.stichman";
+    metaInput.placeholder = "~/Stickdateien/.stichman";
+    metaGroup.appendChild(metaInput);
+    form.appendChild(metaGroup);
+  }
+
+  private buildAppearanceTab(
+    form: HTMLElement,
+    settings: Record<string, string>
+  ): void {
+    // Theme toggle
+    const themeGroup = this.createFormGroup("Theme");
+    const themeSelect = document.createElement("select");
+    themeSelect.className = "settings-input";
+    themeSelect.dataset.key = "theme_mode";
+    for (const opt of [
+      { value: "hell", label: "Hell" },
+      { value: "dunkel", label: "Dunkel" },
+    ]) {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      const current = settings.theme_mode || appState.get("theme");
+      if (current === opt.value) option.selected = true;
+      themeSelect.appendChild(option);
+    }
+    themeSelect.addEventListener("change", () => {
+      const theme = themeSelect.value as ThemeMode;
+      document.documentElement.setAttribute("data-theme", theme);
+      appState.set("theme", theme);
+    });
+    themeGroup.appendChild(themeSelect);
+    form.appendChild(themeGroup);
+
+    // Font size
+    const fontGroup = this.createFormGroup("Schriftgroesse");
+    const fontSelect = document.createElement("select");
+    fontSelect.className = "settings-input";
+    fontSelect.dataset.key = "font_size";
+    for (const opt of [
+      { value: "small", label: "Klein (12px)" },
+      { value: "medium", label: "Mittel (13px)" },
+      { value: "large", label: "Gross (15px)" },
+    ]) {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      if ((settings.font_size || "medium") === opt.value) option.selected = true;
+      fontSelect.appendChild(option);
+    }
+    fontSelect.addEventListener("change", () => {
+      this.applyFontSize(fontSelect.value);
+    });
+    fontGroup.appendChild(fontSelect);
+    form.appendChild(fontGroup);
+
+    // Apply current font size
+    this.applyFontSize(settings.font_size || "medium");
+  }
+
+  private applyFontSize(size: string): void {
+    const map: Record<string, string> = {
+      small: "12px",
+      medium: "13px",
+      large: "15px",
+    };
+    document.documentElement.style.setProperty(
+      "--font-size-body",
+      map[size] || "13px"
+    );
   }
 
   private buildKiTab(
@@ -289,28 +445,159 @@ export class SettingsDialog {
     organizeInput.placeholder = "{theme}/{name}";
     organizeGroup.appendChild(organizeInput);
     form.appendChild(organizeGroup);
+  }
 
-    // Bibliotheks-Stammverzeichnis
-    const libraryGroup = this.createFormGroup("Bibliotheks-Stammverzeichnis");
-    const libraryInput = document.createElement("input");
-    libraryInput.type = "text";
-    libraryInput.className = "settings-input";
-    libraryInput.dataset.key = "library_root";
-    libraryInput.value = settings.library_root || "~/Stickdateien";
-    libraryInput.placeholder = "~/Stickdateien";
-    libraryGroup.appendChild(libraryInput);
-    form.appendChild(libraryGroup);
+  private buildCustomTab(
+    form: HTMLElement,
+    customFields: CustomFieldDef[]
+  ): void {
+    // Existing fields list
+    const listContainer = document.createElement("div");
+    listContainer.className = "custom-fields-list";
+    this.renderCustomFieldsList(listContainer, customFields);
+    form.appendChild(listContainer);
 
-    // Metadaten-Verzeichnis
-    const metaGroup = this.createFormGroup("Metadaten-Verzeichnis");
-    const metaInput = document.createElement("input");
-    metaInput.type = "text";
-    metaInput.className = "settings-input";
-    metaInput.dataset.key = "metadata_root";
-    metaInput.value = settings.metadata_root || "~/Stickdateien/.stichman";
-    metaInput.placeholder = "~/Stickdateien/.stichman";
-    metaGroup.appendChild(metaInput);
-    form.appendChild(metaGroup);
+    // Create new field form
+    const createSection = document.createElement("div");
+    createSection.className = "custom-fields-create";
+
+    const sectionHeader = document.createElement("div");
+    sectionHeader.className = "settings-legend";
+    sectionHeader.innerHTML = "<strong>Neues Feld erstellen</strong>";
+    createSection.appendChild(sectionHeader);
+
+    const nameGroup = this.createFormGroup("Feldname");
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "settings-input";
+    nameInput.placeholder = "z.B. Schwierigkeitsgrad";
+    nameGroup.appendChild(nameInput);
+    createSection.appendChild(nameGroup);
+
+    const typeGroup = this.createFormGroup("Typ");
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "settings-input";
+    for (const opt of [
+      { value: "text", label: "Text" },
+      { value: "number", label: "Zahl" },
+      { value: "date", label: "Datum" },
+      { value: "select", label: "Auswahl" },
+    ]) {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.label;
+      typeSelect.appendChild(option);
+    }
+    typeGroup.appendChild(typeSelect);
+    createSection.appendChild(typeGroup);
+
+    const optionsGroup = this.createFormGroup("Optionen (kommagetrennt)");
+    optionsGroup.className = "settings-form-group custom-field-options-group";
+    optionsGroup.style.display = "none";
+    const optionsInput = document.createElement("input");
+    optionsInput.type = "text";
+    optionsInput.className = "settings-input";
+    optionsInput.placeholder = "Leicht, Mittel, Schwer";
+    optionsGroup.appendChild(optionsInput);
+    createSection.appendChild(optionsGroup);
+
+    typeSelect.addEventListener("change", () => {
+      optionsGroup.style.display =
+        typeSelect.value === "select" ? "" : "none";
+    });
+
+    const createBtn = document.createElement("button");
+    createBtn.className = "dialog-btn dialog-btn-primary";
+    createBtn.textContent = "Feld erstellen";
+    createBtn.style.marginTop = "8px";
+    createBtn.addEventListener("click", async () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        ToastContainer.show("error", "Feldname darf nicht leer sein");
+        return;
+      }
+      createBtn.disabled = true;
+      try {
+        const options =
+          typeSelect.value === "select" ? optionsInput.value.trim() || null : null;
+        const field = await SettingsService.createCustomField(
+          name,
+          typeSelect.value,
+          options ?? undefined
+        );
+        customFields.push(field);
+        this.renderCustomFieldsList(listContainer, customFields);
+        nameInput.value = "";
+        optionsInput.value = "";
+        ToastContainer.show("success", `Feld "${name}" erstellt`);
+      } catch (e) {
+        console.warn("Failed to create custom field:", e);
+        ToastContainer.show("error", "Feld konnte nicht erstellt werden");
+      }
+      createBtn.disabled = false;
+    });
+    createSection.appendChild(createBtn);
+    form.appendChild(createSection);
+  }
+
+  private renderCustomFieldsList(
+    container: HTMLElement,
+    fields: CustomFieldDef[]
+  ): void {
+    container.innerHTML = "";
+
+    if (fields.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "custom-fields-empty";
+      empty.textContent = "Keine benutzerdefinierten Felder vorhanden";
+      container.appendChild(empty);
+      return;
+    }
+
+    for (const field of fields) {
+      const row = document.createElement("div");
+      row.className = "custom-field-row";
+
+      const info = document.createElement("div");
+      info.className = "custom-field-info";
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "custom-field-name";
+      nameEl.textContent = field.name;
+      info.appendChild(nameEl);
+
+      const typeEl = document.createElement("span");
+      typeEl.className = "custom-field-type";
+      typeEl.textContent = field.fieldType;
+      if (field.options) {
+        typeEl.textContent += ` (${field.options})`;
+      }
+      info.appendChild(typeEl);
+
+      row.appendChild(info);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "dialog-btn dialog-btn-danger";
+      deleteBtn.textContent = "Loeschen";
+      deleteBtn.style.padding = "2px 8px";
+      deleteBtn.style.fontSize = "var(--font-size-caption)";
+      deleteBtn.addEventListener("click", async () => {
+        if (!confirm(`Feld "${field.name}" wirklich loeschen?`)) return;
+        try {
+          await SettingsService.deleteCustomField(field.id);
+          const idx = fields.indexOf(field);
+          if (idx >= 0) fields.splice(idx, 1);
+          this.renderCustomFieldsList(container, fields);
+          ToastContainer.show("success", `Feld "${field.name}" geloescht`);
+        } catch (e) {
+          console.warn("Failed to delete custom field:", e);
+          ToastContainer.show("error", "Feld konnte nicht geloescht werden");
+        }
+      });
+      row.appendChild(deleteBtn);
+
+      container.appendChild(row);
+    }
   }
 
   private createFormGroup(label: string): HTMLElement {
@@ -354,10 +641,17 @@ export class SettingsDialog {
     return allOk;
   }
 
-  private close(): void {
+  private close(saved = false): void {
+    if (!saved) {
+      // Revert live-preview changes
+      document.documentElement.setAttribute("data-theme", this.originalTheme);
+      appState.set("theme", this.originalTheme);
+      this.applyFontSize(this.originalFontSize);
+    }
     if (this.overlay) {
       this.overlay.remove();
       this.overlay = null;
     }
+    SettingsDialog.instance = null;
   }
 }

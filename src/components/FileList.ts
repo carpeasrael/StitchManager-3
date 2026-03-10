@@ -1,10 +1,20 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { getFormatLabel, formatSize } from "../utils/format";
 import * as FileService from "../services/FileService";
+
+const CARD_HEIGHT = 72;
+const BUFFER = 5;
 
 export class FileList extends Component {
   private generation = 0;
   private lastClickedIndex: number | null = null;
+  private listEl: HTMLElement | null = null;
+  private spacer: HTMLElement | null = null;
+  private scrollContainer: HTMLElement | null = null;
+  private visibleStart = 0;
+  private visibleEnd = 0;
+  private scrollRafPending = false;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -21,10 +31,10 @@ export class FileList extends Component {
       appState.on("files", () => this.render())
     );
     this.subscribe(
-      appState.on("selectedFileId", () => this.render())
+      appState.on("selectedFileId", () => this.updateSelection())
     );
     this.subscribe(
-      appState.on("selectedFileIds", () => this.render())
+      appState.on("selectedFileIds", () => this.updateSelection())
     );
     this.loadFiles();
   }
@@ -46,8 +56,6 @@ export class FileList extends Component {
 
   render(): void {
     const files = appState.get("files");
-    const selectedId = appState.get("selectedFileId");
-    const selectedIds = appState.get("selectedFileIds");
 
     this.el.innerHTML = "";
 
@@ -56,16 +64,82 @@ export class FileList extends Component {
       empty.className = "file-list-empty";
       empty.textContent = "Keine Dateien gefunden";
       this.el.appendChild(empty);
+      this.listEl = null;
+      this.spacer = null;
+      this.scrollContainer = null;
       return;
     }
 
-    const list = document.createElement("div");
-    list.className = "file-list";
+    // Scroll container for virtual scrolling
+    this.scrollContainer = document.createElement("div");
+    this.scrollContainer.className = "file-list";
+    this.scrollContainer.addEventListener("scroll", () => this.onScroll());
 
-    for (let i = 0; i < files.length; i++) {
+    // Spacer sets total height for scrollbar accuracy
+    this.spacer = document.createElement("div");
+    this.spacer.style.height = `${files.length * CARD_HEIGHT}px`;
+    this.spacer.style.position = "relative";
+
+    this.listEl = this.spacer;
+    this.scrollContainer.appendChild(this.spacer);
+    this.el.appendChild(this.scrollContainer);
+
+    this.calculateVisibleRange();
+    this.renderVisible();
+  }
+
+  private onScroll(): void {
+    if (this.scrollRafPending) return;
+    this.scrollRafPending = true;
+    requestAnimationFrame(() => {
+      this.scrollRafPending = false;
+      const oldStart = this.visibleStart;
+      const oldEnd = this.visibleEnd;
+      this.calculateVisibleRange();
+
+      if (this.visibleStart !== oldStart || this.visibleEnd !== oldEnd) {
+        this.renderVisible();
+      }
+    });
+  }
+
+  private calculateVisibleRange(): void {
+    if (!this.scrollContainer) return;
+    const files = appState.get("files");
+    const scrollTop = this.scrollContainer.scrollTop;
+    const containerHeight = this.scrollContainer.clientHeight;
+
+    const start = Math.floor(scrollTop / CARD_HEIGHT);
+    const visibleCount = Math.ceil(containerHeight / CARD_HEIGHT);
+
+    this.visibleStart = Math.max(0, start - BUFFER);
+    this.visibleEnd = Math.min(files.length, start + visibleCount + BUFFER);
+  }
+
+  private renderVisible(): void {
+    if (!this.listEl) return;
+    const files = appState.get("files");
+    const selectedId = appState.get("selectedFileId");
+    const selectedIds = appState.get("selectedFileIds");
+
+    // Clear existing cards
+    this.listEl.innerHTML = "";
+
+    // Update spacer height in case file count changed
+    this.listEl.style.height = `${files.length * CARD_HEIGHT}px`;
+
+    for (let i = this.visibleStart; i < this.visibleEnd; i++) {
       const file = files[i];
+      if (!file) continue;
+
       const card = document.createElement("div");
       card.className = "file-card";
+      card.style.position = "absolute";
+      card.style.top = `${i * CARD_HEIGHT}px`;
+      card.style.left = "0";
+      card.style.right = "0";
+      card.style.height = `${CARD_HEIGHT}px`;
+      card.style.boxSizing = "border-box";
 
       const isMultiSelected = selectedIds.includes(file.id);
       const isSingleSelected = file.id === selectedId && selectedIds.length === 0;
@@ -75,7 +149,7 @@ export class FileList extends Component {
 
       const thumb = document.createElement("div");
       thumb.className = "file-card-thumb";
-      thumb.textContent = this.getFormatLabel(file.filename);
+      thumb.textContent = getFormatLabel(file.filename);
       card.appendChild(thumb);
 
       const info = document.createElement("div");
@@ -105,9 +179,9 @@ export class FileList extends Component {
       meta.className = "file-card-meta";
       const parts: string[] = [];
       if (file.fileSizeBytes) {
-        parts.push(this.formatSize(file.fileSizeBytes));
+        parts.push(formatSize(file.fileSizeBytes));
       }
-      const ext = this.getFormatLabel(file.filename);
+      const ext = getFormatLabel(file.filename);
       if (ext) {
         parts.push(ext);
       }
@@ -121,10 +195,27 @@ export class FileList extends Component {
         this.handleClick(file.id, index, e);
       });
 
-      list.appendChild(card);
+      this.listEl.appendChild(card);
     }
+  }
 
-    this.el.appendChild(list);
+  private updateSelection(): void {
+    if (!this.listEl) return;
+    const files = appState.get("files");
+    const selectedId = appState.get("selectedFileId");
+    const selectedIds = appState.get("selectedFileIds");
+
+    for (const child of Array.from(this.listEl.children)) {
+      const card = child as HTMLElement;
+      const topPx = parseInt(card.style.top, 10);
+      const index = Math.round(topPx / CARD_HEIGHT);
+      const file = files[index];
+      if (!file) continue;
+
+      const isMultiSelected = selectedIds.includes(file.id);
+      const isSingleSelected = file.id === selectedId && selectedIds.length === 0;
+      card.classList.toggle("selected", isMultiSelected || isSingleSelected);
+    }
   }
 
   private handleClick(fileId: number, index: number, e: MouseEvent): void {
@@ -163,14 +254,4 @@ export class FileList extends Component {
     }
   }
 
-  private getFormatLabel(filename: string): string {
-    const ext = filename.split(".").pop();
-    return ext ? ext.toUpperCase() : "";
-  }
-
-  private formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
 }

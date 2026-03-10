@@ -12,6 +12,7 @@ const initialState: State = {
   formatFilter: null,
   settings: {},
   theme: "hell",
+  toasts: [],
 };
 
 class AppStateClass {

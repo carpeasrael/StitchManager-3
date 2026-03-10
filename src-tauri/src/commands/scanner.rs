@@ -180,6 +180,93 @@ pub fn parse_embroidery_file(filepath: String) -> Result<ParsedFileInfo, AppErro
     parser.parse(&data)
 }
 
+/// Auto-import files detected by the filesystem watcher.
+/// Matches each file to the best-fitting folder (longest path prefix match).
+/// Files that don't match any folder or are already imported are silently skipped.
+#[tauri::command]
+pub fn watcher_auto_import(
+    db: State<'_, DbState>,
+    file_paths: Vec<String>,
+) -> Result<u32, AppError> {
+    let conn = lock_db(&db)?;
+
+    // Load all folders to match file paths against
+    let mut stmt = conn.prepare("SELECT id, path FROM folders WHERE path IS NOT NULL")?;
+    let folders: Vec<(i64, String)> = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut imported_count: u32 = 0;
+    let tx = conn.unchecked_transaction()?;
+
+    for filepath in &file_paths {
+        let path = std::path::Path::new(filepath);
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let file_size: Option<i64> = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| i64::try_from(m.len()).ok());
+
+        // Find best matching folder (path-component-aware ancestry check)
+        let best_folder = folders
+            .iter()
+            .filter(|(_, folder_path)| {
+                let fp = std::path::Path::new(filepath);
+                let dp = std::path::Path::new(folder_path);
+                fp.starts_with(dp)
+            })
+            .max_by_key(|(_, folder_path)| folder_path.len());
+
+        let folder_id = match best_folder {
+            Some((id, _)) => *id,
+            None => continue, // No matching folder, skip
+        };
+
+        let result = tx.execute(
+            "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![folder_id, filename, filepath, file_size],
+        );
+
+        if let Ok(changes) = result {
+            if changes > 0 {
+                imported_count += 1;
+            }
+        }
+    }
+
+    tx.commit()?;
+    Ok(imported_count)
+}
+
+/// Remove DB entries for files that have been deleted from disk.
+#[tauri::command]
+pub fn watcher_remove_by_paths(
+    db: State<'_, DbState>,
+    file_paths: Vec<String>,
+) -> Result<u32, AppError> {
+    let conn = lock_db(&db)?;
+    let mut removed_count: u32 = 0;
+
+    let tx = conn.unchecked_transaction()?;
+    for filepath in &file_paths {
+        let changes = tx.execute(
+            "DELETE FROM embroidery_files WHERE filepath = ?1",
+            [filepath],
+        )?;
+        removed_count += changes as u32;
+    }
+    tx.commit()?;
+
+    Ok(removed_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

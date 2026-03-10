@@ -1,0 +1,3 @@
+- [P2] Persisted `font_size` is never applied during app startup. `SettingsDialog` saves `font_size`, but `init()` in `src/main.ts` only initializes theme and bridge state; it never reads/applies `font_size` unless the user opens settings. Users who select large/small font and restart will silently fall back to default text size until they open the dialog.
+
+- [P2] Saving a new `library_root` does not restart the filesystem watcher. The watcher is auto-started only once in Rust setup (`src-tauri/src/lib.rs`) and frontend save flow in `src/components/SettingsDialog.ts` persists settings without invoking `watcher_start`/`watcher_stop`. After changing library path, live file add/remove events continue for the old directory until app restart.

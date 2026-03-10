@@ -1,12 +1,12 @@
 .app-layout {
   display: grid;
   grid-template-rows: 28px 48px 1fr 22px;
-  grid-template-columns: var(--sidebar-width, 240px) var(--center-width, 480px) 1fr;
+  grid-template-columns: var(--sidebar-width, 240px) 4px var(--center-width, 480px) 4px 1fr;
   grid-template-areas:
-    "menu    menu    menu"
-    "toolbar toolbar toolbar"
-    "sidebar center  right"
-    "status  status  status";
+    "menu    menu       menu    menu      menu"
+    "toolbar toolbar    toolbar toolbar   toolbar"
+    "sidebar splitter-l center  splitter-r right"
+    "status  status     status  status    status";
   height: 100vh;
   overflow: hidden;
   background: var(--color-bg);
@@ -57,6 +57,14 @@
   overflow-y: auto;
   background: var(--color-surface);
   padding: var(--spacing-4);
+}
+
+.app-splitter-l {
+  grid-area: splitter-l;
+}
+
+.app-splitter-r {
+  grid-area: splitter-r;
 }
 
 .app-status {
