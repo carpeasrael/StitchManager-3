@@ -8,7 +8,7 @@ StitchManager helps embroidery enthusiasts and professionals organize, browse, a
 
 ### Format Parsing
 - Native binary parsing for **PES**, **DST**, **JEF**, and **VP3** embroidery formats
-- Extracts stitch count, dimensions, thread colors, and color palettes (Brother/Peltier, Janome)
+- Extracts stitch count, dimensions, thread colors, and color palettes (Brother, Janome)
 - Embedded thumbnail extraction (PES) with synthetic stitch-render fallback
 
 ### File Management
@@ -58,8 +58,8 @@ StitchManager helps embroidery enthusiasts and professionals organize, browse, a
 
 ```bash
 # Clone the repository
-git clone https://github.com/carpeasrael/StitchManager-2.git
-cd StitchManager-2
+git clone https://github.com/carpeasrael/StitchManager-3.git
+cd StitchManager-3
 
 # Install frontend dependencies
 npm install
@@ -71,25 +71,51 @@ npm run tauri dev
 npm run tauri build
 ```
 
+### Other Useful Commands
+
+```bash
+# Start Vite dev server only (frontend)
+npm run dev
+
+# TypeScript check + Vite production build (frontend only)
+npm run build
+
+# Check Rust backend compiles
+cd src-tauri && cargo check
+
+# Run Rust tests
+cd src-tauri && cargo test
+```
+
 ## Project Structure
 
 ```
 src/                        # Frontend (TypeScript)
   components/               # UI components (Sidebar, FileList, MetadataPanel, ...)
-  dialogs/                  # Modal dialogs (Settings, AI Preview/Result, Batch)
   services/                 # Tauri invoke wrappers (FileService, AiService, ...)
   state/                    # AppState (pub/sub) + EventBus
   styles/                   # Aurora theme tokens, layout, component styles
-  utils/                    # Keyboard shortcuts, splitter, virtual scroll
+  types/                    # TypeScript type definitions
+  utils/                    # Formatting helpers
+  shortcuts.ts              # Keyboard shortcut definitions
   main.ts                   # App entry point
+  styles.css                # Main stylesheet
 
 src-tauri/                  # Backend (Rust)
   src/
-    commands/               # Tauri command handlers (files, folders, ai, batch, ...)
-    db/                     # SQLite database, migrations, models
+    commands/               # Tauri command handlers (files, folders, ai, batch, settings, scanner)
+    db/                     # SQLite database, migrations, models, queries
     parsers/                # Embroidery format parsers (PES, DST, JEF, VP3)
     services/               # Thumbnail generation, AI client, file watcher
+    error.rs                # Error types
     lib.rs                  # Tauri app setup and plugin registration
+    main.rs                 # Binary entry point
+  capabilities/             # Tauri permission grants
+  tauri.conf.json           # Tauri window, build, and bundle config
+
+docs/
+  analysis/                 # Sprint analysis documents
+  reviews/                  # Code review logs
 ```
 
 ## Supported Formats
@@ -103,4 +129,4 @@ src-tauri/                  # Backend (Rust)
 
 ## License
 
-ISC
+GPL-3.0 — see [LICENSE](LICENSE) for details.
