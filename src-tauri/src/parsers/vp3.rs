@@ -301,7 +301,7 @@ fn try_parse_color_section(
         let g = data[p + skip + 1];
         let b = data[p + skip + 2];
 
-        // Simple heuristic: look for a position followed by length-prefixed strings
+        // Look for a position followed by length-prefixed strings
         let after_rgb = p + skip + 3;
         if after_rgb + 2 <= block_end {
             let name_len = read_u16_be(data, after_rgb).unwrap_or(0) as usize;
@@ -310,6 +310,11 @@ fn try_parse_color_section(
                     &data[after_rgb + 2..after_rgb + 2 + name_len],
                 )
                 .to_string();
+
+                // Validate: name must contain at least one letter
+                if !name.is_empty() && !name.chars().any(|c| c.is_ascii_alphabetic()) {
+                    continue;
+                }
 
                 let brand_pos = after_rgb + 2 + name_len;
                 let brand = if brand_pos + 2 <= block_end {
@@ -414,45 +419,74 @@ fn compute_vp3_stitch_bounds(
 }
 
 /// Fallback: scan the VP3 data for recognizable structure patterns.
+/// Requires both thread name AND brand name strings to reduce false positives.
 fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
-    // Scan for "%vsm%" or block-length patterns
-    // This is a best-effort fallback for files with non-standard headers
     let mut colors = Vec::new();
     let mut pos = 0;
-
-    // Try to find RGB triplets followed by string patterns (limit scan to 10MB)
     let scan_limit = data.len().min(10_000_000);
+
     while pos + 10 < scan_limit {
-        // Look for a pattern: 3 bytes (RGB) followed by u16 BE string length < 100
-        if pos + 5 < data.len() {
-            let potential_len = ((data[pos + 3] as u16) << 8) | data[pos + 4] as u16;
-            if potential_len > 0
-                && potential_len < 100
-                && pos + 5 + potential_len as usize <= data.len()
-            {
-                let s = String::from_utf8_lossy(
-                    &data[pos + 5..pos + 5 + potential_len as usize],
-                );
-                // Check if the string looks like a color name (ASCII printable)
-                if s.chars().all(|c| c.is_ascii_graphic() || c == ' ') && s.len() > 2 {
-                    let r = data[pos];
-                    let g = data[pos + 1];
-                    let b = data[pos + 2];
-                    colors.push(ParsedColor {
-                        hex: format!("#{r:02X}{g:02X}{b:02X}"),
-                        name: Some(s.to_string()),
-                        brand: Some("Viking/Pfaff".to_string()),
-                        brand_code: None,
-                    });
-                    pos += 5 + potential_len as usize;
-                    continue;
-                }
-            }
+        if pos + 5 >= data.len() {
+            break;
         }
-        pos += 1;
+        let name_len = ((data[pos + 3] as u16) << 8) | data[pos + 4] as u16;
+        if name_len < 3 || name_len >= 100 || pos + 5 + name_len as usize > data.len() {
+            pos += 1;
+            continue;
+        }
+
+        let name_bytes = &data[pos + 5..pos + 5 + name_len as usize];
+        let name = String::from_utf8_lossy(name_bytes);
+
+        // Name must contain at least one letter and be all printable ASCII
+        let name_valid = name.chars().any(|c| c.is_ascii_alphabetic())
+            && name.chars().all(|c| c.is_ascii_graphic() || c == ' ');
+        if !name_valid {
+            pos += 1;
+            continue;
+        }
+
+        let r = data[pos];
+        let g = data[pos + 1];
+        let b = data[pos + 2];
+
+        // Reject all-identical RGB (likely garbage), except black (0,0,0) and white (255,255,255)
+        if r == g && g == b && r != 0 && r != 255 {
+            pos += 1;
+            continue;
+        }
+
+        // Require a valid brand name string immediately after the thread name
+        let brand_start = pos + 5 + name_len as usize;
+        if brand_start + 2 > data.len() {
+            pos += 1;
+            continue;
+        }
+        let brand_len = ((data[brand_start] as u16) << 8) | data[brand_start + 1] as u16;
+        if brand_len == 0 || brand_len >= 100 || brand_start + 2 + brand_len as usize > data.len() {
+            pos += 1;
+            continue;
+        }
+        let brand_bytes = &data[brand_start + 2..brand_start + 2 + brand_len as usize];
+        let brand = String::from_utf8_lossy(brand_bytes);
+        let brand_valid = brand.chars().any(|c| c.is_ascii_alphabetic())
+            && brand.chars().all(|c| c.is_ascii_graphic() || c == ' ');
+        if !brand_valid {
+            pos += 1;
+            continue;
+        }
+
+        colors.push(ParsedColor {
+            hex: format!("#{r:02X}{g:02X}{b:02X}"),
+            name: Some(name.to_string()),
+            brand: Some(brand.to_string()),
+            brand_code: None,
+        });
+        pos = brand_start + 2 + brand_len as usize;
     }
 
-    if colors.is_empty() {
+    // Reject if no colors found or suspiciously many (>50 = likely false positives)
+    if colors.is_empty() || colors.len() > 50 {
         return None;
     }
 
@@ -588,6 +622,43 @@ mod tests {
         let parser = Vp3Parser;
         let info = parser.parse(&data).unwrap();
         assert_eq!(info.format, "VP3");
+    }
+
+    #[test]
+    fn test_scan_vp3_rejects_garbage_rgb() {
+        // Build data where RGB is all-identical (e.g., 128,128,128) followed
+        // by something that looks like a string — should be rejected.
+        let mut data = vec![0u8; 50];
+        data[0..5].copy_from_slice(VP3_MAGIC);
+        // RGB = (128, 128, 128) — rejected as likely garbage
+        data[10] = 128;
+        data[11] = 128;
+        data[12] = 128;
+        // u16 BE len = 4
+        data[13] = 0;
+        data[14] = 4;
+        data[15..19].copy_from_slice(b"Test");
+
+        let result = scan_vp3_structure(&data);
+        assert!(result.is_none(), "All-identical RGB should be rejected");
+    }
+
+    #[test]
+    fn test_scan_vp3_requires_brand_name() {
+        // Build data with valid thread name but no brand name — should be rejected.
+        let mut data = vec![0u8; 50];
+        // RGB
+        data[0] = 255;
+        data[1] = 0;
+        data[2] = 0;
+        // Thread name: u16 BE len = 3, "Red"
+        data[3] = 0;
+        data[4] = 3;
+        data[5..8].copy_from_slice(b"Red");
+        // No valid brand string follows (zeros)
+
+        let result = scan_vp3_structure(&data);
+        assert!(result.is_none(), "Missing brand name should cause rejection");
     }
 
     #[test]

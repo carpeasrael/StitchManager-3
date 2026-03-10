@@ -107,29 +107,34 @@ impl EmbroideryParser for JefParser {
         // Byte 8: date (packed BCD or integer)
         // Byte 12: time (packed BCD or integer)
 
-        // Byte 16: color count (u32 LE) — may actually be at offset 28 in some variants
-        // JEF uses a 116-byte header in common implementations:
-        //   offset 24: color count
-        //   offset 28: stitch count
-        //   offset 32: hoop code
-        //   offset 36..52: extents (+X, -X, +Y, -Y as i32 LE)
-        // Alternate simpler layout:
-        //   offset 16: color count
-        //   offset 20: stitch count (not always reliable)
-        //   offset 24: hoop
-        //   offset 28..44: extents
+        // JEF has two header variants:
+        //   116-byte header: color_count at offset 24, stitch_count at 28, extents at 36
+        //   Compact header:  color_count at offset 16, stitch_count at 20, extents at 28
+        //
+        // Determine variant by validating: header_size + color_count * 4 == stitch_offset
+        let cc_at_24 = read_u32_le(data, 24).unwrap_or(0);
+        let cc_at_16 = read_u32_le(data, 16).unwrap_or(0);
 
-        // Try the 116-byte header variant first (most common)
-        let (color_count_raw, header_stitch_count, extent_base) = if data.len() >= 116 {
-            // 116-byte header: offsets per Wilcom/community docs
-            let cc = read_u32_le(data, 24)?;
+        let matches_116 = data.len() >= 116
+            && cc_at_24 > 0
+            && cc_at_24 <= 256
+            && stitch_offset == 116 + cc_at_24 as usize * 4;
+        let matches_compact = cc_at_16 > 0
+            && cc_at_16 <= 256
+            && stitch_offset == JEF_MIN_HEADER + cc_at_16 as usize * 4;
+
+        let (color_count_raw, header_stitch_count, extent_base, color_table_start) = if matches_116 {
             let sc = read_u32_le(data, 28)?;
-            (cc, sc, 36usize)
-        } else {
-            // Compact header
-            let cc = read_u32_le(data, 16)?;
+            (cc_at_24, sc, 36usize, 116usize)
+        } else if matches_compact {
             let sc = read_u32_le(data, 20)?;
-            (cc, sc, 28usize)
+            (cc_at_16, sc, 28usize, JEF_MIN_HEADER)
+        } else if data.len() >= 116 && cc_at_24 > 0 && cc_at_24 <= 256 {
+            // Fallback: assume 116-byte header (most common)
+            let sc = read_u32_le(data, 28)?;
+            (cc_at_24, sc, 36usize, 116usize)
+        } else {
+            return Err(parse_err("Cannot determine JEF header variant"));
         };
 
         // Validate color count
@@ -159,7 +164,6 @@ impl EmbroideryParser for JefParser {
 
         // Parse color table (after header, before stitch data)
         // Color table: color_count entries, each 4 bytes (color index as i32 LE)
-        let color_table_start = if data.len() >= 116 { 116usize } else { JEF_MIN_HEADER };
         let mut colors = Vec::with_capacity(color_count as usize);
         for i in 0..color_count as usize {
             let offset = color_table_start + i * 4;
@@ -461,6 +465,40 @@ mod tests {
         assert_eq!(info.colors[0].hex, "#000000"); // Color index 1 = Black
         assert_eq!(info.colors[1].hex, "#FF0000"); // Color index 5 = Red
         assert_eq!(info.colors[2].hex, "#1A842D"); // Color index 9 = Green
+    }
+
+    #[test]
+    fn test_jef_stitch_offset_validation() {
+        // Build a JEF with 116-byte header where stitch_offset matches
+        // header_size(116) + color_count(2) * 4 = 124
+        let mut data = vec![0u8; 200];
+        let stitch_offset: u32 = 124;
+        data[0..4].copy_from_slice(&stitch_offset.to_le_bytes());
+
+        // 116-byte header: color_count at offset 24
+        data[24..28].copy_from_slice(&2u32.to_le_bytes());
+        data[28..32].copy_from_slice(&1u32.to_le_bytes()); // stitch count hint
+        // Extents
+        data[36..40].copy_from_slice(&50i32.to_le_bytes());
+        data[40..44].copy_from_slice(&50i32.to_le_bytes());
+        data[44..48].copy_from_slice(&75i32.to_le_bytes());
+        data[48..52].copy_from_slice(&75i32.to_le_bytes());
+
+        // Color table at 116: 2 entries
+        data[116..120].copy_from_slice(&1i32.to_le_bytes()); // Black
+        data[120..124].copy_from_slice(&5i32.to_le_bytes()); // Red
+
+        // Stitch data at 124
+        data[124] = 0x01;
+        data[125] = 0x01;
+        data[126] = 0xFF; // end
+
+        let parser = JefParser;
+        let info = parser.parse(&data).unwrap();
+        assert_eq!(info.color_count, Some(2));
+        assert_eq!(info.colors.len(), 2);
+        assert_eq!(info.colors[0].hex, "#000000"); // Black
+        assert_eq!(info.colors[1].hex, "#FF0000"); // Red
     }
 
     #[test]

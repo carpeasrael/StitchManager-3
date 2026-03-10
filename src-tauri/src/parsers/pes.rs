@@ -35,15 +35,111 @@ fn read_u32(data: &[u8], offset: usize) -> Result<u32, AppError> {
         .map_err(|e| parse_err(format!("Failed to read u32 at offset {offset}: {e}")))
 }
 
+/// Standard PEC thread color palette (65 colors, index 0-64).
+/// Used as fallback when PES color objects are unavailable (older PES versions).
+const PEC_PALETTE: &[(u8, u8, u8, &str)] = &[
+    (0, 0, 0, "Unknown"),
+    (14, 31, 124, "Prussian Blue"),
+    (10, 85, 163, "Blue"),
+    (0, 135, 119, "Teal Green"),
+    (75, 107, 175, "Cornflower Blue"),
+    (237, 23, 31, "Red"),
+    (209, 92, 0, "Reddish Brown"),
+    (145, 54, 151, "Magenta"),
+    (228, 154, 203, "Light Lilac"),
+    (145, 95, 172, "Lilac"),
+    (158, 214, 125, "Mint Green"),
+    (232, 169, 0, "Deep Gold"),
+    (254, 186, 53, "Orange"),
+    (255, 255, 0, "Yellow"),
+    (112, 188, 31, "Lime Green"),
+    (186, 152, 0, "Brass"),
+    (168, 168, 168, "Silver"),
+    (125, 111, 0, "Russet Brown"),
+    (255, 255, 179, "Cream Brown"),
+    (79, 85, 86, "Pewter"),
+    (0, 0, 0, "Black"),
+    (11, 61, 145, "Ultramarine"),
+    (119, 1, 118, "Royal Purple"),
+    (41, 49, 51, "Dark Gray"),
+    (42, 19, 1, "Dark Brown"),
+    (246, 74, 138, "Deep Rose"),
+    (178, 118, 36, "Light Brown"),
+    (252, 187, 197, "Salmon Pink"),
+    (254, 55, 15, "Vermilion"),
+    (240, 240, 240, "White"),
+    (106, 28, 138, "Violet"),
+    (168, 221, 196, "Seacrest"),
+    (37, 132, 187, "Sky Blue"),
+    (254, 179, 67, "Pumpkin"),
+    (255, 243, 107, "Cream Yellow"),
+    (208, 166, 96, "Khaki"),
+    (209, 84, 0, "Clay Brown"),
+    (102, 186, 73, "Leaf Green"),
+    (19, 74, 70, "Peacock Blue"),
+    (135, 135, 135, "Gray"),
+    (216, 204, 198, "Warm Gray"),
+    (67, 86, 7, "Dark Olive"),
+    (253, 217, 222, "Flesh Pink"),
+    (249, 147, 188, "Pink"),
+    (0, 56, 34, "Deep Green"),
+    (178, 175, 212, "Lavender"),
+    (104, 106, 176, "Wisteria Blue"),
+    (239, 227, 185, "Beige"),
+    (247, 56, 102, "Carmine"),
+    (181, 75, 100, "Amber Red"),
+    (19, 43, 26, "Olive Green"),
+    (199, 1, 86, "Dark Fuchsia"),
+    (254, 158, 50, "Tangerine"),
+    (168, 222, 235, "Light Blue"),
+    (0, 103, 62, "Emerald Green"),
+    (78, 41, 144, "Purple"),
+    (47, 126, 32, "Moss Green"),
+    (255, 204, 204, "Flesh Pink 2"),
+    (255, 217, 17, "Harvest Gold"),
+    (9, 91, 166, "Electric Blue"),
+    (240, 249, 112, "Lemon Yellow"),
+    (227, 243, 91, "Fresh Green"),
+    (255, 153, 0, "Applique Material"),
+    (255, 240, 141, "Applique Position"),
+    (255, 200, 200, "Applique Remnant"),
+];
+
+/// Parse PEC color index table as fallback colors.
+/// The PEC section has a standard layout across all PES versions.
+fn parse_pec_palette_colors(data: &[u8], pec_offset: usize) -> Vec<ParsedColor> {
+    if pec_offset + 49 > data.len() {
+        return Vec::new();
+    }
+    let num_colors = data[pec_offset + 48] as usize + 1; // stored as count-1
+    let mut colors = Vec::with_capacity(num_colors);
+
+    for i in 0..num_colors {
+        let idx_pos = pec_offset + 49 + i;
+        if idx_pos >= data.len() {
+            break;
+        }
+        let color_idx = data[idx_pos] as usize;
+        if color_idx < PEC_PALETTE.len() {
+            let (r, g, b, name) = PEC_PALETTE[color_idx];
+            colors.push(ParsedColor {
+                hex: format!("#{r:02X}{g:02X}{b:02X}"),
+                name: Some(name.to_string()),
+                brand: None,
+                brand_code: Some(format!("{color_idx}")),
+            });
+        }
+    }
+    colors
+}
+
 /// Parse PES color objects from the PES header section.
-/// Returns a vector of parsed colors.
-fn parse_pes_colors(data: &[u8], name_len: usize) -> Result<Vec<ParsedColor>, AppError> {
-    // Color count is at offset 17 + name_len + 8 + 63 = name_len + 88
-    // But based on analyzing the actual binary, the color count offset varies.
-    // The proposal says: uint16 LE at offset 17 + name_len + 8 + 63
-    // Let's compute: 17 (name start) + name_len + 8 (padding after name) + 63 (hoop params)
+/// Only works reliably for PES v6 (0060). Returns empty for other versions.
+fn parse_pes_colors(data: &[u8], name_len: usize, pec_offset: usize) -> Result<Vec<ParsedColor>, AppError> {
+    // Color count offset: 17 (name start) + name_len + 8 (padding) + 63 (hoop params)
     let color_count_offset = 17 + name_len + 8 + 63;
-    if color_count_offset + 2 > data.len() {
+    // Ensure we're reading within the PES header, not the PEC section
+    if color_count_offset + 2 > data.len() || color_count_offset + 2 > pec_offset {
         return Ok(Vec::new());
     }
 
@@ -237,8 +333,20 @@ impl EmbroideryParser for PesParser {
             0
         };
 
-        // Parse PES color objects
-        let colors = parse_pes_colors(data, name_len)?;
+        // Parse PES color objects (only reliable for v5+/v6)
+        let version_num: u16 = version.parse().unwrap_or(0);
+        let pes_colors = if version_num >= 50 {
+            parse_pes_colors(data, name_len, pec_offset)?
+        } else {
+            Vec::new()
+        };
+
+        // Fall back to PEC palette colors if PES colors unavailable
+        let colors = if !pes_colors.is_empty() {
+            pes_colors
+        } else {
+            parse_pec_palette_colors(data, pec_offset)
+        };
 
         // PEC header starts at pec_offset
         // Color count at PEC+48
@@ -433,6 +541,51 @@ mod tests {
             assert!(color.hex.starts_with('#'), "Color hex should start with #");
             assert_eq!(color.hex.len(), 7, "Color hex should be #RRGGBB");
         }
+    }
+
+    #[test]
+    fn test_pec_palette_fallback_for_old_versions() {
+        // Build a minimal PES v1 file — PES color objects not available,
+        // should fall back to PEC palette.
+        let mut data = vec![0u8; 600];
+        data[0..4].copy_from_slice(b"#PES");
+        data[4..8].copy_from_slice(b"0001"); // version 1
+        let pec_offset: u32 = 12; // PEC immediately after header
+        data[8..12].copy_from_slice(&pec_offset.to_le_bytes());
+
+        // PEC header at offset 12
+        let pec = pec_offset as usize;
+        // Color count - 1 at PEC+48 (2 colors => stored as 1)
+        data[pec + 48] = 1;
+        // Color indices at PEC+49: index 5 (Red), index 2 (Blue)
+        data[pec + 49] = 5;
+        data[pec + 50] = 2;
+
+        // Graphic header at PEC+512 (dimensions)
+        let gfx = pec + 512;
+        if gfx + 20 <= data.len() {
+            // Width/height in 0.1mm at gfx+8/gfx+10
+            data[gfx + 8..gfx + 10].copy_from_slice(&100u16.to_le_bytes());
+            data[gfx + 10..gfx + 12].copy_from_slice(&80u16.to_le_bytes());
+        }
+
+        let parser = PesParser;
+        let info = parser.parse(&data).unwrap();
+
+        assert_eq!(info.format, "PES");
+        assert_eq!(info.format_version.as_deref(), Some("0001"));
+        assert_eq!(info.colors.len(), 2);
+        // Index 5 = Red (237, 23, 31)
+        assert_eq!(info.colors[0].hex, "#ED171F");
+        assert_eq!(info.colors[0].name.as_deref(), Some("Red"));
+        // Index 2 = Blue (10, 85, 163)
+        assert_eq!(info.colors[1].hex, "#0A55A3");
+        assert_eq!(info.colors[1].name.as_deref(), Some("Blue"));
+    }
+
+    #[test]
+    fn test_pec_palette_has_65_entries() {
+        assert_eq!(PEC_PALETTE.len(), 65);
     }
 
     #[test]
