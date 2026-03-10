@@ -50,6 +50,7 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid transparent;
   border-radius: var(--radius-card);
   cursor: pointer;
   transition: background 0.15s;
