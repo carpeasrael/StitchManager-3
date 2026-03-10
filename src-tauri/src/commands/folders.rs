@@ -109,8 +109,31 @@ pub fn update_folder(
 pub fn delete_folder(db: State<'_, DbState>, folder_id: i64) -> Result<(), AppError> {
     let conn = lock_db(&db)?;
 
+    // Collect thumbnail paths before cascade delete removes the file rows.
+    // Use recursive CTE to include files in nested subfolders (parent_id cascade).
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE folder_tree(id) AS (
+             SELECT id FROM folders WHERE id = ?1
+             UNION ALL
+             SELECT f.id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
+         )
+         SELECT e.thumbnail_path FROM embroidery_files e
+         JOIN folder_tree ft ON e.folder_id = ft.id
+         WHERE e.thumbnail_path IS NOT NULL AND e.thumbnail_path != ''",
+    )?;
+    let thumbnail_paths: Vec<String> = stmt
+        .query_map([folder_id], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
     let file_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1",
+        "WITH RECURSIVE folder_tree(id) AS (
+             SELECT id FROM folders WHERE id = ?1
+             UNION ALL
+             SELECT f.id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
+         )
+         SELECT COUNT(*) FROM embroidery_files e
+         JOIN folder_tree ft ON e.folder_id = ft.id",
         [folder_id],
         |row| row.get(0),
     )?;
@@ -125,6 +148,15 @@ pub fn delete_folder(db: State<'_, DbState>, folder_id: i64) -> Result<(), AppEr
         return Err(AppError::NotFound(format!(
             "Ordner {folder_id} nicht gefunden"
         )));
+    }
+
+    // Clean up thumbnail files on disk (best-effort)
+    for path in &thumbnail_paths {
+        if let Err(e) = std::fs::remove_file(path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("Failed to remove thumbnail {path}: {e}");
+            }
+        }
     }
 
     Ok(())
@@ -255,5 +287,146 @@ mod tests {
             .collect();
 
         assert_eq!(names, vec!["Alpha", "Beta", "Zebra"]);
+    }
+
+    #[test]
+    fn test_delete_folder_cleans_up_thumbnails() {
+        let conn = init_database_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create fake thumbnail files on disk
+        let thumb1 = tmp.path().join("100.png");
+        let thumb2 = tmp.path().join("101.png");
+        std::fs::write(&thumb1, b"fake png 1").unwrap();
+        std::fs::write(&thumb2, b"fake png 2").unwrap();
+        assert!(thumb1.exists());
+        assert!(thumb2.exists());
+
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('Test', '/test')",
+            [],
+        ).unwrap();
+        let folder_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, thumbnail_path) \
+             VALUES (?1, 'a.pes', '/test/a.pes', ?2)",
+            rusqlite::params![folder_id, thumb1.to_string_lossy().as_ref()],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, thumbnail_path) \
+             VALUES (?1, 'b.dst', '/test/b.dst', ?2)",
+            rusqlite::params![folder_id, thumb2.to_string_lossy().as_ref()],
+        ).unwrap();
+
+        // Collect thumbnail paths using recursive CTE — mirrors the command logic
+        let mut stmt = conn.prepare(
+            "WITH RECURSIVE folder_tree(id) AS (
+                 SELECT id FROM folders WHERE id = ?1
+                 UNION ALL
+                 SELECT f.id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
+             )
+             SELECT e.thumbnail_path FROM embroidery_files e
+             JOIN folder_tree ft ON e.folder_id = ft.id
+             WHERE e.thumbnail_path IS NOT NULL AND e.thumbnail_path != ''",
+        ).unwrap();
+        let thumbnail_paths: Vec<String> = stmt
+            .query_map([folder_id], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(thumbnail_paths.len(), 2);
+
+        // Delete folder (cascades to files)
+        let changes = conn.execute("DELETE FROM folders WHERE id = ?1", [folder_id]).unwrap();
+        assert_eq!(changes, 1);
+
+        // Files should be cascade-deleted
+        let file_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1",
+                [folder_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(file_count, 0);
+
+        // Clean up thumbnails (mirrors the new delete_folder logic)
+        for path in &thumbnail_paths {
+            let _ = std::fs::remove_file(path);
+        }
+
+        assert!(!thumb1.exists(), "Thumbnail 1 should be deleted from disk");
+        assert!(!thumb2.exists(), "Thumbnail 2 should be deleted from disk");
+    }
+
+    #[test]
+    fn test_delete_folder_cleans_up_nested_subfolder_thumbnails() {
+        let conn = init_database_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create fake thumbnail files
+        let thumb_parent = tmp.path().join("200.png");
+        let thumb_child = tmp.path().join("201.png");
+        std::fs::write(&thumb_parent, b"fake").unwrap();
+        std::fs::write(&thumb_child, b"fake").unwrap();
+
+        // Parent folder
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('Parent', '/parent')",
+            [],
+        ).unwrap();
+        let parent_id = conn.last_insert_rowid();
+
+        // Child folder (nested under parent)
+        conn.execute(
+            "INSERT INTO folders (name, path, parent_id) VALUES ('Child', '/parent/child', ?1)",
+            [parent_id],
+        ).unwrap();
+        let child_id = conn.last_insert_rowid();
+
+        // File in parent folder
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, thumbnail_path) \
+             VALUES (?1, 'a.pes', '/parent/a.pes', ?2)",
+            rusqlite::params![parent_id, thumb_parent.to_string_lossy().as_ref()],
+        ).unwrap();
+
+        // File in child folder
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, thumbnail_path) \
+             VALUES (?1, 'b.dst', '/parent/child/b.dst', ?2)",
+            rusqlite::params![child_id, thumb_child.to_string_lossy().as_ref()],
+        ).unwrap();
+
+        // Recursive CTE should find both thumbnails
+        let mut stmt = conn.prepare(
+            "WITH RECURSIVE folder_tree(id) AS (
+                 SELECT id FROM folders WHERE id = ?1
+                 UNION ALL
+                 SELECT f.id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
+             )
+             SELECT e.thumbnail_path FROM embroidery_files e
+             JOIN folder_tree ft ON e.folder_id = ft.id
+             WHERE e.thumbnail_path IS NOT NULL AND e.thumbnail_path != ''",
+        ).unwrap();
+        let thumbnail_paths: Vec<String> = stmt
+            .query_map([parent_id], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(thumbnail_paths.len(), 2, "Should find thumbnails in parent and child folders");
+
+        // Delete parent (cascades to child folder and all files)
+        conn.execute("DELETE FROM folders WHERE id = ?1", [parent_id]).unwrap();
+
+        // Clean up thumbnails
+        for path in &thumbnail_paths {
+            let _ = std::fs::remove_file(path);
+        }
+
+        assert!(!thumb_parent.exists(), "Parent thumbnail should be deleted");
+        assert!(!thumb_child.exists(), "Child thumbnail should be deleted");
     }
 }

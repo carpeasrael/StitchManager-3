@@ -343,6 +343,7 @@ pub fn watcher_auto_import(
 }
 
 /// Remove DB entries for files that have been deleted from disk.
+/// Also cleans up associated thumbnail files (best-effort).
 #[tauri::command]
 pub fn watcher_remove_by_paths(
     db: State<'_, DbState>,
@@ -350,6 +351,18 @@ pub fn watcher_remove_by_paths(
 ) -> Result<u32, AppError> {
     let conn = lock_db(&db)?;
     let mut removed_count: u32 = 0;
+
+    // Collect thumbnail paths before deleting rows
+    let mut thumbnail_paths: Vec<String> = Vec::new();
+    for filepath in &file_paths {
+        if let Ok(path) = conn.query_row(
+            "SELECT thumbnail_path FROM embroidery_files WHERE filepath = ?1 AND thumbnail_path IS NOT NULL AND thumbnail_path != ''",
+            [filepath],
+            |row| row.get::<_, String>(0),
+        ) {
+            thumbnail_paths.push(path);
+        }
+    }
 
     let tx = conn.unchecked_transaction()?;
     for filepath in &file_paths {
@@ -360,6 +373,15 @@ pub fn watcher_remove_by_paths(
         removed_count += changes as u32;
     }
     tx.commit()?;
+
+    // Clean up thumbnail files on disk (best-effort)
+    for path in &thumbnail_paths {
+        if let Err(e) = std::fs::remove_file(path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("Failed to remove thumbnail {path}: {e}");
+            }
+        }
+    }
 
     Ok(removed_count)
 }
@@ -489,5 +511,48 @@ mod tests {
     fn test_parse_embroidery_file_not_found() {
         let result = parse_embroidery_file("/tmp/nonexistent_12345.pes".to_string());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_watcher_remove_cleans_up_thumbnails() {
+        let conn = init_database_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create a fake thumbnail file on disk
+        let thumb = tmp.path().join("300.png");
+        fs::write(&thumb, b"fake png").unwrap();
+        assert!(thumb.exists());
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Test', '/test')", []).unwrap();
+        let folder_id = conn.last_insert_rowid();
+
+        let filepath = "/test/a.pes";
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, thumbnail_path) \
+             VALUES (?1, 'a.pes', ?2, ?3)",
+            rusqlite::params![folder_id, filepath, thumb.to_string_lossy().as_ref()],
+        ).unwrap();
+
+        // Query thumbnail path before delete — mirrors watcher_remove_by_paths logic
+        let thumbnail_path: Option<String> = conn.query_row(
+            "SELECT thumbnail_path FROM embroidery_files WHERE filepath = ?1 AND thumbnail_path IS NOT NULL AND thumbnail_path != ''",
+            [filepath],
+            |row| row.get::<_, String>(0),
+        ).ok();
+        assert!(thumbnail_path.is_some());
+
+        // Delete the row
+        let changes = conn.execute(
+            "DELETE FROM embroidery_files WHERE filepath = ?1",
+            [filepath],
+        ).unwrap();
+        assert_eq!(changes, 1);
+
+        // Clean up thumbnail (mirrors the watcher logic)
+        if let Some(ref path) = thumbnail_path {
+            let _ = fs::remove_file(path);
+        }
+
+        assert!(!thumb.exists(), "Thumbnail should be deleted from disk after watcher remove");
     }
 }

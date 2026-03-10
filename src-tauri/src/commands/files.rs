@@ -247,11 +247,36 @@ pub fn update_file(
 pub fn delete_file(db: State<'_, DbState>, file_id: i64) -> Result<(), AppError> {
     let conn = lock_db(&db)?;
 
+    // Query thumbnail path before deleting the row
+    let thumbnail_path: Option<String> = conn
+        .query_row(
+            "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+            [file_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
+            }
+            other => AppError::Database(other),
+        })?;
+
     let changes = conn.execute("DELETE FROM embroidery_files WHERE id = ?1", [file_id])?;
     if changes == 0 {
         return Err(AppError::NotFound(format!(
             "Datei {file_id} nicht gefunden"
         )));
+    }
+
+    // Clean up thumbnail file on disk (best-effort)
+    if let Some(ref path) = thumbnail_path {
+        if !path.is_empty() {
+            if let Err(e) = std::fs::remove_file(path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    log::warn!("Failed to remove thumbnail {path}: {e}");
+                }
+            }
+        }
     }
 
     Ok(())
@@ -634,5 +659,73 @@ mod tests {
 
         let encoded = base64::engine::general_purpose::STANDARD.encode(b"abc");
         assert_eq!(encoded, "YWJj");
+    }
+
+    #[test]
+    fn test_delete_file_cleans_up_thumbnail() {
+        let conn = init_database_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create a fake thumbnail file on disk
+        let thumb_path = tmp.path().join("42.png");
+        std::fs::write(&thumb_path, b"fake png").unwrap();
+        assert!(thumb_path.exists());
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Test', '/test')", []).unwrap();
+        let folder_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, thumbnail_path) \
+             VALUES (?1, 'a.pes', '/test/a.pes', ?2)",
+            rusqlite::params![folder_id, thumb_path.to_string_lossy().as_ref()],
+        ).unwrap();
+        let file_id = conn.last_insert_rowid();
+
+        // Query thumbnail path, delete row, then clean up — mirrors the command logic
+        let thumbnail_path: Option<String> = conn
+            .query_row(
+                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+                [file_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        conn.execute("DELETE FROM embroidery_files WHERE id = ?1", [file_id]).unwrap();
+
+        // Clean up thumbnail (mirrors the new delete_file logic)
+        if let Some(ref path) = thumbnail_path {
+            if !path.is_empty() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+
+        assert!(!thumb_path.exists(), "Thumbnail should be deleted from disk");
+    }
+
+    #[test]
+    fn test_delete_file_no_thumbnail_path() {
+        let conn = init_database_in_memory().unwrap();
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Test', '/test')", []).unwrap();
+        let folder_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) VALUES (?1, 'a.pes', '/test/a.pes')",
+            [folder_id],
+        ).unwrap();
+        let file_id = conn.last_insert_rowid();
+
+        // Should not error when thumbnail_path is NULL
+        let thumbnail_path: Option<String> = conn
+            .query_row(
+                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+                [file_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(thumbnail_path.is_none());
+
+        let changes = conn.execute("DELETE FROM embroidery_files WHERE id = ?1", [file_id]).unwrap();
+        assert_eq!(changes, 1);
     }
 }
