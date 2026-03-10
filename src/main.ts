@@ -1,6 +1,7 @@
 import "./styles.css";
 import { appState } from "./state/AppState";
 import { EventBus } from "./state/EventBus";
+import { Component } from "./components/Component";
 import { Sidebar } from "./components/Sidebar";
 import { SearchBar } from "./components/SearchBar";
 import { FilterChips } from "./components/FilterChips";
@@ -99,201 +100,207 @@ export function destroyTauriBridge(): void {
   tauriBridgeCleanup = [];
 }
 
-function setupThemeToggle(): void {
+function setupThemeToggle(): () => void {
   const menuEl = document.querySelector(".app-menu");
-  if (!menuEl) return;
+  if (!menuEl) return () => {};
 
   const btn = document.createElement("button");
   btn.textContent = "\u25D0";
   btn.title = "Theme wechseln";
   btn.style.cssText =
     "margin-left:auto;background:none;border:1px solid var(--color-border);border-radius:var(--radius-button);padding:2px 8px;cursor:pointer;color:var(--color-text);font-size:var(--font-size-body);";
-  btn.addEventListener("click", () => {
-    toggleTheme();
-  });
+  const onClick = () => toggleTheme();
+  btn.addEventListener("click", onClick);
   menuEl.appendChild(btn);
+  return () => {
+    btn.removeEventListener("click", onClick);
+    btn.remove();
+  };
 }
 
-function initEventHandlers(): void {
-  EventBus.on("toolbar:ai-analyze", async () => {
-    const fileId = appState.get("selectedFileId");
-    if (fileId === null) return;
+function initEventHandlers(): () => void {
+  const unsubs = [
+    EventBus.on("toolbar:ai-analyze", async () => {
+      const fileId = appState.get("selectedFileId");
+      if (fileId === null) return;
 
-    const files = appState.get("files");
-    const file = files.find((f) => f.id === fileId);
-    if (!file) return;
+      const files = appState.get("files");
+      const file = files.find((f) => f.id === fileId);
+      if (!file) return;
 
-    await AiPreviewDialog.open(fileId, file, async (result) => {
-      await AiResultDialog.open(result, fileId);
+      await AiPreviewDialog.open(fileId, file, async (result) => {
+        await AiResultDialog.open(result, fileId);
+        await reloadFiles();
+      });
+    }),
+
+    EventBus.on("toolbar:settings", () => {
+      SettingsDialog.open();
+    }),
+
+    EventBus.on("toolbar:save", () => {
+      EventBus.emit("metadata:save");
+    }),
+
+    EventBus.on("toolbar:batch-rename", async () => {
+      const fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) return;
+
+      const settings = await SettingsService.getAllSettings();
+      const pattern = settings.rename_pattern || "{name}_{theme}";
+
+      BatchDialog.open("Batch Umbenennen", fileIds.length);
+      try {
+        await BatchService.rename(fileIds, pattern);
+      } catch (e) {
+        console.warn("Batch rename failed:", e);
+      }
       await reloadFiles();
-    });
-  });
+    }),
 
-  EventBus.on("toolbar:settings", () => {
-    SettingsDialog.open();
-  });
+    EventBus.on("toolbar:batch-organize", async () => {
+      const fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) return;
 
-  EventBus.on("toolbar:save", () => {
-    EventBus.emit("metadata:save");
-  });
+      const settings = await SettingsService.getAllSettings();
+      const pattern = settings.organize_pattern || "{theme}/{name}";
 
-  EventBus.on("toolbar:batch-rename", async () => {
-    const fileIds = appState.get("selectedFileIds");
-    if (fileIds.length === 0) return;
-
-    const settings = await SettingsService.getAllSettings();
-    const pattern = settings.rename_pattern || "{name}_{theme}";
-
-    BatchDialog.open("Batch Umbenennen", fileIds.length);
-    try {
-      await BatchService.rename(fileIds, pattern);
-    } catch (e) {
-      console.warn("Batch rename failed:", e);
-    }
-    await reloadFiles();
-  });
-
-  EventBus.on("toolbar:batch-organize", async () => {
-    const fileIds = appState.get("selectedFileIds");
-    if (fileIds.length === 0) return;
-
-    const settings = await SettingsService.getAllSettings();
-    const pattern = settings.organize_pattern || "{theme}/{name}";
-
-    BatchDialog.open("Batch Organisieren", fileIds.length);
-    try {
-      await BatchService.organize(fileIds, pattern);
-    } catch (e) {
-      console.warn("Batch organize failed:", e);
-    }
-    await reloadFiles();
-  });
-
-  EventBus.on("toolbar:batch-export", async () => {
-    const fileIds = appState.get("selectedFileIds");
-    if (fileIds.length === 0) return;
-
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Zielordner f\u00FCr USB-Export w\u00E4hlen",
-    });
-    if (!selected) return;
-
-    const targetPath = typeof selected === "string" ? selected : String(selected);
-    if (!targetPath) return;
-
-    BatchDialog.open("USB-Export", fileIds.length);
-    try {
-      await BatchService.exportUsb(fileIds, targetPath);
-    } catch (e) {
-      console.warn("Batch export failed:", e);
-    }
-  });
-
-  EventBus.on("toolbar:batch-ai", async () => {
-    const fileIds = appState.get("selectedFileIds");
-    if (fileIds.length === 0) return;
-
-    BatchDialog.open("Batch KI-Analyse", fileIds.length);
-    try {
-      await AiService.analyzeBatch(fileIds);
-    } catch (e) {
-      console.warn("Batch AI analysis failed:", e);
-    }
-    await reloadFiles();
-  });
-
-  EventBus.on("file:updated", async () => {
-    await reloadFiles();
-    EventBus.emit("file:refresh");
-  });
-
-  // Filesystem watcher events
-  EventBus.on("fs:new-files", async (payload) => {
-    const data = payload as { paths: string[] };
-    try {
-      const imported = await invoke<number>("watcher_auto_import", { filePaths: data.paths });
-      if (imported > 0) {
-        ToastContainer.show("info", `${imported} neue Datei(en) importiert`);
-        await reloadFiles();
+      BatchDialog.open("Batch Organisieren", fileIds.length);
+      try {
+        await BatchService.organize(fileIds, pattern);
+      } catch (e) {
+        console.warn("Batch organize failed:", e);
       }
-    } catch (e) {
-      console.warn("Watcher auto-import failed:", e);
-    }
-  });
+      await reloadFiles();
+    }),
 
-  EventBus.on("fs:files-removed", async (payload) => {
-    const data = payload as { paths: string[] };
-    try {
-      const removed = await invoke<number>("watcher_remove_by_paths", { filePaths: data.paths });
-      if (removed > 0) {
-        ToastContainer.show("info", `${removed} Datei(en) entfernt`);
-        await reloadFiles();
+    EventBus.on("toolbar:batch-export", async () => {
+      const fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) return;
+
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Zielordner f\u00FCr USB-Export w\u00E4hlen",
+      });
+      if (!selected) return;
+
+      const targetPath = typeof selected === "string" ? selected : String(selected);
+      if (!targetPath) return;
+
+      BatchDialog.open("USB-Export", fileIds.length);
+      try {
+        await BatchService.exportUsb(fileIds, targetPath);
+      } catch (e) {
+        console.warn("Batch export failed:", e);
       }
-    } catch (e) {
-      console.warn("Watcher remove failed:", e);
-    }
-  });
+    }),
 
-  // Keyboard shortcut handlers
-  EventBus.on("shortcut:save", () => {
-    EventBus.emit("metadata:save");
-  });
+    EventBus.on("toolbar:batch-ai", async () => {
+      const fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) return;
 
-  EventBus.on("shortcut:search", () => {
-    const input = document.querySelector<HTMLInputElement>(".search-bar-input");
-    if (input) input.focus();
-  });
+      BatchDialog.open("Batch KI-Analyse", fileIds.length);
+      try {
+        await AiService.analyzeBatch(fileIds);
+      } catch (e) {
+        console.warn("Batch AI analysis failed:", e);
+      }
+      await reloadFiles();
+    }),
 
-  EventBus.on("shortcut:settings", () => {
-    SettingsDialog.open();
-  });
+    EventBus.on("file:updated", async () => {
+      await reloadFiles();
+      EventBus.emit("file:refresh");
+    }),
 
-  EventBus.on("shortcut:delete", async () => {
-    const fileId = appState.get("selectedFileId");
-    if (fileId === null) return;
+    // Filesystem watcher events
+    EventBus.on("fs:new-files", async (payload) => {
+      const data = payload as { paths: string[] };
+      try {
+        const imported = await invoke<number>("watcher_auto_import", { filePaths: data.paths });
+        if (imported > 0) {
+          ToastContainer.show("info", `${imported} neue Datei(en) importiert`);
+          await reloadFiles();
+        }
+      } catch (e) {
+        console.warn("Watcher auto-import failed:", e);
+      }
+    }),
 
-    const files = appState.get("files");
-    const file = files.find((f) => f.id === fileId);
-    if (!file) return;
+    EventBus.on("fs:files-removed", async (payload) => {
+      const data = payload as { paths: string[] };
+      try {
+        const removed = await invoke<number>("watcher_remove_by_paths", { filePaths: data.paths });
+        if (removed > 0) {
+          ToastContainer.show("info", `${removed} Datei(en) entfernt`);
+          await reloadFiles();
+        }
+      } catch (e) {
+        console.warn("Watcher remove failed:", e);
+      }
+    }),
 
-    if (!confirm(`Datei "${file.name || file.filename}" wirklich loeschen?`)) return;
+    // Keyboard shortcut handlers
+    EventBus.on("shortcut:save", () => {
+      EventBus.emit("metadata:save");
+    }),
 
-    try {
-      await invoke("delete_file", { fileId });
-      ToastContainer.show("success", "Datei geloescht");
-      reloadFiles();
-    } catch (e) {
-      console.warn("Failed to delete file:", e);
-      ToastContainer.show("error", "Datei konnte nicht geloescht werden");
-    }
-  });
+    EventBus.on("shortcut:search", () => {
+      const input = document.querySelector<HTMLInputElement>(".search-bar-input");
+      if (input) input.focus();
+    }),
 
-  EventBus.on("shortcut:prev-file", () => {
-    navigateFile(-1);
-  });
+    EventBus.on("shortcut:settings", () => {
+      SettingsDialog.open();
+    }),
 
-  EventBus.on("shortcut:next-file", () => {
-    navigateFile(1);
-  });
+    EventBus.on("shortcut:delete", async () => {
+      const fileId = appState.get("selectedFileId");
+      if (fileId === null) return;
 
-  EventBus.on("shortcut:escape", () => {
-    // Close any open dialog via its own close method (to revert live previews)
-    if (SettingsDialog.isOpen()) {
-      SettingsDialog.dismiss();
-      return;
-    }
-    // Dispatch dismiss event so dialogs can clean up properly
-    const overlay = document.querySelector(".dialog-overlay");
-    if (overlay) {
-      overlay.dispatchEvent(new CustomEvent("dialog-dismiss"));
-      return;
-    }
-    // Clear selection
-    appState.set("selectedFileIds", []);
-    appState.set("selectedFileId", null);
-  });
+      const files = appState.get("files");
+      const file = files.find((f) => f.id === fileId);
+      if (!file) return;
+
+      if (!confirm(`Datei "${file.name || file.filename}" wirklich loeschen?`)) return;
+
+      try {
+        await invoke("delete_file", { fileId });
+        ToastContainer.show("success", "Datei geloescht");
+        reloadFiles();
+      } catch (e) {
+        console.warn("Failed to delete file:", e);
+        ToastContainer.show("error", "Datei konnte nicht geloescht werden");
+      }
+    }),
+
+    EventBus.on("shortcut:prev-file", () => {
+      navigateFile(-1);
+    }),
+
+    EventBus.on("shortcut:next-file", () => {
+      navigateFile(1);
+    }),
+
+    EventBus.on("shortcut:escape", () => {
+      // Close any open dialog via its own close method (to revert live previews)
+      if (SettingsDialog.isOpen()) {
+        SettingsDialog.dismiss();
+        return;
+      }
+      // Dispatch dismiss event so dialogs can clean up properly
+      const overlay = document.querySelector(".dialog-overlay");
+      if (overlay) {
+        overlay.dispatchEvent(new CustomEvent("dialog-dismiss"));
+        return;
+      }
+      // Clear selection
+      appState.set("selectedFileIds", []);
+      appState.set("selectedFileId", null);
+    }),
+  ];
+  return () => unsubs.forEach((fn) => fn());
 }
 
 async function reloadFiles(): Promise<void> {
@@ -326,10 +333,18 @@ function navigateFile(direction: number): void {
   appState.set("selectedFileId", files[newIndex].id);
 }
 
-function initComponents(): void {
+interface AppInstances {
+  components: Component[];
+  splitters: Splitter[];
+  toast: ToastContainer;
+}
+
+function initComponents(): AppInstances {
+  const components: Component[] = [];
+
   const sidebarEl = document.querySelector<HTMLElement>(".app-sidebar");
   if (sidebarEl) {
-    new Sidebar(sidebarEl);
+    components.push(new Sidebar(sidebarEl));
   }
 
   const toolbarEl = document.querySelector<HTMLElement>(".app-toolbar");
@@ -338,56 +353,89 @@ function initComponents(): void {
     const searchContainer = document.createElement("div");
     searchContainer.className = "toolbar-search";
     toolbarEl.appendChild(searchContainer);
-    new SearchBar(searchContainer);
+    components.push(new SearchBar(searchContainer));
 
     const filterContainer = document.createElement("div");
     filterContainer.className = "toolbar-filters";
     toolbarEl.appendChild(filterContainer);
-    new FilterChips(filterContainer);
+    components.push(new FilterChips(filterContainer));
 
     const actionsContainer = document.createElement("div");
     actionsContainer.className = "toolbar-actions-container";
     toolbarEl.appendChild(actionsContainer);
-    new Toolbar(actionsContainer);
+    components.push(new Toolbar(actionsContainer));
   }
 
   const centerEl = document.querySelector<HTMLElement>(".app-center");
   if (centerEl) {
-    new FileList(centerEl);
+    components.push(new FileList(centerEl));
   }
 
   const rightEl = document.querySelector<HTMLElement>(".app-right");
   if (rightEl) {
-    new MetadataPanel(rightEl);
+    components.push(new MetadataPanel(rightEl));
   }
 
   const statusEl = document.querySelector<HTMLElement>(".app-status");
   if (statusEl) {
-    new StatusBar(statusEl);
+    components.push(new StatusBar(statusEl));
   }
 
-  // Initialize splitters
+  const splitters: Splitter[] = [];
   const splitterL = document.querySelector<HTMLElement>(".app-splitter-l");
   if (splitterL) {
-    new Splitter(splitterL, "--sidebar-width", 180, 400, 240);
+    splitters.push(new Splitter(splitterL, "--sidebar-width", 180, 400, 240));
   }
 
   const splitterR = document.querySelector<HTMLElement>(".app-splitter-r");
   if (splitterR) {
-    new Splitter(splitterR, "--center-width", 300, 800, 480);
+    splitters.push(new Splitter(splitterR, "--center-width", 300, 800, 480));
   }
 
-  // Initialize toast container
-  new ToastContainer();
+  const toast = new ToastContainer();
+
+  return { components, splitters, toast };
 }
 
+let hmrCleanup: (() => void)[] = [];
+let initGeneration = 0;
+
 async function init(): Promise<void> {
-  await initTheme();
+  const generation = ++initGeneration;
+
+  const hmrData = import.meta.hot?.data as Record<string, unknown> | undefined;
+  if (!hmrData?.["stitch_main.themeInitialized"]) {
+    await initTheme();
+    if (generation !== initGeneration) return;
+    if (hmrData) hmrData["stitch_main.themeInitialized"] = true;
+  }
+  destroyTauriBridge();
   await initTauriBridge();
-  setupThemeToggle();
-  initShortcuts();
-  initEventHandlers();
-  initComponents();
+  if (generation !== initGeneration) return;
+
+  const destroyThemeToggle = setupThemeToggle();
+  const destroyShortcuts = initShortcuts();
+  const destroyEventHandlers = initEventHandlers();
+  const { components, splitters, toast } = initComponents();
+
+  hmrCleanup = [
+    destroyTauriBridge,
+    destroyEventHandlers,
+    destroyShortcuts,
+    destroyThemeToggle,
+    () => components.forEach((c) => c.destroy()),
+    () => splitters.forEach((s) => s.destroy()),
+    () => toast.destroy(),
+  ];
 }
 
 init();
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    initGeneration++;
+    destroyTauriBridge();
+    hmrCleanup.forEach((fn) => fn());
+    hmrCleanup = [];
+  });
+}

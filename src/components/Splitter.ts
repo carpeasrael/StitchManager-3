@@ -6,6 +6,9 @@ export class Splitter {
   private dragging = false;
   private startX = 0;
   private startValue = 0;
+  private activeMoveHandler: ((ev: MouseEvent) => void) | null = null;
+  private activeUpHandler: (() => void) | null = null;
+  private readonly mouseDownHandler: (e: MouseEvent) => void;
 
   constructor(
     container: HTMLElement,
@@ -28,10 +31,28 @@ export class Splitter {
       root.style.setProperty(property, `${defaultValue}px`);
     }
 
-    this.el.addEventListener("mousedown", (e) => this.onMouseDown(e));
+    this.mouseDownHandler = (e) => this.onMouseDown(e);
+    this.el.addEventListener("mousedown", this.mouseDownHandler);
+  }
+
+  destroy(): void {
+    if (this.activeMoveHandler) {
+      document.removeEventListener("mousemove", this.activeMoveHandler);
+    }
+    if (this.activeUpHandler) {
+      document.removeEventListener("mouseup", this.activeUpHandler);
+    }
+    if (this.dragging) {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+    this.dragging = false;
+    this.el.removeEventListener("mousedown", this.mouseDownHandler);
+    this.el.remove();
   }
 
   private onMouseDown(e: MouseEvent): void {
+    if (this.dragging) return;
     e.preventDefault();
     this.dragging = true;
     this.startX = e.clientX;
@@ -57,12 +78,16 @@ export class Splitter {
 
     const onMouseUp = () => {
       this.dragging = false;
+      this.activeMoveHandler = null;
+      this.activeUpHandler = null;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
     };
 
+    this.activeMoveHandler = onMouseMove;
+    this.activeUpHandler = onMouseUp;
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
   }

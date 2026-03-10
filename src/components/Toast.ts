@@ -2,16 +2,28 @@ import { appState } from "../state/AppState";
 import type { Toast as ToastType, ToastLevel } from "../types/index";
 
 let idCounter = 0;
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
 
 export class ToastContainer {
   private el: HTMLElement;
+  private unsubscribe: () => void;
 
   constructor() {
     this.el = document.createElement("div");
     this.el.className = "toast-container";
     document.body.appendChild(this.el);
 
-    appState.on("toasts", (toasts) => this.render(toasts));
+    this.unsubscribe = appState.on("toasts", (toasts) => this.render(toasts));
+  }
+
+  destroy(): void {
+    this.unsubscribe();
+    this.el.remove();
+    for (const timer of pendingTimers) {
+      clearTimeout(timer);
+    }
+    pendingTimers.clear();
+    appState.set("toasts", []);
   }
 
   private render(toasts: ToastType[]): void {
@@ -21,7 +33,11 @@ export class ToastContainer {
       const el = child as HTMLElement;
       if (!existingIds.has(el.dataset.toastId ?? "") && !el.classList.contains("toast-exit")) {
         el.classList.add("toast-exit");
-        setTimeout(() => el.remove(), 300);
+        const exitTimer = setTimeout(() => {
+          pendingTimers.delete(exitTimer);
+          el.remove();
+        }, 300);
+        pendingTimers.add(exitTimer);
       }
     }
 
@@ -63,12 +79,14 @@ export class ToastContainer {
     }
     appState.set("toasts", [...current, toast]);
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      pendingTimers.delete(timer);
       const toasts = appState.get("toasts");
       appState.set(
         "toasts",
         toasts.filter((t) => t.id !== id)
       );
     }, duration);
+    pendingTimers.add(timer);
   }
 }

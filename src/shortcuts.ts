@@ -7,8 +7,8 @@ function isInputFocused(): boolean {
   return tag === "input" || tag === "textarea" || tag === "select";
 }
 
-export function initShortcuts(): void {
-  document.addEventListener("keydown", (e: KeyboardEvent) => {
+export function initShortcuts(): () => void {
+  const handler = (e: KeyboardEvent) => {
     const mod = e.metaKey || e.ctrlKey;
 
     // Always handle Escape regardless of focus
@@ -56,5 +56,7 @@ export function initShortcuts(): void {
         EventBus.emit("shortcut:next-file");
         break;
     }
-  });
+  };
+  document.addEventListener("keydown", handler);
+  return () => document.removeEventListener("keydown", handler);
 }
