@@ -40,6 +40,13 @@ class AppStateClass {
     }
   }
 
+  /** Atomically read-modify-write a state key. The updater receives the
+   *  current value and must return the new value. Listeners fire once
+   *  with the result. */
+  update<K extends keyof State>(key: K, updater: (current: State[K]) => State[K]): void {
+    this.set(key, updater(this.get(key)));
+  }
+
   on<K extends keyof State>(
     key: K,
     listener: Listener<K>

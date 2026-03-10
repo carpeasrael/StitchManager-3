@@ -542,6 +542,9 @@ export class MetadataPanel extends Component {
   private async save(): Promise<void> {
     if (!this.currentFile || !this.dirty || this.saving) return;
 
+    // Capture the file ID at the start so we can detect selection changes
+    const saveFileId = this.currentFile.id;
+
     this.saving = true;
     const saveBtn = this.el.querySelector<HTMLButtonElement>(".metadata-save-btn");
     if (saveBtn) {
@@ -578,33 +581,40 @@ export class MetadataPanel extends Component {
         values.tags.join(",") !== this.snapshot.tags.join(",");
 
       if (hasUpdates) {
-        const updatedFile = await FileService.updateFile(
-          this.currentFile.id,
-          updates
-        );
+        const updatedFile = await FileService.updateFile(saveFileId, updates);
+
+        // Abort if user selected a different file while we were saving
+        if (this.currentFile?.id !== saveFileId) {
+          if (saveBtn) saveBtn.textContent = "Speichern";
+          return;
+        }
+
+        // Safe to update: onSelectionChanged listens to "selectedFileId", not "files",
+        // so this assignment cannot be overwritten synchronously by the update below.
         this.currentFile = updatedFile;
 
-        // Update the file in appState.files
-        const files = appState.get("files");
-        const idx = files.findIndex((f) => f.id === updatedFile.id);
-        if (idx >= 0) {
-          files[idx] = updatedFile;
-          appState.set("files", files);
-        }
+        // Atomically update only this file in the files array
+        appState.update("files", (files) =>
+          files.map((f) => (f.id === updatedFile.id ? updatedFile : f))
+        );
       }
 
       if (tagsChanged) {
-        const newTags = await FileService.setTags(
-          this.currentFile.id,
-          values.tags
-        );
+        const newTags = await FileService.setTags(saveFileId, values.tags);
+
+        // Abort if user selected a different file while we were saving
+        if (this.currentFile?.id !== saveFileId) {
+          if (saveBtn) saveBtn.textContent = "Speichern";
+          return;
+        }
+
         this.currentTags = newTags;
       }
 
       this.snapshot = this.takeSnapshot(this.currentFile, this.currentTags);
       this.dirty = false;
 
-      EventBus.emit("file:saved", { fileId: this.currentFile.id });
+      EventBus.emit("file:saved", { fileId: saveFileId });
 
       if (saveBtn) {
         saveBtn.textContent = "Gespeichert!";
