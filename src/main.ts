@@ -304,10 +304,10 @@ function initEventHandlers(): void {
       SettingsDialog.dismiss();
       return;
     }
-    // For other dialogs, removing the overlay is safe
+    // Dispatch dismiss event so dialogs can clean up properly
     const overlay = document.querySelector(".dialog-overlay");
     if (overlay) {
-      overlay.remove();
+      overlay.dispatchEvent(new CustomEvent("dialog-dismiss"));
       return;
     }
     // Clear selection

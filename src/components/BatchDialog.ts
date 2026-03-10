@@ -26,6 +26,7 @@ export class BatchDialog {
   private show(): void {
     this.overlay = document.createElement("div");
     this.overlay.className = "dialog-overlay";
+    this.overlay.addEventListener("dialog-dismiss", () => this.close());
 
     const dialog = document.createElement("div");
     dialog.className = "dialog dialog-batch";

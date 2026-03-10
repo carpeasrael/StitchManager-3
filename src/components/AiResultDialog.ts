@@ -43,6 +43,7 @@ export class AiResultDialog {
     this.overlay.addEventListener("click", (e) => {
       if (e.target === this.overlay) this.close();
     });
+    this.overlay.addEventListener("dialog-dismiss", () => this.close());
 
     const dialog = document.createElement("div");
     dialog.className = "dialog dialog-ai-result";

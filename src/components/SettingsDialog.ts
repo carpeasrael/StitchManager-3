@@ -144,14 +144,16 @@ export class SettingsDialog {
       // Custom fields are saved inline, not via the save button
 
       if (allOk) {
-        // Restart watcher only if library_root actually changed
+        // Update watcher if library_root changed
         const libraryInput = generalForm.querySelector<HTMLInputElement>('[data-key="library_root"]');
-        if (libraryInput && libraryInput.value && libraryInput.value !== this.originalLibraryRoot) {
+        if (libraryInput && libraryInput.value !== this.originalLibraryRoot) {
           try {
             await invoke("watcher_stop");
-            await invoke("watcher_start", { path: libraryInput.value });
+            if (libraryInput.value) {
+              await invoke("watcher_start", { path: libraryInput.value });
+            }
           } catch (e) {
-            console.warn("Failed to restart watcher:", e);
+            console.warn("Failed to update watcher:", e);
           }
         }
         ToastContainer.show("success", "Einstellungen gespeichert");
