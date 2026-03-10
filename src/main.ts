@@ -38,6 +38,7 @@ async function initTheme(): Promise<void> {
   } catch (e) {
     console.warn("Failed to load theme from DB, using default:", e);
     applyTheme("hell");
+    applyFontSize("medium");
   }
 }
 
@@ -268,7 +269,7 @@ function initEventHandlers(): () => void {
       try {
         await invoke("delete_file", { fileId });
         ToastContainer.show("success", "Datei geloescht");
-        reloadFiles();
+        await reloadFiles();
       } catch (e) {
         console.warn("Failed to delete file:", e);
         ToastContainer.show("error", "Datei konnte nicht geloescht werden");
