@@ -74,7 +74,7 @@ fn load_ai_config(conn: &rusqlite::Connection) -> Result<AiConfig, AppError> {
 
     let provider_str = get("ai_provider")?;
     let url = get("ai_url")?;
-    let api_key = get("ai_api_key").ok();
+    let api_key = get("ai_api_key").ok().filter(|k| !k.trim().is_empty());
     let model = get("ai_model")?;
     let temperature: f64 = get("ai_temperature")?
         .parse()
@@ -775,5 +775,32 @@ mod tests {
             .unwrap();
         assert!(ai_analyzed);
         assert!(!ai_confirmed);
+    }
+
+    #[test]
+    fn test_load_ai_config_empty_api_key_is_none() {
+        use super::load_ai_config;
+
+        // Relies on migration defaults for: ai_provider, ai_url, ai_model,
+        // ai_temperature, ai_timeout_ms.
+        let conn = init_database_in_memory().unwrap();
+
+        // Set a non-empty API key first
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('ai_api_key', 'sk-test123', datetime('now'))",
+            [],
+        ).unwrap();
+
+        let config = load_ai_config(&conn).unwrap();
+        assert_eq!(config.api_key, Some("sk-test123".to_string()));
+
+        // Clear the API key (simulates switching away from OpenAI)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('ai_api_key', '', datetime('now'))",
+            [],
+        ).unwrap();
+
+        let config = load_ai_config(&conn).unwrap();
+        assert_eq!(config.api_key, None);
     }
 }

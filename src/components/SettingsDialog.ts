@@ -624,13 +624,21 @@ export class SettingsDialog {
       const key = input.dataset.key;
       if (!key) continue;
 
-      // Skip API key if it's empty and provider isn't openai
+      // Clear API key when provider is not OpenAI.
+      // ai_provider and ai_api_key are always co-located in kiForm.
       if (key === "ai_api_key") {
         const provider = form.querySelector<HTMLSelectElement>(
           '[data-key="ai_provider"]'
         );
-        if (provider && provider.value !== "openai") continue;
-        if (!input.value) continue;
+        if (provider && provider.value !== "openai") {
+          try {
+            await SettingsService.setSetting(key, "");
+          } catch (e) {
+            console.warn(`Failed to clear setting '${key}':`, e);
+            allOk = false;
+          }
+          continue;
+        }
       }
 
       try {
