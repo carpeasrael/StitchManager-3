@@ -6,7 +6,7 @@ const CURRENT_VERSION: i32 = 1;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
     run_migrations(&conn)?;
     Ok(conn)
 }
@@ -14,7 +14,7 @@ pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
 #[cfg(test)]
 pub fn init_database_in_memory() -> Result<Connection, AppError> {
     let conn = Connection::open_in_memory()?;
-    conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+    conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
     run_migrations(&conn)?;
     Ok(conn)
 }

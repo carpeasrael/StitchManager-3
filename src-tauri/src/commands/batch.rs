@@ -124,10 +124,12 @@ pub async fn batch_rename(
 
     for (i, file_id) in file_ids.iter().enumerate() {
         let result = (|| -> Result<String, AppError> {
-            let conn = lock_db(&db)?;
-
-            let file = conn
-                .query_row(
+            // Query file data under lock, then drop lock before file I/O.
+            // Note: TOCTOU window exists between lock release and re-acquisition
+            // for the DB update. Acceptable for a single-user desktop app.
+            let file = {
+                let conn = lock_db(&db)?;
+                conn.query_row(
                     &format!("{FILE_SELECT} WHERE id = ?1"),
                     [file_id],
                     |row| row_to_file(row),
@@ -137,7 +139,8 @@ pub async fn batch_rename(
                         AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
                     }
                     other => AppError::Database(other),
-                })?;
+                })?
+            };
 
             let ext = file
                 .filename
@@ -169,7 +172,7 @@ pub async fn batch_rename(
                 .unwrap_or(&desired_filename)
                 .to_string();
 
-            // Rename physical file if it exists and target differs
+            // Rename physical file if it exists and target differs (no lock held)
             let did_rename = if old_path.exists() && canonical_old != new_path {
                 std::fs::rename(old_path, &new_path)?;
                 true
@@ -177,7 +180,8 @@ pub async fn batch_rename(
                 false
             };
 
-            // Update DB — rollback filesystem on failure
+            // Re-acquire lock for DB update — rollback filesystem on failure
+            let conn = lock_db(&db)?;
             if let Err(db_err) = conn.execute(
                 "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
                  updated_at = datetime('now') WHERE id = ?3",
@@ -280,10 +284,12 @@ pub async fn batch_organize(
         // Note: folder_id is intentionally not updated — organize is a filesystem-only
         // operation. The file retains its original folder association in the UI.
         let result = (|| -> Result<String, AppError> {
-            let conn = lock_db(&db)?;
-
-            let file = conn
-                .query_row(
+            // Query file data under lock, then drop lock before file I/O.
+            // Note: TOCTOU window exists between lock release and re-acquisition
+            // for the DB update. Acceptable for a single-user desktop app.
+            let file = {
+                let conn = lock_db(&db)?;
+                conn.query_row(
                     &format!("{FILE_SELECT} WHERE id = ?1"),
                     [file_id],
                     |row| row_to_file(row),
@@ -293,7 +299,8 @@ pub async fn batch_organize(
                         AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
                     }
                     other => AppError::Database(other),
-                })?;
+                })?
+            };
 
             // Build target subdirectory from pattern (sanitized against path traversal)
             let sub_path = apply_pattern(&pattern, &file);
@@ -308,6 +315,7 @@ pub async fn batch_organize(
                 ));
             }
 
+            // File I/O without holding the DB lock
             std::fs::create_dir_all(&target_dir)?;
 
             let old_path = std::path::Path::new(&file.filepath);
@@ -319,7 +327,7 @@ pub async fn batch_organize(
             let desired_path = target_dir.join(&file.filename);
             let new_path = dedup_path(&desired_path, &mut claimed);
 
-            // Move physical file if it exists and target differs
+            // Move physical file if it exists and target differs (no lock held)
             let did_rename = if old_path.exists() && canonical_old != new_path {
                 std::fs::rename(old_path, &new_path)?;
                 true
@@ -327,13 +335,14 @@ pub async fn batch_organize(
                 false
             };
 
-            // Update DB — rollback filesystem on failure
+            // Re-acquire lock for DB update — rollback filesystem on failure
             let new_filename = new_path
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or(&file.filename)
                 .to_string();
 
+            let conn = lock_db(&db)?;
             if let Err(db_err) = conn.execute(
                 "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
                  updated_at = datetime('now') WHERE id = ?3",
@@ -409,10 +418,10 @@ pub async fn batch_export_usb(
 
     for (i, file_id) in file_ids.iter().enumerate() {
         let result = (|| -> Result<String, AppError> {
-            let conn = lock_db(&db)?;
-
-            let (filename, filepath): (String, String) = conn
-                .query_row(
+            // Query file data under lock, then drop lock before file I/O
+            let (filename, filepath): (String, String) = {
+                let conn = lock_db(&db)?;
+                conn.query_row(
                     "SELECT filename, filepath FROM embroidery_files WHERE id = ?1",
                     [file_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
@@ -422,8 +431,10 @@ pub async fn batch_export_usb(
                         AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
                     }
                     other => AppError::Database(other),
-                })?;
+                })?
+            };
 
+            // File I/O without holding the DB lock
             let source = std::path::Path::new(&filepath);
             if !source.exists() {
                 return Err(AppError::Io(std::io::Error::new(

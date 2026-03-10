@@ -188,6 +188,28 @@ pub fn watcher_auto_import(
     db: State<'_, DbState>,
     file_paths: Vec<String>,
 ) -> Result<u32, AppError> {
+    // Collect file metadata without holding the DB lock
+    struct FileInfo {
+        filepath: String,
+        filename: String,
+        file_size: Option<i64>,
+    }
+    let file_infos: Vec<FileInfo> = file_paths
+        .iter()
+        .map(|filepath| {
+            let path = std::path::Path::new(filepath);
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let file_size: Option<i64> = std::fs::metadata(path)
+                .ok()
+                .and_then(|m| i64::try_from(m.len()).ok());
+            FileInfo { filepath: filepath.clone(), filename, file_size }
+        })
+        .collect();
+
     let conn = lock_db(&db)?;
 
     // Load all folders to match file paths against
@@ -202,22 +224,12 @@ pub fn watcher_auto_import(
     let mut imported_count: u32 = 0;
     let tx = conn.unchecked_transaction()?;
 
-    for filepath in &file_paths {
-        let path = std::path::Path::new(filepath);
-        let filename = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let file_size: Option<i64> = std::fs::metadata(path)
-            .ok()
-            .and_then(|m| i64::try_from(m.len()).ok());
-
+    for info in &file_infos {
         // Find best matching folder (path-component-aware ancestry check)
         let best_folder = folders
             .iter()
             .filter(|(_, folder_path)| {
-                let fp = std::path::Path::new(filepath);
+                let fp = std::path::Path::new(&info.filepath);
                 let dp = std::path::Path::new(folder_path);
                 fp.starts_with(dp)
             })
@@ -231,7 +243,7 @@ pub fn watcher_auto_import(
         let result = tx.execute(
             "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
              VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![folder_id, filename, filepath, file_size],
+            rusqlite::params![folder_id, info.filename, info.filepath, info.file_size],
         );
 
         if let Ok(changes) = result {

@@ -178,11 +178,10 @@ pub async fn ai_analyze_file(
     // Emit start event
     let _ = app_handle.emit("ai:start", AiStartPayload { file_id });
 
-    // Load thumbnail and config while holding the lock
-    let (image_base64, config) = {
+    // Query DB for thumbnail path and config, then drop the lock before file I/O
+    let (thumbnail_path, config) = {
         let conn = lock_db(&db)?;
 
-        // Load thumbnail
         let thumbnail_path: Option<String> = conn
             .query_row(
                 "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
@@ -196,21 +195,22 @@ pub async fn ai_analyze_file(
                 other => AppError::Database(other),
             })?;
 
-        let b64 = match thumbnail_path {
-            Some(ref path) if !path.is_empty() => {
-                use base64::Engine;
-                let data = std::fs::read(path)?;
-                base64::engine::general_purpose::STANDARD.encode(&data)
-            }
-            _ => {
-                return Err(AppError::Ai(
-                    "Kein Thumbnail verfuegbar fuer KI-Analyse".into(),
-                ));
-            }
-        };
-
         let config = load_ai_config(&conn)?;
-        (b64, config)
+        (thumbnail_path, config)
+    };
+
+    // Read thumbnail file without holding the DB lock
+    let image_base64 = match thumbnail_path {
+        Some(ref path) if !path.is_empty() => {
+            use base64::Engine;
+            let data = std::fs::read(path)?;
+            base64::engine::general_purpose::STANDARD.encode(&data)
+        }
+        _ => {
+            return Err(AppError::Ai(
+                "Kein Thumbnail verfuegbar fuer KI-Analyse".into(),
+            ));
+        }
     };
 
     // Extract fields needed after client consumes config
@@ -500,13 +500,11 @@ pub async fn ai_analyze_batch(
 
     for (i, file_id) in file_ids.iter().enumerate() {
         let analyze_result = (|| async {
-            let (prompt, image_base64, config) = {
+            // Query DB for prompt data, thumbnail path, and config — then drop lock
+            let (prompt, thumbnail_path, config) = {
                 let conn = lock_db(&db)?;
-
-                // Reuse shared prompt builder
                 let prompt = build_prompt_for_file(&conn, *file_id)?;
 
-                // Load thumbnail
                 let thumbnail_path: Option<String> = conn
                     .query_row(
                         "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
@@ -520,21 +518,22 @@ pub async fn ai_analyze_batch(
                         other => AppError::Database(other),
                     })?;
 
-                let b64 = match thumbnail_path {
-                    Some(ref path) if !path.is_empty() => {
-                        use base64::Engine;
-                        let data = std::fs::read(path)?;
-                        base64::engine::general_purpose::STANDARD.encode(&data)
-                    }
-                    _ => {
-                        return Err(AppError::Ai(
-                            "Kein Thumbnail verfuegbar fuer KI-Analyse".into(),
-                        ));
-                    }
-                };
-
                 let config = load_ai_config(&conn)?;
-                (prompt, b64, config)
+                (prompt, thumbnail_path, config)
+            };
+
+            // Read thumbnail file without holding the DB lock
+            let image_base64 = match thumbnail_path {
+                Some(ref path) if !path.is_empty() => {
+                    use base64::Engine;
+                    let data = std::fs::read(path)?;
+                    base64::engine::general_purpose::STANDARD.encode(&data)
+                }
+                _ => {
+                    return Err(AppError::Ai(
+                        "Kein Thumbnail verfuegbar fuer KI-Analyse".into(),
+                    ));
+                }
             };
 
             // Extract fields before config is consumed

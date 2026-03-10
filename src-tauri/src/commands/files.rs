@@ -368,10 +368,10 @@ pub fn get_all_tags(db: State<'_, DbState>) -> Result<Vec<Tag>, AppError> {
 pub fn get_thumbnail(db: State<'_, DbState>, file_id: i64) -> Result<String, AppError> {
     use base64::Engine;
 
-    let conn = lock_db(&db)?;
-
-    let thumbnail_path: Option<String> = conn
-        .query_row(
+    // Query thumbnail path from DB, then drop the lock before file I/O
+    let thumbnail_path: Option<String> = {
+        let conn = lock_db(&db)?;
+        conn.query_row(
             "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
             [file_id],
             |row| row.get(0),
@@ -381,8 +381,10 @@ pub fn get_thumbnail(db: State<'_, DbState>, file_id: i64) -> Result<String, App
                 AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
             }
             other => AppError::Database(other),
-        })?;
+        })?
+    };
 
+    // Read file without holding the DB lock
     match thumbnail_path {
         Some(path) if !path.is_empty() => {
             let data = std::fs::read(&path)?;
