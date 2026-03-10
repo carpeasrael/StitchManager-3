@@ -56,6 +56,7 @@ export class FileList extends Component {
 
   render(): void {
     const files = appState.get("files");
+    this.lastClickedIndex = null;
 
     this.el.innerHTML = "";
 
@@ -228,6 +229,7 @@ export class FileList extends Component {
       const rangeIds = files.slice(start, end + 1).map((f) => f.id);
       appState.set("selectedFileIds", rangeIds);
       appState.set("selectedFileId", fileId);
+      this.lastClickedIndex = index;
     } else if (e.metaKey || e.ctrlKey) {
       // Cmd/Ctrl+click: toggle in multi-select
       const current = appState.get("selectedFileIds");
