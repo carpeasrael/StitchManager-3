@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use super::{EmbroideryParser, ParsedFileInfo};
+use super::{EmbroideryParser, ParsedFileInfo, StitchSegment};
 
 pub struct DstParser;
 
@@ -34,15 +34,13 @@ fn header_field(data: &[u8], offset: usize, len: usize) -> String {
 }
 
 /// Parse a numeric value from a DST header field (skipping the label prefix).
-/// The field starts at `offset` with format "LA:value\r" where the value portion
-/// starts after the label.
 fn parse_header_number(data: &[u8], value_offset: usize, value_len: usize) -> Option<i64> {
     let s = header_field(data, value_offset, value_len);
     s.parse::<i64>().ok()
 }
 
 /// Decode a DST balanced-ternary triplet into (dx, dy) displacements.
-pub fn decode_dst_triplet(b0: u8, b1: u8, b2: u8) -> (i32, i32) {
+pub(crate) fn decode_dst_triplet(b0: u8, b1: u8, b2: u8) -> (i32, i32) {
     let bit = |byte: u8, pos: u8| -> i32 { ((byte >> pos) & 1) as i32 };
 
     let dx = bit(b2, 2) * 81 - bit(b2, 3) * 81
@@ -79,6 +77,72 @@ fn triplet_command(b2: u8) -> DstCommand {
     }
 }
 
+/// Decode DST stitch data into StitchSegments (split on color changes and jumps).
+pub(crate) fn decode_dst_stitch_segments(data: &[u8]) -> Vec<StitchSegment> {
+    let mut segments = Vec::new();
+    let mut current_points = Vec::new();
+    let mut color_index: usize = 0;
+    let mut x: f64 = 0.0;
+    let mut y: f64 = 0.0;
+    let mut pos = DST_HEADER_SIZE;
+
+    current_points.push((x, y));
+
+    while pos + 3 <= data.len() {
+        let b0 = data[pos];
+        let b1 = data[pos + 1];
+        let b2 = data[pos + 2];
+        pos += 3;
+
+        let cmd = triplet_command(b2);
+
+        if cmd == DstCommand::End {
+            break;
+        }
+
+        if cmd == DstCommand::ColorChange {
+            if current_points.len() > 1 {
+                segments.push(StitchSegment {
+                    color_index,
+                    color_hex: None, // DST has no color info
+                    points: current_points,
+                });
+            }
+            color_index += 1;
+            current_points = Vec::new();
+            current_points.push((x, y));
+            continue;
+        }
+
+        let (dx, dy) = decode_dst_triplet(b0, b1, b2);
+        x += dx as f64 * 0.1;
+        y += dy as f64 * 0.1;
+
+        if cmd == DstCommand::Jump {
+            if current_points.len() > 1 {
+                segments.push(StitchSegment {
+                    color_index,
+                    color_hex: None,
+                    points: current_points,
+                });
+            }
+            current_points = Vec::new();
+        }
+
+        current_points.push((x, y));
+    }
+
+    if current_points.len() > 1 {
+        segments.push(StitchSegment {
+            color_index,
+            color_hex: None,
+            points: current_points,
+        });
+    }
+
+    segments
+}
+
 impl EmbroideryParser for DstParser {
     fn supported_extensions(&self) -> &[&str] {
         &["dst"]
@@ -93,6 +157,12 @@ impl EmbroideryParser for DstParser {
         if &data[0..3] != b"LA:" {
             return Err(parse_err("Invalid DST header (expected LA: at offset 0)"));
         }
+
+        // Design name from LA field (bytes 3-18, 16 chars max)
+        let design_name = {
+            let raw = header_field(data, 3, 16);
+            if raw.is_empty() { None } else { Some(raw) }
+        };
 
         // Parse header fields using named offsets
         let stitch_count = parse_header_number(data, ST_VALUE_OFFSET, ST_VALUE_LEN)
@@ -120,8 +190,11 @@ impl EmbroideryParser for DstParser {
         // Color count: CO field stores color changes, actual colors = changes + 1
         let color_count = u16::try_from(color_changes + 1).unwrap_or(u16::MAX);
 
-        // Verify stitch count by decoding triplets
+        // Decode triplets for stitch count, jump count, and trim count
         let mut decoded_stitches: u32 = 0;
+        let mut jump_count: u32 = 0;
+        let mut trim_count: u32 = 0;
+        let mut consecutive_jumps: u32 = 0;
         let mut pos = DST_HEADER_SIZE;
 
         while pos + 3 <= data.len() {
@@ -129,19 +202,46 @@ impl EmbroideryParser for DstParser {
             pos += 3;
 
             match triplet_command(b2) {
-                DstCommand::End => break,
-                DstCommand::ColorChange => {}
-                DstCommand::Normal | DstCommand::Jump => {
+                DstCommand::End => {
+                    if consecutive_jumps >= 2 {
+                        trim_count += 1;
+                    }
+                    consecutive_jumps = 0;
+                    break;
+                }
+                DstCommand::ColorChange => {
+                    if consecutive_jumps >= 2 {
+                        trim_count += 1;
+                    }
+                    consecutive_jumps = 0;
+                }
+                DstCommand::Jump => {
+                    jump_count += 1;
+                    consecutive_jumps += 1;
+                }
+                DstCommand::Normal => {
                     decoded_stitches += 1;
+                    if consecutive_jumps >= 2 {
+                        trim_count += 1;
+                    }
+                    consecutive_jumps = 0;
                 }
             }
         }
 
-        // Use header stitch count if available and within u32 range, otherwise decoded count
-        let final_stitch_count = if stitch_count > 0 && stitch_count <= u32::MAX as i64 {
+        // Flush trailing jumps (data exhausted without explicit End marker)
+        if consecutive_jumps >= 2 {
+            trim_count += 1;
+        }
+
+        // Prefer decoded count (excludes jumps, consistent with PES/JEF).
+        // Fall back to header value only if decoding yielded nothing.
+        let final_stitch_count = if decoded_stitches > 0 {
+            decoded_stitches
+        } else if stitch_count > 0 && stitch_count <= u32::MAX as i64 {
             stitch_count as u32
         } else {
-            decoded_stitches
+            0
         };
 
         Ok(ParsedFileInfo {
@@ -149,15 +249,26 @@ impl EmbroideryParser for DstParser {
             format_version: None,
             width_mm: Some(width_mm),
             height_mm: Some(height_mm),
-            stitch_count: Some(final_stitch_count),
-            color_count: Some(color_count),
+            stitch_count: i32::try_from(final_stitch_count).ok(),
+            color_count: Some(color_count as i32),
             colors: Vec::new(), // DST has no color information
+            design_name,
+            jump_count: i32::try_from(jump_count).ok(),
+            trim_count: i32::try_from(trim_count).ok(),
+            hoop_width_mm: None,
+            hoop_height_mm: None,
         })
     }
 
     fn extract_thumbnail(&self, _data: &[u8]) -> Result<Option<Vec<u8>>, AppError> {
-        // DST format does not contain embedded thumbnails
         Ok(None)
+    }
+
+    fn extract_stitch_segments(&self, data: &[u8]) -> Result<Vec<StitchSegment>, AppError> {
+        if data.len() < DST_HEADER_SIZE {
+            return Err(parse_err("File too small for DST header (< 512 bytes)"));
+        }
+        Ok(decode_dst_stitch_segments(data))
     }
 }
 
@@ -197,7 +308,6 @@ mod tests {
 
     #[test]
     fn test_decode_triplet_positive_x() {
-        // bit 0 of b0 = +1 X → dx=1
         let (dx, dy) = decode_dst_triplet(0x01, 0x00, 0x03);
         assert_eq!(dx, 1);
         assert_eq!(dy, 0);
@@ -205,7 +315,6 @@ mod tests {
 
     #[test]
     fn test_decode_triplet_positive_y() {
-        // bit 7 of b0 = +1 Y → dy=1
         let (dx, dy) = decode_dst_triplet(0x80, 0x00, 0x03);
         assert_eq!(dx, 0);
         assert_eq!(dy, 1);
@@ -213,12 +322,9 @@ mod tests {
 
     #[test]
     fn test_decode_triplet_max() {
-        // All positive bits set: 1+9 (b0) + 3+27 (b1) + 81 (b2) = 121
-        // X positive bits: b0[0]=+1, b0[2]=+9, b1[0]=+3, b1[2]=+27, b2[2]=+81
-        // Y positive bits: b0[7]=+1, b0[5]=+9, b1[7]=+3, b1[5]=+27, b2[5]=+81
-        let b0: u8 = 0x01 | 0x04 | 0x80 | 0x20; // x: +1, +9; y: +1, +9
-        let b1: u8 = 0x01 | 0x04 | 0x80 | 0x20; // x: +3, +27; y: +3, +27
-        let b2: u8 = 0x04 | 0x20 | 0x03; // x: +81; y: +81; normal
+        let b0: u8 = 0x01 | 0x04 | 0x80 | 0x20;
+        let b1: u8 = 0x01 | 0x04 | 0x80 | 0x20;
+        let b2: u8 = 0x04 | 0x20 | 0x03;
         let (dx, dy) = decode_dst_triplet(b0, b1, b2);
         assert_eq!(dx, 121);
         assert_eq!(dy, 121);
@@ -240,11 +346,14 @@ mod tests {
 
         assert_eq!(info.format, "DST");
         assert!(info.format_version.is_none());
-        assert!(info.width_mm.unwrap() > 0.0, "Width should be positive");
-        assert!(info.height_mm.unwrap() > 0.0, "Height should be positive");
-        assert!(info.stitch_count.unwrap() > 0, "Should have stitches");
-        assert!(info.color_count.unwrap() > 0, "Should have at least 1 color");
-        assert!(info.colors.is_empty(), "DST should have no color info");
+        assert!(info.width_mm.unwrap() > 0.0);
+        assert!(info.height_mm.unwrap() > 0.0);
+        assert!(info.stitch_count.unwrap() > 0);
+        assert!(info.color_count.unwrap() > 0);
+        assert!(info.colors.is_empty());
+        assert!(info.design_name.is_some());
+        assert!(info.jump_count.unwrap() > 0);
+        assert!(info.trim_count.is_some());
     }
 
     #[test]
@@ -271,12 +380,12 @@ mod tests {
         let parser = DstParser;
         let info = parser.parse(&data).unwrap();
 
-        // From the hex dump: ST: 27255, CO: 5, +X: 509, -X: 509, +Y: 636, -Y: 636
-        assert_eq!(info.stitch_count.unwrap(), 27255);
-        assert_eq!(info.color_count.unwrap(), 6); // CO:5 means 5 changes = 6 colors
-        // Width = (509 + 509) * 0.1 = 101.8mm
+        // Decoded count excludes jumps (consistent with PES/JEF).
+        // Header ST field reports 27255 including jumps.
+        let sc = info.stitch_count.unwrap();
+        assert!(sc > 0 && sc < 27255, "Stitch count {sc} should exclude jumps");
+        assert_eq!(info.color_count.unwrap(), 6);
         assert!((info.width_mm.unwrap() - 101.8).abs() < 0.01);
-        // Height = (636 + 636) * 0.1 = 127.2mm
         assert!((info.height_mm.unwrap() - 127.2).abs() < 0.01);
     }
 
@@ -290,14 +399,20 @@ mod tests {
 
     #[test]
     fn test_dst_dimensions_match_header() {
-        // Verify that the dimensions calculated from the header fields are consistent
         let data = load_example("2.DST");
         let parser = DstParser;
         let info = parser.parse(&data).unwrap();
 
-        // +X + -X should give the width, +Y + -Y the height
-        // Both should be positive
         assert!(info.width_mm.unwrap() > 0.0);
         assert!(info.height_mm.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn test_dst_stitch_segments() {
+        let data = load_example("2.DST");
+        let parser = DstParser;
+        let segments = parser.extract_stitch_segments(&data).unwrap();
+        assert!(!segments.is_empty(), "Should have stitch segments");
+        assert!(segments[0].points.len() > 1, "First segment should have points");
     }
 }

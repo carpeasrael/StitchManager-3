@@ -283,6 +283,10 @@ export class MetadataPanel extends Component {
       );
     }
 
+    if (file.designName) {
+      this.addInfoRow(infoGrid, "Designname", file.designName);
+    }
+
     if (file.stitchCount !== null) {
       this.addInfoRow(
         infoGrid,
@@ -293,6 +297,30 @@ export class MetadataPanel extends Component {
 
     if (file.colorCount !== null) {
       this.addInfoRow(infoGrid, "Farben", String(file.colorCount));
+    }
+
+    if (file.jumpCount !== null && file.jumpCount > 0) {
+      this.addInfoRow(
+        infoGrid,
+        "Sprungstiche",
+        file.jumpCount.toLocaleString("de-DE")
+      );
+    }
+
+    if (file.trimCount !== null && file.trimCount > 0) {
+      this.addInfoRow(
+        infoGrid,
+        "Schnitte",
+        file.trimCount.toLocaleString("de-DE")
+      );
+    }
+
+    if (file.hoopWidthMm !== null && file.hoopHeightMm !== null) {
+      this.addInfoRow(
+        infoGrid,
+        "Stickrahmen",
+        `${file.hoopWidthMm.toFixed(0)} \u00D7 ${file.hoopHeightMm.toFixed(0)} mm`
+      );
     }
 
     if (file.fileSizeBytes !== null) {

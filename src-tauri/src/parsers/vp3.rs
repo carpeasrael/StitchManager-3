@@ -2,7 +2,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use std::io::Cursor;
 
 use crate::error::AppError;
-use super::{EmbroideryParser, ParsedColor, ParsedFileInfo};
+use super::{EmbroideryParser, ParsedColor, ParsedFileInfo, StitchSegment};
 
 pub struct Vp3Parser;
 
@@ -86,6 +86,7 @@ impl EmbroideryParser for Vp3Parser {
         let mut pos = if has_vsm_magic { 5 } else { 3 };
         let mut colors = Vec::new();
         let mut total_stitches: u32 = 0;
+        let mut total_jumps: u32 = 0;
         let mut min_x: f64 = f64::MAX;
         let mut max_x: f64 = f64::MIN;
         let mut min_y: f64 = f64::MAX;
@@ -99,6 +100,7 @@ impl EmbroideryParser for Vp3Parser {
                 Ok((design_info, new_pos)) => {
                     colors = design_info.colors;
                     total_stitches = design_info.stitch_count;
+                    total_jumps = design_info.jump_count;
                     min_x = design_info.min_x;
                     max_x = design_info.max_x;
                     min_y = design_info.min_y;
@@ -110,6 +112,7 @@ impl EmbroideryParser for Vp3Parser {
                     if let Some(info) = scan_vp3_structure(data) {
                         colors = info.colors;
                         total_stitches = info.stitch_count;
+                        total_jumps = info.jump_count;
                         min_x = info.min_x;
                         max_x = info.max_x;
                         min_y = info.min_y;
@@ -132,16 +135,21 @@ impl EmbroideryParser for Vp3Parser {
             0.0
         };
 
-        let color_count = u16::try_from(colors.len()).unwrap_or(u16::MAX);
+        let color_count = i32::try_from(colors.len()).unwrap_or(i32::MAX);
 
         Ok(ParsedFileInfo {
             format: "VP3".to_string(),
             format_version: None,
             width_mm: Some(width_mm),
             height_mm: Some(height_mm),
-            stitch_count: Some(total_stitches),
+            stitch_count: i32::try_from(total_stitches).ok(),
             color_count: Some(color_count),
             colors,
+            design_name: None,
+            jump_count: i32::try_from(total_jumps).ok(),
+            trim_count: None,
+            hoop_width_mm: None,
+            hoop_height_mm: None,
         })
     }
 
@@ -149,11 +157,27 @@ impl EmbroideryParser for Vp3Parser {
         // VP3 format does not contain embedded thumbnails
         Ok(None)
     }
+
+    fn extract_stitch_segments(&self, data: &[u8]) -> Result<Vec<StitchSegment>, AppError> {
+        if data.len() < 20 {
+            return Err(parse_err("File too small for VP3 header"));
+        }
+
+        let has_vsm_magic = data.len() >= 5 && &data[0..5] == VP3_MAGIC;
+        let has_alt_magic = data.len() >= 3 && &data[0..3] == VP3_MAGIC_ALT;
+        if !has_vsm_magic && !has_alt_magic {
+            return Err(parse_err("Invalid VP3 magic bytes"));
+        }
+
+        // Single-pass decoding: captures both colors and coordinates
+        Ok(decode_vp3_stitch_segments(data))
+    }
 }
 
 struct Vp3DesignInfo {
     colors: Vec<ParsedColor>,
     stitch_count: u32,
+    jump_count: u32,
     min_x: f64,
     max_x: f64,
     min_y: f64,
@@ -165,6 +189,7 @@ fn parse_vp3_design(data: &[u8], start: usize) -> Result<(Vp3DesignInfo, usize),
     let mut pos = start;
     let mut colors = Vec::new();
     let mut total_stitches: u32 = 0;
+    let mut total_jumps: u32 = 0;
     let mut x: f64 = 0.0;
     let mut y: f64 = 0.0;
     let mut min_x: f64 = 0.0;
@@ -214,9 +239,10 @@ fn parse_vp3_design(data: &[u8], start: usize) -> Result<(Vp3DesignInfo, usize),
         if let Some((color, stitch_data_start, section_end)) = try_parse_color_section(data, pos) {
             colors.push(color);
 
-            // Count stitches in this section
-            let section_stitches = count_vp3_stitches(data, stitch_data_start, section_end);
+            // Count stitches and jumps in this section
+            let (section_stitches, section_jumps) = count_vp3_stitches(data, stitch_data_start, section_end);
             total_stitches = total_stitches.saturating_add(section_stitches);
+            total_jumps = total_jumps.saturating_add(section_jumps);
 
             // Update coordinate bounds from stitch data
             let (seg_min_x, seg_max_x, seg_min_y, seg_max_y) =
@@ -244,6 +270,7 @@ fn parse_vp3_design(data: &[u8], start: usize) -> Result<(Vp3DesignInfo, usize),
         Vp3DesignInfo {
             colors,
             stitch_count: total_stitches,
+            jump_count: total_jumps,
             min_x,
             max_x,
             min_y,
@@ -371,13 +398,27 @@ fn try_parse_color_section(
     Some((color, stitch_data_start, block_end))
 }
 
-/// Count stitches in a VP3 stitch data section.
+/// Count stitches and jumps in a VP3 stitch data section.
 /// VP3 stitch data uses i16 BE coordinate pairs.
-fn count_vp3_stitches(data: &[u8], start: usize, end: usize) -> u32 {
+/// Returns (stitch_count_excluding_jumps, jump_count).
+fn count_vp3_stitches(data: &[u8], start: usize, end: usize) -> (u32, u32) {
     let effective_end = end.min(data.len());
-    let byte_count = effective_end.saturating_sub(start);
-    // Each stitch is 4 bytes (i16 X + i16 Y)
-    (byte_count / 4) as u32
+    let mut stitch_count: u32 = 0;
+    let mut jump_count: u32 = 0;
+    let mut pos = start;
+
+    while pos + 4 <= effective_end {
+        if let (Ok(dx), Ok(dy)) = (read_i16_be(data, pos), read_i16_be(data, pos + 2)) {
+            if (dx as i32).abs() > VP3_JUMP_THRESHOLD || (dy as i32).abs() > VP3_JUMP_THRESHOLD {
+                jump_count += 1;
+            } else {
+                stitch_count += 1;
+            }
+        }
+        pos += 4;
+    }
+
+    (stitch_count, jump_count)
 }
 
 /// Compute bounding box from VP3 stitch data (i16 BE coordinate pairs).
@@ -493,6 +534,7 @@ fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
     Some(Vp3DesignInfo {
         colors,
         stitch_count: 0,
+        jump_count: 0,
         min_x: 0.0,
         max_x: 0.0,
         min_y: 0.0,
@@ -500,16 +542,16 @@ fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
     })
 }
 
-/// Decode VP3 stitch coordinates into segments (split on color sections).
-/// Each segment is a Vec of (x, y) absolute positions in mm.
-pub fn decode_vp3_stitch_coordinates(data: &[u8]) -> Vec<Vec<(f64, f64)>> {
-    // VP3 stores stitch data within color sections.
-    // We try to find and decode each section.
-    let mut segments: Vec<Vec<(f64, f64)>> = Vec::new();
+/// Jump threshold in VP3 coordinate units (0.01mm). Displacements exceeding
+/// this on either axis are treated as jumps and split the current segment.
+const VP3_JUMP_THRESHOLD: i32 = 500; // 5mm
+
+/// Single-pass decoding: captures both colors and stitch coordinates into StitchSegments.
+fn decode_vp3_stitch_segments(data: &[u8]) -> Vec<StitchSegment> {
+    let mut segments = Vec::new();
     let mut x: f64 = 0.0;
     let mut y: f64 = 0.0;
 
-    // Find color sections
     let mut pos = if data.len() >= 5 && &data[0..5] == VP3_MAGIC {
         5
     } else if data.len() >= 3 && &data[0..3] == VP3_MAGIC_ALT {
@@ -518,7 +560,7 @@ pub fn decode_vp3_stitch_coordinates(data: &[u8]) -> Vec<Vec<(f64, f64)>> {
         return segments;
     };
 
-    // Skip initial metadata
+    // Skip initial metadata strings
     for _ in 0..5 {
         if pos + 2 > data.len() {
             break;
@@ -536,25 +578,46 @@ pub fn decode_vp3_stitch_coordinates(data: &[u8]) -> Vec<Vec<(f64, f64)>> {
         pos += 16;
     }
 
+    let mut color_index: usize = 0;
     while pos + 10 <= data.len() {
-        if let Some((_color, stitch_start, section_end)) = try_parse_color_section(data, pos) {
-            let mut segment = Vec::new();
-            segment.push((x, y));
+        if let Some((color, stitch_start, section_end)) = try_parse_color_section(data, pos) {
+            let color_hex = color.hex;
+            let mut points = Vec::new();
+            points.push((x, y));
 
             let effective_end = section_end.min(data.len());
             let mut sp = stitch_start;
             while sp + 4 <= effective_end {
                 if let (Ok(dx), Ok(dy)) = (read_i16_be(data, sp), read_i16_be(data, sp + 2)) {
+                    // Heuristic jump detection: large displacement (>5mm)
+                    let is_jump = (dx as i32).abs() > VP3_JUMP_THRESHOLD || (dy as i32).abs() > VP3_JUMP_THRESHOLD;
+
                     x += dx as f64 * 0.01;
                     y += dy as f64 * 0.01;
-                    segment.push((x, y));
+
+                    if is_jump {
+                        if points.len() > 1 {
+                            segments.push(StitchSegment {
+                                color_index,
+                                color_hex: Some(color_hex.clone()),
+                                points,
+                            });
+                        }
+                        points = Vec::new();
+                    }
+                    points.push((x, y));
                 }
                 sp += 4;
             }
 
-            if segment.len() > 1 {
-                segments.push(segment);
+            if points.len() > 1 {
+                segments.push(StitchSegment {
+                    color_index,
+                    color_hex: Some(color_hex),
+                    points,
+                });
             }
+            color_index += 1;
             pos = section_end;
         } else {
             pos += 1;

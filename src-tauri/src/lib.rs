@@ -107,6 +107,7 @@ pub fn run() {
             commands::settings::create_custom_field,
             commands::settings::delete_custom_field,
             commands::scanner::parse_embroidery_file,
+            commands::scanner::get_stitch_segments,
             commands::batch::batch_rename,
             commands::batch::batch_organize,
             commands::batch::batch_export_usb,

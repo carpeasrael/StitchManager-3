@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 1;
+const CURRENT_VERSION: i32 = 2;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -49,8 +49,9 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
         apply_v1(conn)?;
     }
 
-    // Future migrations:
-    // if current < 2 { apply_v2(conn)?; }
+    if current < 2 {
+        apply_v2(conn)?;
+    }
 
     Ok(())
 }
@@ -213,6 +214,24 @@ fn apply_v1(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v2(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE embroidery_files ADD COLUMN design_name TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN jump_count INTEGER;
+        ALTER TABLE embroidery_files ADD COLUMN trim_count INTEGER;
+        ALTER TABLE embroidery_files ADD COLUMN hoop_width_mm REAL;
+        ALTER TABLE embroidery_files ADD COLUMN hoop_height_mm REAL;
+
+        INSERT INTO schema_version (version, description) VALUES (2, 'Add parser metadata fields');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,7 +276,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1, "Schema version must still be 1");
+        assert_eq!(version, 2, "Schema version must be 2");
     }
 
     #[test]
@@ -280,22 +299,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_one() {
+    fn test_schema_version_is_two() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 1",
+                "SELECT description FROM schema_version WHERE version = 2",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Initial schema");
+        assert_eq!(desc, "Add parser metadata fields");
     }
 
     #[test]

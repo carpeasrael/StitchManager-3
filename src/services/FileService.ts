@@ -5,6 +5,7 @@ import type {
   FileUpdate,
   ThreadColor,
   Tag,
+  StitchSegment,
 } from "../types/index";
 
 export async function getFiles(
@@ -59,4 +60,10 @@ export async function getAllTags(): Promise<Tag[]> {
 
 export async function getThumbnail(fileId: number): Promise<string> {
   return invoke<string>("get_thumbnail", { fileId });
+}
+
+export async function getStitchSegments(
+  filepath: string
+): Promise<StitchSegment[]> {
+  return invoke<StitchSegment[]>("get_stitch_segments", { filepath });
 }

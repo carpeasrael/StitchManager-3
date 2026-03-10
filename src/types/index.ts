@@ -23,6 +23,11 @@ export interface EmbroideryFile {
   colorCount: number | null;
   fileSizeBytes: number | null;
   thumbnailPath: string | null;
+  designName: string | null;
+  jumpCount: number | null;
+  trimCount: number | null;
+  hoopWidthMm: number | null;
+  hoopHeightMm: number | null;
   aiAnalyzed: boolean;
   aiConfirmed: boolean;
   createdAt: string;
@@ -77,6 +82,12 @@ export interface FileUpdate {
   theme?: string;
   description?: string;
   license?: string;
+}
+
+export interface StitchSegment {
+  colorIndex: number;
+  colorHex: string | null;
+  points: [number, number][];
 }
 
 export interface CustomFieldDef {

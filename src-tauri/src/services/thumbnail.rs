@@ -66,8 +66,8 @@ impl ThumbnailGenerator {
                 scale_monochrome_thumbnail(&pixels, 48, 38)
             }
             None => {
-                // Render from stitch coordinates
-                render_stitch_thumbnail(data, ext)?
+                // Render from stitch coordinates using the same parser
+                render_stitch_thumbnail(data, parser)?
             }
         };
 
@@ -136,91 +136,26 @@ fn scale_monochrome_thumbnail(pixels: &[u8], src_w: u32, src_h: u32) -> RgbaImag
     img
 }
 
-/// Render a thumbnail from stitch coordinate data.
-fn render_stitch_thumbnail(data: &[u8], ext: &str) -> Result<RgbaImage, AppError> {
-    let segments = match ext.to_lowercase().as_str() {
-        "dst" => decode_dst_stitch_coordinates(data),
-        "jef" => {
-            // JEF stitch offset is at byte 0
-            let offset = if data.len() >= 4 {
-                u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize
-            } else {
-                0
-            };
-            if offset > 0 && offset < data.len() {
-                crate::parsers::jef::decode_jef_stitch_coordinates(data, offset)
-            } else {
-                Vec::new()
-            }
-        }
-        "vp3" => crate::parsers::vp3::decode_vp3_stitch_coordinates(data),
-        _ => Vec::new(),
-    };
-
-    Ok(render_segments_to_image(&segments))
+/// Parse a hex color string (#RRGGBB) into an Rgba pixel.
+fn parse_hex_color(hex: &str) -> Option<Rgba<u8>> {
+    let hex = hex.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(Rgba([r, g, b, 255]))
 }
 
-/// Decode DST stitch coordinates into segments (split on color changes).
-fn decode_dst_stitch_coordinates(data: &[u8]) -> Vec<Vec<(f64, f64)>> {
-    use crate::parsers::dst;
-
-    let mut segments: Vec<Vec<(f64, f64)>> = Vec::new();
-    let mut current: Vec<(f64, f64)> = Vec::new();
-    let mut x: f64 = 0.0;
-    let mut y: f64 = 0.0;
-    let mut pos = 512usize; // DST header is 512 bytes
-
-    current.push((x, y));
-
-    while pos + 3 <= data.len() {
-        let b0 = data[pos];
-        let b1 = data[pos + 1];
-        let b2 = data[pos + 2];
-        pos += 3;
-
-        // Use the triplet command detection from DST parser
-        // Mask 0xF3 zeroes displacement bits [3:2] to isolate command bits [7:6]+[1:0]
-        let cmd = b2 & 0xF3;
-
-        if cmd == 0xF3 {
-            // End
-            break;
-        }
-
-        if cmd == 0xC3 {
-            // Color change
-            if current.len() > 1 {
-                segments.push(current);
-            }
-            current = Vec::new();
-            current.push((x, y));
-            continue;
-        }
-
-        let (dx, dy) = dst::decode_dst_triplet(b0, b1, b2);
-        x += dx as f64 * 0.1; // DST units are 0.1mm
-        y += dy as f64 * 0.1;
-
-        if cmd == 0x83 {
-            // Jump — start a new sub-path without drawing
-            if current.len() > 1 {
-                segments.push(current);
-            }
-            current = Vec::new();
-        }
-
-        current.push((x, y));
-    }
-
-    if current.len() > 1 {
-        segments.push(current);
-    }
-
-    segments
+/// Render a thumbnail from stitch coordinate data using the parser's extract_stitch_segments.
+fn render_stitch_thumbnail(data: &[u8], parser: &dyn parsers::EmbroideryParser) -> Result<RgbaImage, AppError> {
+    let stitch_segments = parser.extract_stitch_segments(data)?;
+    Ok(render_segments_to_image_colored(&stitch_segments))
 }
 
-/// Render stitch coordinate segments into a 192×192 RGBA image.
-fn render_segments_to_image(segments: &[Vec<(f64, f64)>]) -> RgbaImage {
+/// Render StitchSegments into a 192×192 RGBA image using actual thread colors.
+fn render_segments_to_image_colored(segments: &[parsers::StitchSegment]) -> RgbaImage {
     let mut img = ImageBuffer::new(TARGET_WIDTH, TARGET_HEIGHT);
 
     // Fill with white background
@@ -239,7 +174,7 @@ fn render_segments_to_image(segments: &[Vec<(f64, f64)>]) -> RgbaImage {
     let mut max_y = f64::MIN;
 
     for seg in segments {
-        for &(x, y) in seg {
+        for &(x, y) in &seg.points {
             if x < min_x { min_x = x; }
             if x > max_x { max_x = x; }
             if y < min_y { min_y = y; }
@@ -262,13 +197,18 @@ fn render_segments_to_image(segments: &[Vec<(f64, f64)>]) -> RgbaImage {
     let offset_x = PADDING as f64 + (draw_w - data_w * scale) / 2.0;
     let offset_y = PADDING as f64 + (draw_h - data_h * scale) / 2.0;
 
-    // Draw each segment with a different color
-    for (seg_idx, seg) in segments.iter().enumerate() {
-        let (r, g, b) = DEFAULT_COLORS[seg_idx % DEFAULT_COLORS.len()];
-        let color = Rgba([r, g, b, 255]);
+    // Draw each segment with its actual color, falling back to default palette
+    for seg in segments {
+        let color = seg
+            .color_hex
+            .as_deref()
+            .and_then(parse_hex_color)
+            .unwrap_or_else(|| {
+                let (r, g, b) = DEFAULT_COLORS[seg.color_index % DEFAULT_COLORS.len()];
+                Rgba([r, g, b, 255])
+            });
 
-        for window in seg.windows(2) {
-            // Clamp to image bounds before i32 cast to prevent overflow in Bresenham
+        for window in seg.points.windows(2) {
             let clamp = |v: f64| v.clamp(-1.0, (TARGET_WIDTH + 1) as f64) as i32;
             let x0 = clamp((window[0].0 - min_x) * scale + offset_x);
             let y0 = clamp((window[0].1 - min_y) * scale + offset_y);
@@ -419,16 +359,20 @@ mod tests {
 
     #[test]
     fn test_render_empty_segments() {
-        let segments: Vec<Vec<(f64, f64)>> = Vec::new();
-        let img = render_segments_to_image(&segments);
+        let segments: Vec<parsers::StitchSegment> = Vec::new();
+        let img = render_segments_to_image_colored(&segments);
         assert_eq!(img.width(), TARGET_WIDTH);
         assert_eq!(img.height(), TARGET_HEIGHT);
     }
 
     #[test]
     fn test_render_single_segment() {
-        let segments = vec![vec![(0.0, 0.0), (10.0, 10.0), (20.0, 0.0)]];
-        let img = render_segments_to_image(&segments);
+        let segments = vec![parsers::StitchSegment {
+            color_index: 0,
+            color_hex: Some("#FF0000".to_string()),
+            points: vec![(0.0, 0.0), (10.0, 10.0), (20.0, 0.0)],
+        }];
+        let img = render_segments_to_image_colored(&segments);
         assert_eq!(img.width(), TARGET_WIDTH);
         assert_eq!(img.height(), TARGET_HEIGHT);
 
@@ -438,10 +382,23 @@ mod tests {
     }
 
     #[test]
-    fn test_dst_stitch_coordinates() {
+    fn test_dst_stitch_segments_via_parser() {
         let data = load_example("2.DST");
-        let segments = decode_dst_stitch_coordinates(&data);
+        let parser = parsers::get_parser("dst").unwrap();
+        let segments = parser.extract_stitch_segments(&data).unwrap();
         assert!(!segments.is_empty(), "DST should have stitch segments");
-        assert!(segments[0].len() > 1, "First segment should have points");
+        assert!(segments[0].points.len() > 1, "First segment should have points");
+    }
+
+    #[test]
+    fn test_parse_hex_color() {
+        let c = parse_hex_color("#FF0000").unwrap();
+        assert_eq!(c, Rgba([255, 0, 0, 255]));
+
+        let c = parse_hex_color("#00FF00").unwrap();
+        assert_eq!(c, Rgba([0, 255, 0, 255]));
+
+        assert!(parse_hex_color("invalid").is_none());
+        assert!(parse_hex_color("#GG0000").is_none());
     }
 }

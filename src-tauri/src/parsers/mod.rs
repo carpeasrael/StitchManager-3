@@ -15,9 +15,14 @@ pub struct ParsedFileInfo {
     pub format_version: Option<String>,
     pub width_mm: Option<f64>,
     pub height_mm: Option<f64>,
-    pub stitch_count: Option<u32>,
-    pub color_count: Option<u16>,
+    pub stitch_count: Option<i32>,
+    pub color_count: Option<i32>,
     pub colors: Vec<ParsedColor>,
+    pub design_name: Option<String>,
+    pub jump_count: Option<i32>,
+    pub trim_count: Option<i32>,
+    pub hoop_width_mm: Option<f64>,
+    pub hoop_height_mm: Option<f64>,
 }
 
 /// A single thread color extracted from the file.
@@ -30,12 +35,22 @@ pub struct ParsedColor {
     pub brand_code: Option<String>,
 }
 
+/// A segment of stitches for a single color layer.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StitchSegment {
+    pub color_index: usize,
+    pub color_hex: Option<String>,
+    pub points: Vec<(f64, f64)>,
+}
+
 /// Common interface for all embroidery format parsers.
-#[allow(dead_code)]
+#[allow(dead_code)] // supported_extensions() is used in tests only
 pub trait EmbroideryParser: Send + Sync {
     fn supported_extensions(&self) -> &[&str];
     fn parse(&self, data: &[u8]) -> Result<ParsedFileInfo, AppError>;
     fn extract_thumbnail(&self, data: &[u8]) -> Result<Option<Vec<u8>>, AppError>;
+    fn extract_stitch_segments(&self, data: &[u8]) -> Result<Vec<StitchSegment>, AppError>;
 }
 
 /// Look up a parser implementation by file extension (case-insensitive).

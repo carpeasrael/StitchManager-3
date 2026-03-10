@@ -6,7 +6,7 @@ use crate::DbState;
 use crate::db::models::EmbroideryFile;
 use crate::db::queries::{FILE_SELECT, row_to_file};
 use crate::error::{lock_db, AppError};
-use crate::parsers::{self, ParsedFileInfo};
+use crate::parsers::{self, ParsedFileInfo, StitchSegment};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3"];
 
@@ -93,9 +93,9 @@ pub fn import_files(
     file_paths: Vec<String>,
     folder_id: i64,
 ) -> Result<Vec<EmbroideryFile>, AppError> {
-    // Collect filesystem metadata before acquiring the DB lock to avoid
-    // holding the mutex during potentially slow I/O.
-    let file_info: Vec<(String, String, Option<i64>)> = file_paths
+    // Collect filesystem metadata and parse files before acquiring the DB lock
+    // to avoid holding the mutex during potentially slow I/O.
+    let file_info: Vec<(String, String, Option<i64>, Option<ParsedFileInfo>)> = file_paths
         .iter()
         .map(|filepath| {
             let path = std::path::Path::new(filepath);
@@ -107,7 +107,16 @@ pub fn import_files(
             let file_size: Option<i64> = std::fs::metadata(path)
                 .ok()
                 .and_then(|m| i64::try_from(m.len()).ok());
-            (filepath.clone(), filename, file_size)
+            let parsed = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(|ext| parsers::get_parser(ext))
+                .and_then(|parser| {
+                    std::fs::read(path)
+                        .ok()
+                        .and_then(|data| parser.parse(&data).ok())
+                });
+            (filepath.clone(), filename, file_size, parsed)
         })
         .collect();
 
@@ -128,7 +137,7 @@ pub fn import_files(
     let mut imported = Vec::new();
     let tx = conn.unchecked_transaction()?;
 
-    for (filepath, filename, file_size) in &file_info {
+    for (filepath, filename, file_size, parsed) in &file_info {
         let result = tx.execute(
             "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
              VALUES (?1, ?2, ?3, ?4)",
@@ -138,6 +147,28 @@ pub fn import_files(
         match result {
             Ok(changes) if changes > 0 => {
                 let id = tx.last_insert_rowid();
+                // Persist parsed metadata if available
+                if let Some(info) = parsed {
+                    let _ = tx.execute(
+                        "UPDATE embroidery_files SET \
+                         stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
+                         design_name = ?6, jump_count = ?7, trim_count = ?8, \
+                         hoop_width_mm = ?9, hoop_height_mm = ?10 \
+                         WHERE id = ?1",
+                        rusqlite::params![
+                            id,
+                            info.stitch_count,
+                            info.color_count,
+                            info.width_mm,
+                            info.height_mm,
+                            info.design_name,
+                            info.jump_count,
+                            info.trim_count,
+                            info.hoop_width_mm,
+                            info.hoop_height_mm,
+                        ],
+                    );
+                }
                 let file = tx.query_row(
                     &format!("{FILE_SELECT} WHERE id = ?1"),
                     [id],
@@ -180,6 +211,27 @@ pub fn parse_embroidery_file(filepath: String) -> Result<ParsedFileInfo, AppErro
     parser.parse(&data)
 }
 
+#[tauri::command]
+pub fn get_stitch_segments(filepath: String) -> Result<Vec<StitchSegment>, AppError> {
+    let path = std::path::Path::new(&filepath);
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .ok_or_else(|| AppError::Parse {
+            format: "unknown".to_string(),
+            message: format!("No file extension: {filepath}"),
+        })?;
+
+    let parser = parsers::get_parser(&ext).ok_or_else(|| AppError::Parse {
+        format: ext.clone(),
+        message: format!("Unsupported format: {ext}"),
+    })?;
+
+    let data = std::fs::read(&filepath)?;
+    parser.extract_stitch_segments(&data)
+}
+
 /// Auto-import files detected by the filesystem watcher.
 /// Matches each file to the best-fitting folder (longest path prefix match).
 /// Files that don't match any folder or are already imported are silently skipped.
@@ -188,11 +240,12 @@ pub fn watcher_auto_import(
     db: State<'_, DbState>,
     file_paths: Vec<String>,
 ) -> Result<u32, AppError> {
-    // Collect file metadata without holding the DB lock
+    // Collect file metadata and parse files without holding the DB lock
     struct FileInfo {
         filepath: String,
         filename: String,
         file_size: Option<i64>,
+        parsed: Option<ParsedFileInfo>,
     }
     let file_infos: Vec<FileInfo> = file_paths
         .iter()
@@ -206,7 +259,16 @@ pub fn watcher_auto_import(
             let file_size: Option<i64> = std::fs::metadata(path)
                 .ok()
                 .and_then(|m| i64::try_from(m.len()).ok());
-            FileInfo { filepath: filepath.clone(), filename, file_size }
+            let parsed = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(|ext| parsers::get_parser(ext))
+                .and_then(|parser| {
+                    std::fs::read(path)
+                        .ok()
+                        .and_then(|data| parser.parse(&data).ok())
+                });
+            FileInfo { filepath: filepath.clone(), filename, file_size, parsed }
         })
         .collect();
 
@@ -248,6 +310,29 @@ pub fn watcher_auto_import(
 
         if let Ok(changes) = result {
             if changes > 0 {
+                // Persist parsed metadata if available
+                if let Some(pinfo) = &info.parsed {
+                    let id = tx.last_insert_rowid();
+                    let _ = tx.execute(
+                        "UPDATE embroidery_files SET \
+                         stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
+                         design_name = ?6, jump_count = ?7, trim_count = ?8, \
+                         hoop_width_mm = ?9, hoop_height_mm = ?10 \
+                         WHERE id = ?1",
+                        rusqlite::params![
+                            id,
+                            pinfo.stitch_count,
+                            pinfo.color_count,
+                            pinfo.width_mm,
+                            pinfo.height_mm,
+                            pinfo.design_name,
+                            pinfo.jump_count,
+                            pinfo.trim_count,
+                            pinfo.hoop_width_mm,
+                            pinfo.hoop_height_mm,
+                        ],
+                    );
+                }
                 imported_count += 1;
             }
         }

@@ -2,7 +2,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
 
 use crate::error::AppError;
-use super::{EmbroideryParser, ParsedColor, ParsedFileInfo};
+use super::{EmbroideryParser, ParsedColor, ParsedFileInfo, StitchSegment};
 
 pub struct PesParser;
 
@@ -228,11 +228,12 @@ fn parse_pes_colors(data: &[u8], name_len: usize, pec_offset: usize) -> Result<V
 }
 
 /// Decode PEC stitch data starting at the given offset.
-/// Returns (stitch_count, color_change_count).
-fn decode_pec_stitches(data: &[u8], stitch_start: usize) -> (u32, u16) {
+/// Returns (stitch_count, color_change_count, jump_count).
+fn decode_pec_stitches(data: &[u8], stitch_start: usize) -> (u32, u16, u32) {
     let mut pos = stitch_start;
     let mut stitch_count: u32 = 0;
     let mut color_changes: u16 = 0;
+    let mut jump_count: u32 = 0;
 
     while pos < data.len() {
         let b = data[pos];
@@ -249,24 +250,40 @@ fn decode_pec_stitches(data: &[u8], stitch_start: usize) -> (u32, u16) {
             continue;
         }
 
-        // Read X displacement
+        // Read X displacement — check jump flag before masking
+        let x_byte = data[pos];
+        let mut is_jump = false;
         let (_dx, x_advance) = match decode_pec_value(data, pos) {
             Some(v) => v,
             None => break,
         };
+        if x_advance == 2 && (x_byte & 0x20) != 0 {
+            is_jump = true;
+        }
         pos += x_advance;
 
         // Read Y displacement
+        if pos >= data.len() {
+            break;
+        }
+        let y_byte = data[pos];
         let (_dy, y_advance) = match decode_pec_value(data, pos) {
             Some(v) => v,
             None => break,
         };
+        if y_advance == 2 && (y_byte & 0x20) != 0 {
+            is_jump = true;
+        }
         pos += y_advance;
 
-        stitch_count += 1;
+        if is_jump {
+            jump_count += 1;
+        } else {
+            stitch_count += 1;
+        }
     }
 
-    (stitch_count, color_changes)
+    (stitch_count, color_changes, jump_count)
 }
 
 /// Decode a single PEC displacement value.
@@ -298,102 +315,221 @@ fn decode_pec_value(data: &[u8], pos: usize) -> Option<(i32, usize)> {
     }
 }
 
+/// Decode PEC stitch data into StitchSegments (split on color changes and jumps).
+fn decode_pec_stitch_segments(
+    data: &[u8],
+    stitch_start: usize,
+    colors: &[ParsedColor],
+) -> Vec<StitchSegment> {
+    let mut segments = Vec::new();
+    let mut current_points = Vec::new();
+    let mut color_index: usize = 0;
+    let mut x: f64 = 0.0;
+    let mut y: f64 = 0.0;
+    let mut pos = stitch_start;
+
+    current_points.push((x, y));
+
+    while pos < data.len() {
+        let b = data[pos];
+        if b == 0xFF {
+            break;
+        }
+
+        // Color change
+        if b == 0xFE && pos + 2 < data.len() && data[pos + 1] == 0xB0 {
+            if current_points.len() > 1 {
+                segments.push(StitchSegment {
+                    color_index,
+                    color_hex: colors.get(color_index).map(|c| c.hex.clone()),
+                    points: current_points,
+                });
+            }
+            color_index += 1;
+            current_points = Vec::new();
+            pos += 3;
+            current_points.push((x, y));
+            continue;
+        }
+
+        let x_byte = data[pos];
+        let (dx, x_adv) = match decode_pec_value(data, pos) {
+            Some(v) => v,
+            None => break,
+        };
+        let mut is_jump = x_adv == 2 && (x_byte & 0x20) != 0;
+        pos += x_adv;
+
+        if pos >= data.len() {
+            break;
+        }
+        let y_byte = data[pos];
+        let (dy, y_adv) = match decode_pec_value(data, pos) {
+            Some(v) => v,
+            None => break,
+        };
+        if y_adv == 2 && (y_byte & 0x20) != 0 {
+            is_jump = true;
+        }
+        pos += y_adv;
+
+        x += dx as f64 * 0.1;
+        y += dy as f64 * 0.1;
+
+        if is_jump {
+            if current_points.len() > 1 {
+                segments.push(StitchSegment {
+                    color_index,
+                    color_hex: colors.get(color_index).map(|c| c.hex.clone()),
+                    points: current_points,
+                });
+            }
+            current_points = Vec::new();
+        }
+        current_points.push((x, y));
+    }
+
+    if current_points.len() > 1 {
+        segments.push(StitchSegment {
+            color_index,
+            color_hex: colors.get(color_index).map(|c| c.hex.clone()),
+            points: current_points,
+        });
+    }
+
+    segments
+}
+
+/// Extract PES header common fields needed by both parse() and extract_stitch_segments().
+struct PesHeaderInfo {
+    pec_offset: usize,
+    name_len: usize,
+    version_num: u16,
+    version: String,
+    colors: Vec<ParsedColor>,
+    stitch_start: usize,
+}
+
+fn parse_pes_header(data: &[u8]) -> Result<PesHeaderInfo, AppError> {
+    if data.len() < 12 {
+        return Err(parse_err("File too small for PES header"));
+    }
+    if &data[0..4] != b"#PES" {
+        return Err(parse_err("Invalid magic bytes (expected #PES)"));
+    }
+
+    let version = String::from_utf8_lossy(&data[4..8]).to_string();
+    let pec_offset = read_u32(data, 8)? as usize;
+    if pec_offset >= data.len() {
+        return Err(parse_err(format!(
+            "PEC offset {pec_offset} exceeds file size {}",
+            data.len()
+        )));
+    }
+
+    let name_len = if data.len() > 16 { data[16] as usize } else { 0 };
+    let version_num: u16 = version.parse().unwrap_or(0);
+
+    let pes_colors = if version_num >= 50 {
+        parse_pes_colors(data, name_len, pec_offset)?
+    } else {
+        Vec::new()
+    };
+    let colors = if !pes_colors.is_empty() {
+        pes_colors
+    } else {
+        parse_pec_palette_colors(data, pec_offset)
+    };
+
+    let stitch_start = pec_offset.checked_add(532).ok_or_else(|| {
+        parse_err("PEC offset overflow when computing stitch start position")
+    })?;
+
+    Ok(PesHeaderInfo {
+        pec_offset,
+        name_len,
+        version_num,
+        version,
+        colors,
+        stitch_start,
+    })
+}
+
 impl EmbroideryParser for PesParser {
     fn supported_extensions(&self) -> &[&str] {
         &["pes"]
     }
 
     fn parse(&self, data: &[u8]) -> Result<ParsedFileInfo, AppError> {
-        // Minimum: 12 bytes for magic + version + PEC offset
-        if data.len() < 12 {
-            return Err(parse_err("File too small for PES header"));
-        }
+        let hdr = parse_pes_header(data)?;
 
-        // Validate magic: #PES
-        if &data[0..4] != b"#PES" {
-            return Err(parse_err("Invalid magic bytes (expected #PES)"));
-        }
-
-        // Version (ASCII, e.g. "0060")
-        let version = String::from_utf8_lossy(&data[4..8]).to_string();
-
-        // PEC offset (u32 LE at byte 8)
-        let pec_offset = read_u32(data, 8)? as usize;
-        if pec_offset >= data.len() {
-            return Err(parse_err(format!(
-                "PEC offset {pec_offset} exceeds file size {}",
-                data.len()
-            )));
-        }
-
-        // Design name at offset 16: length byte + string
-        let name_len = if data.len() > 16 {
-            data[16] as usize
+        // Design name at offset 17
+        let design_name = if hdr.name_len > 0 && 17 + hdr.name_len <= data.len() {
+            let raw = String::from_utf8_lossy(&data[17..17 + hdr.name_len]).trim().to_string();
+            if raw.is_empty() { None } else { Some(raw) }
         } else {
-            0
+            None
         };
 
-        // Parse PES color objects (only reliable for v5+/v6)
-        let version_num: u16 = version.parse().unwrap_or(0);
-        let pes_colors = if version_num >= 50 {
-            parse_pes_colors(data, name_len, pec_offset)?
+        // Hoop dimensions from PES header (v5+)
+        let hoop_params_offset = 17 + hdr.name_len + 8;
+        let (hoop_width_mm, hoop_height_mm) = if hdr.version_num >= 50
+            && hoop_params_offset + 4 <= hdr.pec_offset
+            && hoop_params_offset + 4 <= data.len()
+        {
+            let hw = read_u16(data, hoop_params_offset).unwrap_or(0) as f64;
+            let hh = read_u16(data, hoop_params_offset + 2).unwrap_or(0) as f64;
+            if hw > 0.0 && hh > 0.0 { (Some(hw), Some(hh)) } else { (None, None) }
         } else {
-            Vec::new()
-        };
-
-        // Fall back to PEC palette colors if PES colors unavailable
-        let colors = if !pes_colors.is_empty() {
-            pes_colors
-        } else {
-            parse_pec_palette_colors(data, pec_offset)
+            (None, None)
         };
 
         // PEC header starts at pec_offset
-        // Color count at PEC+48
-        let pec_color_count = if pec_offset.checked_add(49).map_or(false, |end| end <= data.len()) {
-            data[pec_offset + 48] as u16 + 1 // stored as count-1
+        let pec_color_count = if hdr.pec_offset.checked_add(49).map_or(false, |end| end <= data.len()) {
+            data[hdr.pec_offset + 48] as u16 + 1
         } else {
-            u16::try_from(colors.len()).unwrap_or(u16::MAX)
+            u16::try_from(hdr.colors.len()).unwrap_or(u16::MAX)
         };
 
         // Graphic header at PEC+512 (20 bytes)
-        let gfx_offset = pec_offset.checked_add(512).ok_or_else(|| {
+        let gfx_offset = hdr.pec_offset.checked_add(512).ok_or_else(|| {
             parse_err("PEC offset overflow when computing graphic header position")
         })?;
         if gfx_offset + 20 > data.len() {
             return Err(parse_err("File too small for PEC graphic header"));
         }
 
-        // Design width and height (uint16 LE, in 0.1mm units)
         let width_raw = read_u16(data, gfx_offset + 8)?;
         let height_raw = read_u16(data, gfx_offset + 10)?;
         let width_mm = width_raw as f64 * 0.1;
         let height_mm = height_raw as f64 * 0.1;
 
-        // Decode PEC stitches (start at PEC+532)
-        let stitch_start = pec_offset.checked_add(532).ok_or_else(|| {
-            parse_err("PEC offset overflow when computing stitch start position")
-        })?;
-        let (stitch_count, _color_changes) = if stitch_start < data.len() {
-            decode_pec_stitches(data, stitch_start)
+        // Decode PEC stitches
+        let (stitch_count, _color_changes, jump_count) = if hdr.stitch_start < data.len() {
+            decode_pec_stitches(data, hdr.stitch_start)
         } else {
-            (0, 0)
+            (0, 0, 0)
         };
 
-        let color_count = if !colors.is_empty() {
-            u16::try_from(colors.len()).unwrap_or(u16::MAX)
+        let color_count = if !hdr.colors.is_empty() {
+            i32::try_from(hdr.colors.len()).unwrap_or(i32::MAX)
         } else {
-            pec_color_count
+            pec_color_count as i32 // u16 always fits in i32
         };
 
         Ok(ParsedFileInfo {
             format: "PES".to_string(),
-            format_version: Some(version),
+            format_version: Some(hdr.version),
             width_mm: Some(width_mm),
             height_mm: Some(height_mm),
-            stitch_count: Some(stitch_count),
+            stitch_count: i32::try_from(stitch_count).ok(),
             color_count: Some(color_count),
-            colors,
+            colors: hdr.colors,
+            design_name,
+            jump_count: i32::try_from(jump_count).ok(),
+            trim_count: None,
+            hoop_width_mm,
+            hoop_height_mm,
         })
     }
 
@@ -415,12 +551,10 @@ impl EmbroideryParser for PesParser {
             _ => return Ok(None),
         };
 
-        // Stitch data length (uint24 LE)
         let stitch_data_len = data[gfx_offset + 2] as usize
             | (data[gfx_offset + 3] as usize) << 8
             | (data[gfx_offset + 4] as usize) << 16;
 
-        // Thumbnail starts at PEC+532+stitch_data_len
         let thumb_start = match pec_offset
             .checked_add(532)
             .and_then(|v| v.checked_add(stitch_data_len))
@@ -428,13 +562,12 @@ impl EmbroideryParser for PesParser {
             Some(s) => s,
             None => return Ok(None),
         };
-        let thumb_size = 228; // 48×38 / 8 × 8 = 228 bytes (6 bytes per row × 38 rows)
+        let thumb_size = 228;
 
         if thumb_start + thumb_size > data.len() {
             return Ok(None);
         }
 
-        // Decode 48×38 monochrome bitmap (1 bit/pixel, MSB-first)
         let mut pixels = vec![0u8; 48 * 38];
         for row in 0..38 {
             for byte_idx in 0..6 {
@@ -448,6 +581,14 @@ impl EmbroideryParser for PesParser {
         }
 
         Ok(Some(pixels))
+    }
+
+    fn extract_stitch_segments(&self, data: &[u8]) -> Result<Vec<StitchSegment>, AppError> {
+        let hdr = parse_pes_header(data)?;
+        if hdr.stitch_start >= data.len() {
+            return Ok(Vec::new());
+        }
+        Ok(decode_pec_stitch_segments(data, hdr.stitch_start, &hdr.colors))
     }
 }
 
@@ -491,6 +632,8 @@ mod tests {
         assert!(info.stitch_count.unwrap() > 0);
         assert!(info.color_count.unwrap() > 0);
         assert!(!info.colors.is_empty());
+        assert!(info.design_name.is_some());
+        assert!(info.jump_count.is_some());
     }
 
     #[test]
@@ -525,7 +668,6 @@ mod tests {
         let pixels = thumb.unwrap();
         assert_eq!(pixels.len(), 48 * 38);
 
-        // Verify thumbnail has a pattern (not all zeros or all 255)
         let has_black = pixels.iter().any(|&p| p == 0);
         let has_white = pixels.iter().any(|&p| p == 255);
         assert!(has_black && has_white, "Thumbnail should have a pattern");
@@ -545,26 +687,19 @@ mod tests {
 
     #[test]
     fn test_pec_palette_fallback_for_old_versions() {
-        // Build a minimal PES v1 file — PES color objects not available,
-        // should fall back to PEC palette.
         let mut data = vec![0u8; 600];
         data[0..4].copy_from_slice(b"#PES");
-        data[4..8].copy_from_slice(b"0001"); // version 1
-        let pec_offset: u32 = 12; // PEC immediately after header
+        data[4..8].copy_from_slice(b"0001");
+        let pec_offset: u32 = 12;
         data[8..12].copy_from_slice(&pec_offset.to_le_bytes());
 
-        // PEC header at offset 12
         let pec = pec_offset as usize;
-        // Color count - 1 at PEC+48 (2 colors => stored as 1)
         data[pec + 48] = 1;
-        // Color indices at PEC+49: index 5 (Red), index 2 (Blue)
         data[pec + 49] = 5;
         data[pec + 50] = 2;
 
-        // Graphic header at PEC+512 (dimensions)
         let gfx = pec + 512;
         if gfx + 20 <= data.len() {
-            // Width/height in 0.1mm at gfx+8/gfx+10
             data[gfx + 8..gfx + 10].copy_from_slice(&100u16.to_le_bytes());
             data[gfx + 10..gfx + 12].copy_from_slice(&80u16.to_le_bytes());
         }
@@ -575,10 +710,8 @@ mod tests {
         assert_eq!(info.format, "PES");
         assert_eq!(info.format_version.as_deref(), Some("0001"));
         assert_eq!(info.colors.len(), 2);
-        // Index 5 = Red (237, 23, 31)
         assert_eq!(info.colors[0].hex, "#ED171F");
         assert_eq!(info.colors[0].name.as_deref(), Some("Red"));
-        // Index 2 = Blue (10, 85, 163)
         assert_eq!(info.colors[1].hex, "#0A55A3");
         assert_eq!(info.colors[1].name.as_deref(), Some("Blue"));
     }
@@ -590,17 +723,14 @@ mod tests {
 
     #[test]
     fn test_decode_pec_short_form() {
-        // Short positive: 0x10 = 16
         let (val, consumed) = decode_pec_value(&[0x10], 0).unwrap();
         assert_eq!(val, 16);
         assert_eq!(consumed, 1);
 
-        // Short negative: 0x7F = -1 (7-bit two's complement)
         let (val, consumed) = decode_pec_value(&[0x7F], 0).unwrap();
         assert_eq!(val, -1);
         assert_eq!(consumed, 1);
 
-        // Short zero
         let (val, consumed) = decode_pec_value(&[0x00], 0).unwrap();
         assert_eq!(val, 0);
         assert_eq!(consumed, 1);
@@ -608,13 +738,10 @@ mod tests {
 
     #[test]
     fn test_decode_pec_long_form() {
-        // Long form: bit7=1, 12-bit value
-        // 0x80 0x10 = positive 16
         let (val, consumed) = decode_pec_value(&[0x80, 0x10], 0).unwrap();
         assert_eq!(val, 16);
         assert_eq!(consumed, 2);
 
-        // Long form negative: 0x8F 0xF0 = raw 0xFF0, >= 0x800 => 0xFF0 - 0x1000 = -16
         let (val, consumed) = decode_pec_value(&[0x8F, 0xF0], 0).unwrap();
         assert_eq!(val, -16);
         assert_eq!(consumed, 2);
@@ -623,7 +750,15 @@ mod tests {
     #[test]
     fn test_decode_pec_value_oob() {
         assert!(decode_pec_value(&[], 0).is_none());
-        // Long form with truncated second byte
         assert!(decode_pec_value(&[0x80], 0).is_none());
+    }
+
+    #[test]
+    fn test_pes_stitch_segments() {
+        let data = load_example("BayrischesHerz.PES");
+        let parser = PesParser;
+        let segments = parser.extract_stitch_segments(&data).unwrap();
+        assert!(!segments.is_empty(), "Should have stitch segments");
+        assert!(segments[0].points.len() > 1, "First segment should have points");
     }
 }
