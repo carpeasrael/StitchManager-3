@@ -153,7 +153,8 @@ pub fn import_files(
                         "UPDATE embroidery_files SET \
                          stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
                          design_name = ?6, jump_count = ?7, trim_count = ?8, \
-                         hoop_width_mm = ?9, hoop_height_mm = ?10 \
+                         hoop_width_mm = ?9, hoop_height_mm = ?10, \
+                         category = ?11, author = ?12, keywords = ?13, comments = ?14 \
                          WHERE id = ?1",
                         rusqlite::params![
                             id,
@@ -166,6 +167,10 @@ pub fn import_files(
                             info.trim_count,
                             info.hoop_width_mm,
                             info.hoop_height_mm,
+                            info.category,
+                            info.author,
+                            info.keywords,
+                            info.comments,
                         ],
                     );
                 }
@@ -317,7 +322,8 @@ pub fn watcher_auto_import(
                         "UPDATE embroidery_files SET \
                          stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
                          design_name = ?6, jump_count = ?7, trim_count = ?8, \
-                         hoop_width_mm = ?9, hoop_height_mm = ?10 \
+                         hoop_width_mm = ?9, hoop_height_mm = ?10, \
+                         category = ?11, author = ?12, keywords = ?13, comments = ?14 \
                          WHERE id = ?1",
                         rusqlite::params![
                             id,
@@ -330,6 +336,10 @@ pub fn watcher_auto_import(
                             pinfo.trim_count,
                             pinfo.hoop_width_mm,
                             pinfo.hoop_height_mm,
+                            pinfo.category,
+                            pinfo.author,
+                            pinfo.keywords,
+                            pinfo.comments,
                         ],
                     );
                 }

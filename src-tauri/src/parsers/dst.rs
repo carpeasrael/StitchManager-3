@@ -257,6 +257,10 @@ impl EmbroideryParser for DstParser {
             trim_count: i32::try_from(trim_count).ok(),
             hoop_width_mm: None,
             hoop_height_mm: None,
+            category: None,
+            author: None,
+            keywords: None,
+            comments: None,
         })
     }
 

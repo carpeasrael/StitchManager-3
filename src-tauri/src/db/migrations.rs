@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 2;
+const CURRENT_VERSION: i32 = 3;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -51,6 +51,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 2 {
         apply_v2(conn)?;
+    }
+
+    if current < 3 {
+        apply_v3(conn)?;
     }
 
     Ok(())
@@ -232,6 +236,23 @@ fn apply_v2(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v3(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE embroidery_files ADD COLUMN category TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN author TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN keywords TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN comments TEXT;
+
+        INSERT INTO schema_version (version, description) VALUES (3, 'Add PES extended metadata fields');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,7 +297,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2, "Schema version must be 2");
+        assert_eq!(version, 3, "Schema version must be 3");
     }
 
     #[test]
@@ -299,22 +320,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_two() {
+    fn test_schema_version_is_three() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 2",
+                "SELECT description FROM schema_version WHERE version = 3",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add parser metadata fields");
+        assert_eq!(desc, "Add PES extended metadata fields");
     }
 
     #[test]

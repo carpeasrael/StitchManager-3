@@ -271,6 +271,10 @@ impl EmbroideryParser for JefParser {
             trim_count: None,
             hoop_width_mm: None,
             hoop_height_mm: None,
+            category: None,
+            author: None,
+            keywords: None,
+            comments: None,
         })
     }
 

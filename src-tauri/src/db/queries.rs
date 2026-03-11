@@ -4,6 +4,7 @@ pub const FILE_SELECT: &str =
     "SELECT id, folder_id, filename, filepath, name, theme, description, license, \
      width_mm, height_mm, stitch_count, color_count, file_size_bytes, thumbnail_path, \
      design_name, jump_count, trim_count, hoop_width_mm, hoop_height_mm, \
+     category, author, keywords, comments, \
      ai_analyzed, ai_confirmed, created_at, updated_at FROM embroidery_files";
 
 /// Same column list with `e.` alias prefix, for use in JOINs or subquery-filtered queries.
@@ -12,6 +13,7 @@ pub const FILE_SELECT_ALIASED: &str =
      e.license, e.width_mm, e.height_mm, e.stitch_count, e.color_count, \
      e.file_size_bytes, e.thumbnail_path, \
      e.design_name, e.jump_count, e.trim_count, e.hoop_width_mm, e.hoop_height_mm, \
+     e.category, e.author, e.keywords, e.comments, \
      e.ai_analyzed, e.ai_confirmed, \
      e.created_at, e.updated_at FROM embroidery_files e";
 
@@ -36,9 +38,13 @@ pub fn row_to_file(row: &rusqlite::Row) -> rusqlite::Result<EmbroideryFile> {
         trim_count: row.get(16)?,
         hoop_width_mm: row.get(17)?,
         hoop_height_mm: row.get(18)?,
-        ai_analyzed: row.get(19)?,
-        ai_confirmed: row.get(20)?,
-        created_at: row.get(21)?,
-        updated_at: row.get(22)?,
+        category: row.get(19)?,
+        author: row.get(20)?,
+        keywords: row.get(21)?,
+        comments: row.get(22)?,
+        ai_analyzed: row.get(23)?,
+        ai_confirmed: row.get(24)?,
+        created_at: row.get(25)?,
+        updated_at: row.get(26)?,
     })
 }

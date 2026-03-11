@@ -23,6 +23,10 @@ pub struct ParsedFileInfo {
     pub trim_count: Option<i32>,
     pub hoop_width_mm: Option<f64>,
     pub hoop_height_mm: Option<f64>,
+    pub category: Option<String>,
+    pub author: Option<String>,
+    pub keywords: Option<String>,
+    pub comments: Option<String>,
 }
 
 /// A single thread color extracted from the file.

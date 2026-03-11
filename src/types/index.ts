@@ -28,6 +28,10 @@ export interface EmbroideryFile {
   trimCount: number | null;
   hoopWidthMm: number | null;
   hoopHeightMm: number | null;
+  category: string | null;
+  author: string | null;
+  keywords: string | null;
+  comments: string | null;
   aiAnalyzed: boolean;
   aiConfirmed: boolean;
   createdAt: string;
