@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::DbState;
+use crate::{DbState, ThumbnailState};
 use crate::db::models::{EmbroideryFile, FileFormat, FileThreadColor, FileUpdate, Tag};
 use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, row_to_file};
 use crate::error::{lock_db, AppError};
@@ -390,16 +390,20 @@ pub fn get_all_tags(db: State<'_, DbState>) -> Result<Vec<Tag>, AppError> {
 }
 
 #[tauri::command]
-pub fn get_thumbnail(db: State<'_, DbState>, file_id: i64) -> Result<String, AppError> {
+pub fn get_thumbnail(
+    db: State<'_, DbState>,
+    thumb_state: State<'_, ThumbnailState>,
+    file_id: i64,
+) -> Result<String, AppError> {
     use base64::Engine;
 
-    // Query thumbnail path from DB, then drop the lock before file I/O
-    let thumbnail_path: Option<String> = {
+    // Query thumbnail path and filepath from DB, then drop the lock before file I/O
+    let (thumbnail_path, filepath): (Option<String>, String) = {
         let conn = lock_db(&db)?;
         conn.query_row(
-            "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+            "SELECT thumbnail_path, filepath FROM embroidery_files WHERE id = ?1",
             [file_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -409,14 +413,52 @@ pub fn get_thumbnail(db: State<'_, DbState>, file_id: i64) -> Result<String, App
         })?
     };
 
-    // Read file without holding the DB lock
-    match thumbnail_path {
-        Some(path) if !path.is_empty() => {
-            let data = std::fs::read(&path)?;
+    // If cached thumbnail exists on disk, return it
+    if let Some(ref path) = thumbnail_path {
+        if !path.is_empty() && std::path::Path::new(path).exists() {
+            let data = std::fs::read(path)?;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+            return Ok(format!("data:image/png;base64,{b64}"));
+        }
+    }
+
+    // On-demand generation: read the original file and generate a thumbnail
+    let src_path = std::path::Path::new(&filepath);
+    let ext = src_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    if ext.is_empty() {
+        return Ok(String::new());
+    }
+
+    let raw_data = match std::fs::read(src_path) {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("Failed to read source file for thumbnail {}: {e}", filepath);
+            return Ok(String::new());
+        }
+    };
+
+    match thumb_state.0.generate(file_id, &raw_data, &ext) {
+        Ok(thumb_path) => {
+            // Persist the path in DB for future cache hits
+            let conn = lock_db(&db)?;
+            let _ = conn.execute(
+                "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                rusqlite::params![file_id, thumb_path.to_string_lossy().as_ref()],
+            );
+
+            let data = std::fs::read(&thumb_path)?;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
             Ok(format!("data:image/png;base64,{b64}"))
         }
-        _ => Ok(String::new()),
+        Err(e) => {
+            log::warn!("Failed to generate thumbnail for file {file_id}: {e}");
+            Ok(String::new())
+        }
     }
 }
 

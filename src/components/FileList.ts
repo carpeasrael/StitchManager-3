@@ -5,6 +5,7 @@ import * as FileService from "../services/FileService";
 
 const CARD_HEIGHT = 72;
 const BUFFER = 5;
+const THUMB_CACHE_MAX = 200;
 
 export class FileList extends Component {
   private generation = 0;
@@ -15,6 +16,7 @@ export class FileList extends Component {
   private visibleStart = 0;
   private visibleEnd = 0;
   private scrollRafPending = false;
+  private thumbCache = new Map<number, string>();
 
   constructor(container: HTMLElement) {
     super(container);
@@ -57,6 +59,7 @@ export class FileList extends Component {
   render(): void {
     const files = appState.get("files");
     this.lastClickedIndex = null;
+    this.thumbCache.clear();
 
     this.el.innerHTML = "";
 
@@ -150,7 +153,37 @@ export class FileList extends Component {
 
       const thumb = document.createElement("div");
       thumb.className = "file-card-thumb";
+      // Load thumbnail with in-memory cache to avoid re-fetching on scroll
       thumb.textContent = getFormatLabel(file.filename);
+      const cachedUri = this.thumbCache.get(file.id);
+      if (cachedUri) {
+        const img = document.createElement("img");
+        img.src = cachedUri;
+        img.alt = file.name || file.filename;
+        img.className = "file-card-thumb-img";
+        thumb.textContent = "";
+        thumb.appendChild(img);
+      } else {
+        FileService.getThumbnail(file.id).then((dataUri) => {
+          if (dataUri) {
+            this.thumbCache.set(file.id, dataUri);
+            // Evict oldest entries if cache exceeds max
+            if (this.thumbCache.size > THUMB_CACHE_MAX) {
+              const firstKey = this.thumbCache.keys().next().value;
+              if (firstKey !== undefined) this.thumbCache.delete(firstKey);
+            }
+            // Only update DOM if element is still attached
+            if (thumb.isConnected) {
+              const img = document.createElement("img");
+              img.src = dataUri;
+              img.alt = file.name || file.filename;
+              img.className = "file-card-thumb-img";
+              thumb.textContent = "";
+              thumb.appendChild(img);
+            }
+          }
+        }).catch(() => { /* keep format label fallback */ });
+      }
       card.appendChild(thumb);
 
       const info = document.createElement("div");

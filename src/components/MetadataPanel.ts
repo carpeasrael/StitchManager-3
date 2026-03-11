@@ -2,7 +2,6 @@ import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { getFormatLabel, formatSize } from "../utils/format";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import * as FileService from "../services/FileService";
 import * as SettingsService from "../services/SettingsService";
 import type {
@@ -153,49 +152,51 @@ export class MetadataPanel extends Component {
     const wrapper = document.createElement("div");
     wrapper.className = "metadata-panel";
 
-    // Thumbnail section
+    // Thumbnail section — load via getThumbnail() API (returns data URI)
     const thumbSection = document.createElement("div");
     thumbSection.className = "metadata-thumbnail";
-    if (file.thumbnailPath) {
-      const img = document.createElement("img");
-      img.src = convertFileSrc(file.thumbnailPath);
-      img.alt = file.name || file.filename;
-      img.className = "metadata-thumbnail-img";
-      thumbSection.appendChild(img);
-    } else {
-      const placeholder = document.createElement("div");
-      placeholder.className = "metadata-thumbnail-placeholder";
-      placeholder.textContent = getFormatLabel(file.filename);
-      thumbSection.appendChild(placeholder);
-    }
+    const thumbPlaceholder = document.createElement("div");
+    thumbPlaceholder.className = "metadata-thumbnail-placeholder";
+    thumbPlaceholder.textContent = getFormatLabel(file.filename);
+    thumbSection.appendChild(thumbPlaceholder);
+    // Load thumbnail asynchronously
+    const thumbFileId = file.id;
+    FileService.getThumbnail(thumbFileId).then((dataUri) => {
+      if (dataUri && this.currentFile?.id === thumbFileId) {
+        const img = document.createElement("img");
+        img.src = dataUri;
+        img.alt = file.name || file.filename;
+        img.className = "metadata-thumbnail-img";
+        thumbSection.innerHTML = "";
+        thumbSection.appendChild(img);
+      }
+    }).catch(() => { /* keep placeholder */ });
     wrapper.appendChild(thumbSection);
 
-    // AI analyze button (visible if file has a thumbnail)
-    if (file.thumbnailPath) {
-      const aiBar = document.createElement("div");
-      aiBar.className = "metadata-ai-bar";
+    // AI analyze button (always visible for analysis)
+    const aiBar = document.createElement("div");
+    aiBar.className = "metadata-ai-bar";
 
-      const aiBtn = document.createElement("button");
-      aiBtn.className = "metadata-ai-btn";
-      aiBtn.textContent = "\u2728 KI analysieren";
-      aiBtn.addEventListener("click", () => {
-        EventBus.emit("toolbar:ai-analyze");
-      });
+    const aiBtn = document.createElement("button");
+    aiBtn.className = "metadata-ai-btn";
+    aiBtn.textContent = "\u2728 KI analysieren";
+    aiBtn.addEventListener("click", () => {
+      EventBus.emit("toolbar:ai-analyze");
+    });
 
-      if (file.aiAnalyzed) {
-        const label = document.createElement("span");
-        label.className = file.aiConfirmed
-          ? "metadata-ai-status metadata-ai-confirmed"
-          : "metadata-ai-status metadata-ai-pending";
-        label.textContent = file.aiConfirmed
-          ? "KI-best\u00E4tigt"
-          : "KI-analysiert";
-        aiBar.appendChild(label);
-      }
-
-      aiBar.appendChild(aiBtn);
-      wrapper.appendChild(aiBar);
+    if (file.aiAnalyzed) {
+      const label = document.createElement("span");
+      label.className = file.aiConfirmed
+        ? "metadata-ai-status metadata-ai-confirmed"
+        : "metadata-ai-status metadata-ai-pending";
+      label.textContent = file.aiConfirmed
+        ? "KI-best\u00E4tigt"
+        : "KI-analysiert";
+      aiBar.appendChild(label);
     }
+
+    aiBar.appendChild(aiBtn);
+    wrapper.appendChild(aiBar);
 
     // Editable form section
     const formSection = document.createElement("div");

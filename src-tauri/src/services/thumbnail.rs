@@ -1,5 +1,4 @@
-// Wired into Tauri commands in Sprint 7 (get_thumbnail command)
-#![allow(dead_code)]
+// Thumbnail generation: stitch-rendered PNG thumbnails for embroidery files.
 
 use std::path::PathBuf;
 use image::{ImageBuffer, Rgba, RgbaImage};

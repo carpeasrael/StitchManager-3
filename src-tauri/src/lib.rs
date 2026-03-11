@@ -12,6 +12,9 @@ mod services;
 /// The frontend uses `tauri-plugin-sql` for lightweight read queries independently.
 pub struct DbState(pub(crate) Mutex<rusqlite::Connection>);
 
+/// Wrapper for the ThumbnailGenerator stored in Tauri managed state.
+pub struct ThumbnailState(pub(crate) services::thumbnail::ThumbnailGenerator);
+
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -37,6 +40,11 @@ pub fn run() {
                 .ok();
 
             app.manage(DbState(Mutex::new(conn)));
+
+            // Initialize thumbnail generator with cache dir
+            let thumb_cache_dir = app_data_dir.join("thumbnails");
+            let thumbnail_gen = services::thumbnail::ThumbnailGenerator::new(thumb_cache_dir);
+            app.manage(ThumbnailState(thumbnail_gen));
 
             // Initialize watcher holder
             let watcher_holder =
