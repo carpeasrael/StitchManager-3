@@ -67,16 +67,40 @@ export class Sidebar extends Component {
 
     this.el.appendChild(header);
 
+    const list = document.createElement("ul");
+    list.className = "folder-list";
+
+    // "Alle Ordner" entry — shows files across all folders
+    const allLi = document.createElement("li");
+    allLi.className = "folder-item";
+    if (selectedId === null) {
+      allLi.classList.add("selected");
+    }
+    const allName = document.createElement("span");
+    allName.className = "folder-name";
+    allName.textContent = "Alle Ordner";
+    const allCount = document.createElement("span");
+    allCount.className = "folder-count";
+    let totalCount = 0;
+    for (const c of this.folderCounts.values()) totalCount += c;
+    allCount.textContent = String(totalCount);
+    allLi.appendChild(allName);
+    allLi.appendChild(allCount);
+    allLi.addEventListener("click", () => {
+      appState.set("selectedFileIds", []);
+      appState.set("selectedFileId", null);
+      appState.set("selectedFolderId", null);
+    });
+    list.appendChild(allLi);
+
     if (folders.length === 0) {
       const empty = document.createElement("div");
       empty.className = "sidebar-empty";
       empty.textContent = "Keine Ordner vorhanden";
+      this.el.appendChild(list);
       this.el.appendChild(empty);
       return;
     }
-
-    const list = document.createElement("ul");
-    list.className = "folder-list";
 
     for (const folder of folders) {
       const li = document.createElement("li");
@@ -97,7 +121,16 @@ export class Sidebar extends Component {
       li.appendChild(countSpan);
 
       li.addEventListener("click", () => {
-        appState.set("selectedFolderId", folder.id);
+        if (folder.id === appState.get("selectedFolderId")) {
+          // Re-click: deselect → go to "Alle Ordner"
+          appState.set("selectedFileIds", []);
+          appState.set("selectedFileId", null);
+          appState.set("selectedFolderId", null);
+        } else {
+          appState.set("selectedFileIds", []);
+          appState.set("selectedFileId", null);
+          appState.set("selectedFolderId", folder.id);
+        }
       });
 
       list.appendChild(li);

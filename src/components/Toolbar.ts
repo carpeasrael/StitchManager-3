@@ -125,7 +125,10 @@ export class Toolbar extends Component {
     const hasMulti = multiCount > 1;
 
     const scanBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-scan");
-    if (scanBtn) scanBtn.disabled = !hasFolder;
+    if (scanBtn) {
+      scanBtn.disabled = !hasFolder;
+      scanBtn.title = hasFolder ? "Ordner scannen" : "Ordner auswählen, um zu scannen";
+    }
 
     const revealBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-reveal");
     if (revealBtn) revealBtn.disabled = !hasFile || hasMulti;

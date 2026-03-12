@@ -35,7 +35,7 @@ export class StatusBar extends Component {
     const folders = appState.get("folders");
     const selectedId = appState.get("selectedFolderId");
     const folder = folders.find((f) => f.id === selectedId);
-    left.textContent = folder ? folder.name : "Kein Ordner ausgewählt";
+    left.textContent = folder ? folder.name : "Alle Ordner";
 
     this.el.appendChild(left);
 
