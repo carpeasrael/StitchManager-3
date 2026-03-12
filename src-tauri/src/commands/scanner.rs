@@ -296,6 +296,10 @@ pub fn parse_embroidery_file(filepath: String) -> Result<ParsedFileInfo, AppErro
 
 #[tauri::command]
 pub fn get_stitch_segments(filepath: String) -> Result<Vec<StitchSegment>, AppError> {
+    // Reject path traversal attempts
+    if filepath.contains("..") {
+        return Err(AppError::Validation("Path traversal not allowed".to_string()));
+    }
     let path = std::path::Path::new(&filepath);
     let ext = path
         .extension()

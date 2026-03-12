@@ -11,6 +11,7 @@ import type {
   Tag,
   FileUpdate,
   CustomFieldDef,
+  StitchSegment,
 } from "../types/index";
 
 interface FormSnapshot {
@@ -29,6 +30,7 @@ export class MetadataPanel extends Component {
   private snapshot: FormSnapshot | null = null;
   private dirty = false;
   private saving = false;
+  private previewCleanup: (() => void) | null = null;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -42,6 +44,11 @@ export class MetadataPanel extends Component {
       EventBus.on("metadata:save", () => this.save())
     );
     this.render();
+  }
+
+  destroy(): void {
+    if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
+    super.destroy();
   }
 
   private async onSelectionChanged(): Promise<void> {
@@ -131,6 +138,7 @@ export class MetadataPanel extends Component {
   }
 
   render(): void {
+    if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
     this.el.innerHTML = "";
     const empty = document.createElement("div");
     empty.className = "metadata-empty";
@@ -147,31 +155,57 @@ export class MetadataPanel extends Component {
     colors: ThreadColor[],
     tags: Tag[]
   ): void {
+    if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
     this.el.innerHTML = "";
 
     const wrapper = document.createElement("div");
     wrapper.className = "metadata-panel";
 
-    // Thumbnail section — load via getThumbnail() API (returns data URI)
-    const thumbSection = document.createElement("div");
-    thumbSection.className = "metadata-thumbnail";
-    const thumbPlaceholder = document.createElement("div");
-    thumbPlaceholder.className = "metadata-thumbnail-placeholder";
-    thumbPlaceholder.textContent = getFormatLabel(file.filename);
-    thumbSection.appendChild(thumbPlaceholder);
-    // Load thumbnail asynchronously
-    const thumbFileId = file.id;
-    FileService.getThumbnail(thumbFileId).then((dataUri) => {
-      if (dataUri && this.currentFile?.id === thumbFileId) {
-        const img = document.createElement("img");
-        img.src = dataUri;
-        img.alt = file.name || file.filename;
-        img.className = "metadata-thumbnail-img";
-        thumbSection.innerHTML = "";
-        thumbSection.appendChild(img);
-      }
-    }).catch(() => { /* keep placeholder */ });
-    wrapper.appendChild(thumbSection);
+    // Stitch preview section — interactive canvas with zoom/pan
+    const previewSection = document.createElement("div");
+    previewSection.className = "stitch-preview-section";
+
+    const previewContainer = document.createElement("div");
+    previewContainer.className = "stitch-preview-container";
+
+    const canvas = document.createElement("canvas");
+    canvas.className = "stitch-preview-canvas";
+    previewContainer.appendChild(canvas);
+
+    // Zoom controls overlay
+    const controls = document.createElement("div");
+    controls.className = "stitch-preview-controls";
+    const zoomInBtn = document.createElement("button");
+    zoomInBtn.className = "stitch-preview-btn";
+    zoomInBtn.textContent = "+";
+    zoomInBtn.title = "Vergr\u00F6\u00DFern";
+    const zoomOutBtn = document.createElement("button");
+    zoomOutBtn.className = "stitch-preview-btn";
+    zoomOutBtn.textContent = "\u2212";
+    zoomOutBtn.title = "Verkleinern";
+    const zoomResetBtn = document.createElement("button");
+    zoomResetBtn.className = "stitch-preview-btn";
+    zoomResetBtn.textContent = "\u21BA";
+    zoomResetBtn.title = "Zur\u00FCcksetzen";
+    const zoomLabel = document.createElement("span");
+    zoomLabel.className = "stitch-preview-zoom-label";
+    zoomLabel.textContent = "100%";
+    controls.appendChild(zoomInBtn);
+    controls.appendChild(zoomOutBtn);
+    controls.appendChild(zoomResetBtn);
+    controls.appendChild(zoomLabel);
+    previewContainer.appendChild(controls);
+
+    previewSection.appendChild(previewContainer);
+    wrapper.appendChild(previewSection);
+
+    // Load stitch segments and render on canvas
+    const previewFileId = file.id;
+    if (file.filepath) {
+      this.loadStitchPreview(canvas, file.filepath, previewFileId, zoomLabel, {
+        zoomInBtn, zoomOutBtn, zoomResetBtn,
+      }).catch(() => { /* keep empty canvas */ });
+    }
 
     // AI analyze button (always visible for analysis)
     const aiBar = document.createElement("div");
@@ -701,6 +735,182 @@ export class MetadataPanel extends Component {
     }
 
     container.appendChild(group);
+  }
+
+  private async loadStitchPreview(
+    canvas: HTMLCanvasElement,
+    filepath: string,
+    fileId: number,
+    zoomLabel: HTMLElement,
+    controls: {
+      zoomInBtn: HTMLButtonElement;
+      zoomOutBtn: HTMLButtonElement;
+      zoomResetBtn: HTMLButtonElement;
+    }
+  ): Promise<void> {
+    let segments: StitchSegment[];
+    try {
+      segments = await FileService.getStitchSegments(filepath);
+    } catch {
+      return;
+    }
+    if (this.currentFile?.id !== fileId || segments.length === 0) return;
+
+    // Compute bounding box
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const seg of segments) {
+      for (const [x, y] of seg.points) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    const dataW = maxX - minX;
+    const dataH = maxY - minY;
+    if (dataW <= 0 || dataH <= 0) return;
+
+    const padding = 16;
+
+    let zoom = 1;
+    let panX = 0;
+    let panY = 0;
+
+    const drawPreview = () => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const displayW = canvas.clientWidth;
+      const displayH = canvas.clientHeight;
+      const targetW = Math.round(displayW * dpr);
+      const targetH = Math.round(displayH * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Background — use container's computed background for theme compatibility
+      const bgColor = getComputedStyle(canvas.parentElement || canvas).backgroundColor || "#ffffff";
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, displayW, displayH);
+
+      ctx.save();
+      ctx.translate(panX, panY);
+      ctx.scale(zoom, zoom);
+
+      // Recalculate base transform for current display size
+      const curDrawW = displayW - 2 * padding;
+      const curDrawH = displayH - 2 * padding;
+      const curScale = Math.min(curDrawW / dataW, curDrawH / dataH);
+      const curOffX = padding + (curDrawW - dataW * curScale) / 2;
+      const curOffY = padding + (curDrawH - dataH * curScale) / 2;
+
+      ctx.lineWidth = Math.max(1, 1.5 / zoom);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      for (const seg of segments) {
+        if (seg.points.length < 2) continue;
+        ctx.strokeStyle = seg.colorHex || "#000000";
+        ctx.beginPath();
+        const [sx, sy] = seg.points[0];
+        ctx.moveTo((sx - minX) * curScale + curOffX, (sy - minY) * curScale + curOffY);
+        for (let i = 1; i < seg.points.length; i++) {
+          const [px, py] = seg.points[i];
+          ctx.lineTo((px - minX) * curScale + curOffX, (py - minY) * curScale + curOffY);
+        }
+        ctx.stroke();
+      }
+
+      ctx.restore();
+      zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+    };
+
+    drawPreview();
+
+    // Zoom with mouse wheel
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const oldZoom = zoom;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      zoom = Math.min(10, Math.max(0.25, zoom * factor));
+
+      // Zoom toward cursor
+      panX = mouseX - (mouseX - panX) * (zoom / oldZoom);
+      panY = mouseY - (mouseY - panY) * (zoom / oldZoom);
+      drawPreview();
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+
+    // Pan with mouse drag
+    let dragging = false;
+    let lastX = 0, lastY = 0;
+    canvas.addEventListener("mousedown", (e) => {
+      dragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      canvas.style.cursor = "grabbing";
+    });
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging) return;
+      panX += e.clientX - lastX;
+      panY += e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      drawPreview();
+    };
+    const onMouseUp = () => {
+      dragging = false;
+      canvas.style.cursor = "grab";
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    canvas.style.cursor = "grab";
+
+    // Register cleanup for document-level listeners
+    this.previewCleanup = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    // Double-click to reset
+    canvas.addEventListener("dblclick", () => {
+      zoom = 1;
+      panX = 0;
+      panY = 0;
+      drawPreview();
+    });
+
+    // Zoom buttons
+    controls.zoomInBtn.addEventListener("click", () => {
+      const center = canvas.clientWidth / 2;
+      const centerY = canvas.clientHeight / 2;
+      const oldZoom = zoom;
+      zoom = Math.min(10, zoom * 1.3);
+      panX = center - (center - panX) * (zoom / oldZoom);
+      panY = centerY - (centerY - panY) * (zoom / oldZoom);
+      drawPreview();
+    });
+    controls.zoomOutBtn.addEventListener("click", () => {
+      const center = canvas.clientWidth / 2;
+      const centerY = canvas.clientHeight / 2;
+      const oldZoom = zoom;
+      zoom = Math.max(0.25, zoom / 1.3);
+      panX = center - (center - panX) * (zoom / oldZoom);
+      panY = centerY - (centerY - panY) * (zoom / oldZoom);
+      drawPreview();
+    });
+    controls.zoomResetBtn.addEventListener("click", () => {
+      zoom = 1;
+      panX = 0;
+      panY = 0;
+      drawPreview();
+    });
   }
 
   private renderError(): void {

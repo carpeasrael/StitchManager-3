@@ -58,15 +58,28 @@ impl ThumbnailGenerator {
             message: format!("Unsupported format for thumbnail: {ext}"),
         })?;
 
-        // Strategy: try embedded thumbnail first, then render from stitch data
-        let img = match parser.extract_thumbnail(data)? {
-            Some(pixels) => {
-                // PES embedded thumbnail: 48×38 monochrome pixels (u8 array)
-                scale_monochrome_thumbnail(&pixels, 48, 38)
+        // Strategy: prefer stitch-based rendering (full color), fall back to embedded bitmap.
+        // Check stitch segments first — if the parser produces segments, render from them.
+        // This avoids the white-thread-on-white-background edge case that has_content() misses.
+        let has_segments = parser.extract_stitch_segments(data)
+            .map(|segs| segs.iter().any(|s| s.points.len() >= 2))
+            .unwrap_or(false);
+
+        let img = if has_segments {
+            match render_stitch_thumbnail(data, parser) {
+                Ok(rendered) => rendered,
+                Err(_) => {
+                    match parser.extract_thumbnail(data).ok().flatten() {
+                        Some(pixels) => scale_monochrome_thumbnail(&pixels, 48, 38),
+                        None => ImageBuffer::new(TARGET_WIDTH, TARGET_HEIGHT),
+                    }
+                }
             }
-            None => {
-                // Render from stitch coordinates using the same parser
-                render_stitch_thumbnail(data, parser)?
+        } else {
+            // No stitch segments; try embedded thumbnail
+            match parser.extract_thumbnail(data).ok().flatten() {
+                Some(pixels) => scale_monochrome_thumbnail(&pixels, 48, 38),
+                None => ImageBuffer::new(TARGET_WIDTH, TARGET_HEIGHT),
             }
         };
 
@@ -98,7 +111,7 @@ impl ThumbnailGenerator {
     }
 
     fn thumbnail_path(&self, file_id: i64) -> PathBuf {
-        self.cache_dir.join(format!("{file_id}.png"))
+        self.cache_dir.join(format!("{file_id}_v2.png"))
     }
 }
 
@@ -221,11 +234,18 @@ fn render_segments_to_image_colored(segments: &[parsers::StitchSegment]) -> Rgba
     img
 }
 
-/// Bresenham line drawing on an RGBA image.
-fn draw_line(img: &mut RgbaImage, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>) {
+/// Put a pixel with bounds checking.
+#[inline]
+fn put_pixel_safe(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>) {
     let w = img.width() as i32;
     let h = img.height() as i32;
+    if x >= 0 && x < w && y >= 0 && y < h {
+        img.put_pixel(x as u32, y as u32, color);
+    }
+}
 
+/// Bresenham line drawing with 2px thickness on an RGBA image.
+fn draw_line(img: &mut RgbaImage, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>) {
     let dx = (x1 - x0).abs();
     let dy = -(y1 - y0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
@@ -234,9 +254,16 @@ fn draw_line(img: &mut RgbaImage, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgb
     let mut cx = x0;
     let mut cy = y0;
 
+    // Determine perpendicular offset direction for 2px thickness
+    let steep = (y1 - y0).abs() > (x1 - x0).abs();
+
     loop {
-        if cx >= 0 && cx < w && cy >= 0 && cy < h {
-            img.put_pixel(cx as u32, cy as u32, color);
+        // Draw 2px wide: main pixel + one adjacent pixel perpendicular to line direction
+        put_pixel_safe(img, cx, cy, color);
+        if steep {
+            put_pixel_safe(img, cx + 1, cy, color);
+        } else {
+            put_pixel_safe(img, cx, cy + 1, color);
         }
 
         if cx == x1 && cy == y1 {
