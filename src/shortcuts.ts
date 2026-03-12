@@ -24,6 +24,13 @@ export function initShortcuts(): () => void {
       return;
     }
 
+    // Cmd/Ctrl+Shift+R — reveal in folder
+    if (mod && e.shiftKey && (e.key === "r" || e.key === "R")) {
+      e.preventDefault();
+      EventBus.emit("shortcut:reveal-in-folder");
+      return;
+    }
+
     // Other modifier shortcuts — skip when typing in inputs
     if (mod && !isInputFocused()) {
       switch (e.key) {

@@ -729,6 +729,18 @@
   min-width: 0;
 }
 
+.metadata-info-link {
+  cursor: pointer;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.15s;
+}
+
+.metadata-info-link:hover {
+  text-decoration-color: var(--color-accent);
+}
+
 .metadata-swatch-grid {
   display: flex;
   flex-direction: column;

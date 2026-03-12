@@ -46,6 +46,12 @@ export class Toolbar extends Component {
     );
 
     actions.appendChild(
+      this.createButton("toolbar-btn-reveal", "\uD83D\uDCCD", "Im Ordner anzeigen", () =>
+        EventBus.emit("toolbar:reveal-in-folder")
+      )
+    );
+
+    actions.appendChild(
       this.createButton("toolbar-btn-ai", "\u2728", "KI Analyse", () =>
         EventBus.emit("toolbar:ai-analyze")
       )
@@ -120,6 +126,9 @@ export class Toolbar extends Component {
 
     const scanBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-scan");
     if (scanBtn) scanBtn.disabled = !hasFolder;
+
+    const revealBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-reveal");
+    if (revealBtn) revealBtn.disabled = !hasFile || hasMulti;
 
     const aiBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-ai");
     if (aiBtn) aiBtn.disabled = !hasFile || hasMulti;

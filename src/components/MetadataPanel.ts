@@ -4,6 +4,8 @@ import { EventBus } from "../state/EventBus";
 import { getFormatLabel, formatSize } from "../utils/format";
 import * as FileService from "../services/FileService";
 import * as SettingsService from "../services/SettingsService";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { ToastContainer } from "./Toast";
 import type {
   EmbroideryFile,
   ThreadColor,
@@ -304,6 +306,9 @@ export class MetadataPanel extends Component {
     infoGrid.className = "metadata-info-grid";
 
     this.addInfoRow(infoGrid, "Dateiname", file.filename);
+    if (file.filepath) {
+      this.addClickableInfoRow(infoGrid, "Speicherort", file.filepath);
+    }
     this.addInfoRow(infoGrid, "Format", getFormatLabel(file.filename));
 
     if (formats.length > 0 && formats[0].formatVersion) {
@@ -934,6 +939,31 @@ export class MetadataPanel extends Component {
     const valueEl = document.createElement("span");
     valueEl.className = "metadata-info-value";
     valueEl.textContent = value;
+    row.appendChild(valueEl);
+
+    grid.appendChild(row);
+  }
+
+  private addClickableInfoRow(grid: HTMLElement, label: string, filepath: string): void {
+    const row = document.createElement("div");
+    row.className = "metadata-info-row";
+
+    const labelEl = document.createElement("span");
+    labelEl.className = "metadata-info-label";
+    labelEl.textContent = label;
+    row.appendChild(labelEl);
+
+    const dirPath = filepath.replace(/[\\/][^\\/]+$/, "");
+    const valueEl = document.createElement("span");
+    valueEl.className = "metadata-info-value metadata-info-link";
+    valueEl.textContent = dirPath;
+    valueEl.title = "Im Dateimanager öffnen";
+    valueEl.addEventListener("click", () => {
+      revealItemInDir(filepath).catch((e) => {
+        console.warn("Failed to reveal file:", e);
+        ToastContainer.show("error", "Datei konnte nicht im Ordner angezeigt werden");
+      });
+    });
     row.appendChild(valueEl);
 
     grid.appendChild(row);

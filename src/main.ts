@@ -19,6 +19,7 @@ import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import * as FileService from "./services/FileService";
 import * as BatchService from "./services/BatchService";
 import * as AiService from "./services/AiService";
@@ -119,6 +120,22 @@ function setupThemeToggle(): () => void {
   };
 }
 
+async function revealSelectedFile(): Promise<void> {
+  const fileId = appState.get("selectedFileId");
+  if (fileId === null) return;
+
+  const files = appState.get("files");
+  const file = files.find((f) => f.id === fileId);
+  if (!file?.filepath) return;
+
+  try {
+    await revealItemInDir(file.filepath);
+  } catch (e) {
+    console.warn("Failed to reveal file in folder:", e);
+    ToastContainer.show("error", "Datei konnte nicht im Ordner angezeigt werden");
+  }
+}
+
 function initEventHandlers(): () => void {
   const unsubs = [
     EventBus.on("toolbar:ai-analyze", async () => {
@@ -142,6 +159,9 @@ function initEventHandlers(): () => void {
     EventBus.on("toolbar:save", () => {
       EventBus.emit("metadata:save");
     }),
+
+    EventBus.on("toolbar:reveal-in-folder", () => revealSelectedFile()),
+    EventBus.on("shortcut:reveal-in-folder", () => revealSelectedFile()),
 
     EventBus.on("toolbar:batch-rename", async () => {
       const fileIds = appState.get("selectedFileIds");
