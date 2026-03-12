@@ -31,6 +31,13 @@ export function initShortcuts(): () => void {
       return;
     }
 
+    // Cmd/Ctrl+Shift+U — USB export
+    if (mod && e.shiftKey && (e.key === "u" || e.key === "U")) {
+      e.preventDefault();
+      EventBus.emit("shortcut:usb-export");
+      return;
+    }
+
     // Other modifier shortcuts — skip when typing in inputs
     if (mod && !isInputFocused()) {
       switch (e.key) {

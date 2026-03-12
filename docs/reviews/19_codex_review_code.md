@@ -1,8 +1,8 @@
-# Codex Code Review — PES Research & Display (Final)
+# Codex Code Review — Issue #19 (Round 2)
 
 **Reviewer:** Codex-style (code review)
-**Date:** 2026-03-11
-**Scope:** thumbnail.rs, scanner.rs, MetadataPanel.ts, components.css
+**Date:** 2026-03-13
+**Scope:** Round-2 diff — success/error toasts for multi-file export, USB button class fix
 
 ---
 
@@ -10,14 +10,10 @@
 
 No findings.
 
-## Summary
+All three round-1 issues have been resolved:
 
-Code review passed with zero findings. The diff (345 insertions, 33 deletions across 4 files) is clean:
+1. **Finding 1 (resolved):** Multi-file export catch block now shows `ToastContainer.show("error", "Export fehlgeschlagen")`.
+2. **Finding 2 (resolved):** Multi-file export success path now shows `ToastContainer.show("success", ...)` with a count of exported files.
+3. **Finding 3 (resolved):** USB-Export button uses `metadata-action-btn` class. CSS correctly groups `metadata-ai-btn` and `metadata-action-btn` via comma-separated selectors for shared styling while maintaining semantic separation.
 
-**thumbnail.rs:** Stitch-based rendering preferred via `has_segments` check (avoids white-thread edge case). Graceful fallback chain with `.ok().flatten()`. 2px Bresenham lines with `put_pixel_safe`. Cache version bumped to `_v2`.
-
-**scanner.rs:** Path traversal validation (`".."` check) added to `get_stitch_segments`.
-
-**MetadataPanel.ts:** Interactive canvas preview with zoom/pan. Conditional canvas resize avoids flicker. `destroy()` override and `previewCleanup` handle document-level listener teardown. `{ passive: false }` on wheel. `.catch()` on async call. HiDPI via `devicePixelRatio`. Theme-aware background via `getComputedStyle`.
-
-**components.css:** Stitch preview styles use CSS variables for theme compatibility. Responsive container with `aspect-ratio: 1` and `max-width: 400px`.
+No new issues identified. Code is consistent, error handling is symmetric across single/multi paths, event wiring and cleanup are correct.

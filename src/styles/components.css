@@ -794,7 +794,8 @@
   gap: var(--spacing-2);
 }
 
-.metadata-ai-btn {
+.metadata-ai-btn,
+.metadata-action-btn {
   padding: var(--spacing-1) var(--spacing-3);
   border: 1px solid var(--color-accent-20);
   border-radius: var(--radius-button);
@@ -805,7 +806,8 @@
   transition: all 0.15s;
 }
 
-.metadata-ai-btn:hover {
+.metadata-ai-btn:hover,
+.metadata-action-btn:hover {
   background: var(--color-accent-20);
 }
 

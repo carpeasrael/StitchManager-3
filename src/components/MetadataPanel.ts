@@ -232,6 +232,15 @@ export class MetadataPanel extends Component {
     }
 
     aiBar.appendChild(aiBtn);
+
+    const usbBtn = document.createElement("button");
+    usbBtn.className = "metadata-action-btn";
+    usbBtn.textContent = "\uD83D\uDCE4 USB-Export";
+    usbBtn.addEventListener("click", () => {
+      EventBus.emit("toolbar:batch-export");
+    });
+    aiBar.appendChild(usbBtn);
+
     wrapper.appendChild(aiBar);
 
     // Editable form section

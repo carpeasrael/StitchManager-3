@@ -162,6 +162,7 @@ function initEventHandlers(): () => void {
 
     EventBus.on("toolbar:reveal-in-folder", () => revealSelectedFile()),
     EventBus.on("shortcut:reveal-in-folder", () => revealSelectedFile()),
+    EventBus.on("shortcut:usb-export", () => EventBus.emit("toolbar:batch-export")),
 
     EventBus.on("toolbar:batch-rename", async () => {
       const fileIds = appState.get("selectedFileIds");
@@ -196,8 +197,12 @@ function initEventHandlers(): () => void {
     }),
 
     EventBus.on("toolbar:batch-export", async () => {
-      const fileIds = appState.get("selectedFileIds");
-      if (fileIds.length === 0) return;
+      let fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) {
+        const singleId = appState.get("selectedFileId");
+        if (singleId === null) return;
+        fileIds = [singleId];
+      }
 
       const selected = await open({
         directory: true,
@@ -209,11 +214,23 @@ function initEventHandlers(): () => void {
       const targetPath = typeof selected === "string" ? selected : String(selected);
       if (!targetPath) return;
 
-      BatchDialog.open("USB-Export", fileIds.length);
-      try {
-        await BatchService.exportUsb(fileIds, targetPath);
-      } catch (e) {
-        console.warn("Batch export failed:", e);
+      if (fileIds.length === 1) {
+        try {
+          await BatchService.exportUsb(fileIds, targetPath);
+          ToastContainer.show("success", "Datei exportiert");
+        } catch (e) {
+          console.warn("USB export failed:", e);
+          ToastContainer.show("error", "Export fehlgeschlagen");
+        }
+      } else {
+        BatchDialog.open("USB-Export", fileIds.length);
+        try {
+          await BatchService.exportUsb(fileIds, targetPath);
+          ToastContainer.show("success", `${fileIds.length} Dateien exportiert`);
+        } catch (e) {
+          console.warn("Batch export failed:", e);
+          ToastContainer.show("error", "Export fehlgeschlagen");
+        }
       }
     }),
 

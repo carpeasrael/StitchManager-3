@@ -136,11 +136,16 @@ export class Toolbar extends Component {
     const aiBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-ai");
     if (aiBtn) aiBtn.disabled = !hasFile || hasMulti;
 
-    // Batch buttons: visible only when multiple files selected
+    // USB-Export: visible when any file is selected (single or multi)
+    const exportBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-batch-export");
+    if (exportBtn) {
+      exportBtn.style.display = hasFile || hasMulti ? "" : "none";
+    }
+
+    // Other batch buttons: visible only when multiple files selected
     const batchBtns = [
       ".toolbar-btn-batch-rename",
       ".toolbar-btn-batch-organize",
-      ".toolbar-btn-batch-export",
       ".toolbar-btn-batch-ai",
     ];
     for (const sel of batchBtns) {
