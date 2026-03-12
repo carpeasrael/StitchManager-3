@@ -6,17 +6,20 @@ import type {
   ThreadColor,
   Tag,
   StitchSegment,
+  SearchParams,
 } from "../types/index";
 
 export async function getFiles(
   folderId?: number | null,
   search?: string | null,
-  formatFilter?: string | null
+  formatFilter?: string | null,
+  searchParams?: SearchParams | null
 ): Promise<EmbroideryFile[]> {
   return invoke<EmbroideryFile[]>("get_files", {
     folderId: folderId ?? null,
     search: search ?? null,
     formatFilter: formatFilter ?? null,
+    searchParams: searchParams ?? null,
   });
 }
 

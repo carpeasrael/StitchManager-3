@@ -27,6 +27,9 @@ export class FileList extends Component {
       appState.on("searchQuery", () => this.loadFiles())
     );
     this.subscribe(
+      appState.on("searchParams", () => this.loadFiles())
+    );
+    this.subscribe(
       appState.on("formatFilter", () => this.loadFiles())
     );
     this.subscribe(
@@ -46,9 +49,10 @@ export class FileList extends Component {
     const folderId = appState.get("selectedFolderId");
     const search = appState.get("searchQuery");
     const formatFilter = appState.get("formatFilter");
+    const searchParams = appState.get("searchParams");
 
     try {
-      const files = await FileService.getFiles(folderId, search, formatFilter);
+      const files = await FileService.getFiles(folderId, search, formatFilter, searchParams);
       if (gen !== this.generation) return;
       appState.set("files", files);
     } catch (e) {

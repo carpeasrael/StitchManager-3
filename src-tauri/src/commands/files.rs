@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::{DbState, ThumbnailState};
-use crate::db::models::{EmbroideryFile, FileFormat, FileThreadColor, FileUpdate, Tag};
+use crate::db::models::{EmbroideryFile, FileFormat, FileThreadColor, FileUpdate, SearchParams, Tag};
 use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, row_to_file};
 use crate::error::{lock_db, AppError};
 
@@ -10,18 +10,18 @@ fn escape_like(input: &str) -> String {
     input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
-#[tauri::command]
-pub fn get_files(
-    db: State<'_, DbState>,
+/// Core query-building logic shared by the Tauri command and tests.
+/// Accepts a plain `&rusqlite::Connection` so it can be called without `State`.
+pub(crate) fn query_files_impl(
+    conn: &rusqlite::Connection,
     folder_id: Option<i64>,
     search: Option<String>,
     format_filter: Option<String>,
+    search_params: Option<SearchParams>,
 ) -> Result<Vec<EmbroideryFile>, AppError> {
-    let conn = lock_db(&db)?;
-
     let mut conditions = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut param_idx = 1;
+    let mut param_idx: usize = 1;
 
     if let Some(fid) = folder_id {
         conditions.push(format!("e.folder_id = ?{param_idx}"));
@@ -29,15 +29,28 @@ pub fn get_files(
         param_idx += 1;
     }
 
-    if let Some(ref q) = search {
+    // Determine the text query: prefer search_params.text, fall back to legacy `search`
+    let text_query = search_params
+        .as_ref()
+        .and_then(|sp| sp.text.clone())
+        .or(search);
+
+    if let Some(ref q) = text_query {
         let trimmed = q.trim();
         if !trimmed.is_empty() {
             let escaped = escape_like(trimmed);
-            conditions.push(format!(
-                "(e.name LIKE ?{pi} ESCAPE '\\' OR e.filename LIKE ?{pi} ESCAPE '\\')",
-                pi = param_idx
-            ));
-            params.push(Box::new(format!("%{escaped}%")));
+            let like_val = format!("%{escaped}%");
+            let text_fields = [
+                "e.name", "e.filename", "e.theme", "e.description",
+                "e.design_name", "e.category", "e.author", "e.keywords",
+                "e.comments", "e.license",
+            ];
+            let clauses: Vec<String> = text_fields
+                .iter()
+                .map(|f| format!("{f} LIKE ?{param_idx} ESCAPE '\\'"))
+                .collect();
+            conditions.push(format!("({})", clauses.join(" OR ")));
+            params.push(Box::new(like_val));
             param_idx += 1;
         }
     }
@@ -49,8 +62,115 @@ pub fn get_files(
                 "EXISTS (SELECT 1 FROM file_formats ff WHERE ff.file_id = e.id AND ff.format = ?{param_idx})"
             ));
             params.push(Box::new(trimmed.to_uppercase()));
-            #[allow(unused_assignments)]
-            { param_idx += 1; }
+            param_idx += 1;
+        }
+    }
+
+    // Advanced search params
+    if let Some(ref sp) = search_params {
+        // Tag filter (AND logic: file must have ALL listed tags)
+        if let Some(ref tags) = sp.tags {
+            for tag_name in tags {
+                let trimmed = tag_name.trim();
+                if !trimmed.is_empty() {
+                    conditions.push(format!(
+                        "EXISTS (SELECT 1 FROM file_tags ft JOIN tags t ON t.id = ft.tag_id \
+                         WHERE ft.file_id = e.id AND t.name = ?{param_idx})"
+                    ));
+                    params.push(Box::new(trimmed.to_string()));
+                    param_idx += 1;
+                }
+            }
+        }
+
+        // Numeric range: stitch_count
+        if let Some(v) = sp.stitch_count_min {
+            conditions.push(format!("e.stitch_count >= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+        if let Some(v) = sp.stitch_count_max {
+            conditions.push(format!("e.stitch_count <= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+
+        // Numeric range: color_count
+        if let Some(v) = sp.color_count_min {
+            conditions.push(format!("e.color_count >= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+        if let Some(v) = sp.color_count_max {
+            conditions.push(format!("e.color_count <= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+
+        // Numeric range: width_mm
+        if let Some(v) = sp.width_mm_min {
+            conditions.push(format!("e.width_mm >= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+        if let Some(v) = sp.width_mm_max {
+            conditions.push(format!("e.width_mm <= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+
+        // Numeric range: height_mm
+        if let Some(v) = sp.height_mm_min {
+            conditions.push(format!("e.height_mm >= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+        if let Some(v) = sp.height_mm_max {
+            conditions.push(format!("e.height_mm <= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+
+        // Numeric range: file_size
+        if let Some(v) = sp.file_size_min {
+            conditions.push(format!("e.file_size_bytes >= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+        if let Some(v) = sp.file_size_max {
+            conditions.push(format!("e.file_size_bytes <= ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+
+        // Boolean: ai_analyzed
+        if let Some(v) = sp.ai_analyzed {
+            conditions.push(format!("e.ai_analyzed = ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+
+        // Boolean: ai_confirmed
+        if let Some(v) = sp.ai_confirmed {
+            conditions.push(format!("e.ai_confirmed = ?{param_idx}"));
+            params.push(Box::new(v));
+            param_idx += 1;
+        }
+
+        // Color/brand search
+        if let Some(ref cs) = sp.color_search {
+            let trimmed = cs.trim();
+            if !trimmed.is_empty() {
+                let escaped = escape_like(trimmed);
+                let like_val = format!("%{escaped}%");
+                conditions.push(format!(
+                    "EXISTS (SELECT 1 FROM file_thread_colors ftc WHERE ftc.file_id = e.id \
+                     AND (ftc.color_name LIKE ?{param_idx} ESCAPE '\\' OR ftc.brand LIKE ?{param_idx} ESCAPE '\\'))"
+                ));
+                params.push(Box::new(like_val));
+                #[allow(unused_assignments)]
+                { param_idx += 1; }
+            }
         }
     }
 
@@ -71,6 +191,18 @@ pub fn get_files(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(files)
+}
+
+#[tauri::command]
+pub fn get_files(
+    db: State<'_, DbState>,
+    folder_id: Option<i64>,
+    search: Option<String>,
+    format_filter: Option<String>,
+    search_params: Option<SearchParams>,
+) -> Result<Vec<EmbroideryFile>, AppError> {
+    let conn = lock_db(&db)?;
+    query_files_impl(&conn, folder_id, search, format_filter, search_params)
 }
 
 #[tauri::command]
@@ -769,5 +901,421 @@ mod tests {
 
         let changes = conn.execute("DELETE FROM embroidery_files WHERE id = ?1", [file_id]).unwrap();
         assert_eq!(changes, 1);
+    }
+
+    // ── SearchParams tests ──────────────────────────────────────────
+
+    use crate::db::models::SearchParams;
+
+    /// Thin wrapper around the production query builder for test use.
+    fn query_files(
+        conn: &rusqlite::Connection,
+        folder_id: Option<i64>,
+        search: Option<String>,
+        format_filter: Option<String>,
+        search_params: Option<SearchParams>,
+    ) -> Vec<crate::db::models::EmbroideryFile> {
+        super::query_files_impl(conn, folder_id, search, format_filter, search_params).unwrap()
+    }
+
+    /// Seed helper: inserts a folder and returns its id.
+    fn seed_folder(conn: &rusqlite::Connection) -> i64 {
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Test', '/test')", []).unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn test_search_text_across_multiple_fields() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        // File 1: "Flowers" only in theme
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, theme) \
+             VALUES (?1, 'a.pes', '/test/a.pes', 'Flowers')",
+            [fid],
+        ).unwrap();
+
+        // File 2: "Flowers" only in description
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, description) \
+             VALUES (?1, 'b.pes', '/test/b.pes', 'Beautiful Flowers')",
+            [fid],
+        ).unwrap();
+
+        // File 3: no match
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, theme) \
+             VALUES (?1, 'c.pes', '/test/c.pes', 'Stars')",
+            [fid],
+        ).unwrap();
+
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            text: Some("Flowers".into()),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|f| f.filename != "c.pes"));
+    }
+
+    #[test]
+    fn test_search_text_in_author_and_keywords() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, author) \
+             VALUES (?1, 'a.pes', '/test/a.pes', 'Maria')",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, keywords) \
+             VALUES (?1, 'b.pes', '/test/b.pes', 'maria, rose')",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, name) \
+             VALUES (?1, 'c.pes', '/test/c.pes', 'Unrelated')",
+            [fid],
+        ).unwrap();
+
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            text: Some("Maria".into()),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_by_tag_filter() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) \
+             VALUES (?1, 'a.pes', '/test/a.pes')",
+            [fid],
+        ).unwrap();
+        let file_a = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) \
+             VALUES (?1, 'b.pes', '/test/b.pes')",
+            [fid],
+        ).unwrap();
+        let file_b = conn.last_insert_rowid();
+
+        // Create tags
+        conn.execute("INSERT INTO tags (name) VALUES ('floral')", []).unwrap();
+        let tag_floral = conn.last_insert_rowid();
+        conn.execute("INSERT INTO tags (name) VALUES ('nature')", []).unwrap();
+        let tag_nature = conn.last_insert_rowid();
+
+        // File A has both tags, File B has only 'nature'
+        conn.execute("INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![file_a, tag_floral]).unwrap();
+        conn.execute("INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![file_a, tag_nature]).unwrap();
+        conn.execute("INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![file_b, tag_nature]).unwrap();
+
+        // Filter by 'floral' only → file A
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            tags: Some(vec!["floral".into()]),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "a.pes");
+
+        // Filter by both tags (AND logic) → only file A has both
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            tags: Some(vec!["floral".into(), "nature".into()]),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "a.pes");
+
+        // Filter by 'nature' only → both files
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            tags: Some(vec!["nature".into()]),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_numeric_range_stitch_count() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, stitch_count) \
+             VALUES (?1, 'small.pes', '/test/small.pes', 1000)",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, stitch_count) \
+             VALUES (?1, 'medium.pes', '/test/medium.pes', 5000)",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, stitch_count) \
+             VALUES (?1, 'large.pes', '/test/large.pes', 20000)",
+            [fid],
+        ).unwrap();
+
+        // Min only
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            stitch_count_min: Some(5000),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 2);
+
+        // Max only
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            stitch_count_max: Some(5000),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 2);
+
+        // Range: 2000..=10000
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            stitch_count_min: Some(2000),
+            stitch_count_max: Some(10000),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "medium.pes");
+    }
+
+    #[test]
+    fn test_search_numeric_range_dimensions() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, width_mm, height_mm) \
+             VALUES (?1, 'a.pes', '/test/a.pes', 50.0, 80.0)",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, width_mm, height_mm) \
+             VALUES (?1, 'b.pes', '/test/b.pes', 120.0, 200.0)",
+            [fid],
+        ).unwrap();
+
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            width_mm_max: Some(100.0),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "a.pes");
+
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            height_mm_min: Some(100.0),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "b.pes");
+    }
+
+    #[test]
+    fn test_search_boolean_ai_analyzed() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, ai_analyzed) \
+             VALUES (?1, 'analyzed.pes', '/test/analyzed.pes', 1)",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) \
+             VALUES (?1, 'not_analyzed.pes', '/test/not_analyzed.pes')",
+            [fid],
+        ).unwrap();
+
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            ai_analyzed: Some(true),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "analyzed.pes");
+
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            ai_analyzed: Some(false),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "not_analyzed.pes");
+    }
+
+    #[test]
+    fn test_search_boolean_ai_confirmed() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, ai_analyzed, ai_confirmed) \
+             VALUES (?1, 'confirmed.pes', '/test/confirmed.pes', 1, 1)",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, ai_analyzed, ai_confirmed) \
+             VALUES (?1, 'pending.pes', '/test/pending.pes', 1, 0)",
+            [fid],
+        ).unwrap();
+
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            ai_confirmed: Some(true),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "confirmed.pes");
+    }
+
+    #[test]
+    fn test_search_color_brand() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) \
+             VALUES (?1, 'a.pes', '/test/a.pes')",
+            [fid],
+        ).unwrap();
+        let file_a = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) \
+             VALUES (?1, 'b.pes', '/test/b.pes')",
+            [fid],
+        ).unwrap();
+
+        // Add thread color to file A
+        conn.execute(
+            "INSERT INTO file_thread_colors (file_id, sort_order, color_hex, color_name, brand) \
+             VALUES (?1, 1, '#FF0000', 'Red', 'Madeira')",
+            [file_a],
+        ).unwrap();
+
+        // Search by color name
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            color_search: Some("Red".into()),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "a.pes");
+
+        // Search by brand
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            color_search: Some("Madeira".into()),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "a.pes");
+
+        // No match
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            color_search: Some("Isacord".into()),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_search_combined_filters() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        // File A: theme=Flowers, stitch_count=5000, ai_analyzed=true
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, theme, stitch_count, ai_analyzed) \
+             VALUES (?1, 'a.pes', '/test/a.pes', 'Flowers', 5000, 1)",
+            [fid],
+        ).unwrap();
+        let file_a = conn.last_insert_rowid();
+        conn.execute("INSERT INTO tags (name) VALUES ('floral')", []).unwrap();
+        let tag_id = conn.last_insert_rowid();
+        conn.execute("INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![file_a, tag_id]).unwrap();
+
+        // File B: theme=Flowers, stitch_count=500, ai_analyzed=false
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, theme, stitch_count) \
+             VALUES (?1, 'b.pes', '/test/b.pes', 'Flowers', 500)",
+            [fid],
+        ).unwrap();
+
+        // File C: theme=Stars, stitch_count=8000, ai_analyzed=true
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, theme, stitch_count, ai_analyzed) \
+             VALUES (?1, 'c.pes', '/test/c.pes', 'Stars', 8000, 1)",
+            [fid],
+        ).unwrap();
+
+        // Combine text + stitch range + boolean: only file A matches all three
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            text: Some("Flowers".into()),
+            stitch_count_min: Some(1000),
+            ai_analyzed: Some(true),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "a.pes");
+
+        // Combine text + tag: only file A has both "Flowers" text and "floral" tag
+        let results = query_files(&conn, None, None, None, Some(SearchParams {
+            text: Some("Flowers".into()),
+            tags: Some(vec!["floral".into()]),
+            ..Default::default()
+        }));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "a.pes");
+    }
+
+    #[test]
+    fn test_search_empty_params_returns_all() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) VALUES (?1, 'a.pes', '/test/a.pes')",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) VALUES (?1, 'b.pes', '/test/b.pes')",
+            [fid],
+        ).unwrap();
+
+        // Default (empty) SearchParams should return all files
+        let results = query_files(&conn, None, None, None, Some(SearchParams::default()));
+        assert_eq!(results.len(), 2);
+
+        // None search_params should also return all
+        let results = query_files(&conn, None, None, None, None);
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_search_legacy_search_still_works() {
+        let conn = init_database_in_memory().unwrap();
+        let fid = seed_folder(&conn);
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, name) \
+             VALUES (?1, 'rose.pes', '/test/rose.pes', 'Rose Design')",
+            [fid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, name) \
+             VALUES (?1, 'star.dst', '/test/star.dst', 'Star Pattern')",
+            [fid],
+        ).unwrap();
+
+        // Legacy search param (no SearchParams struct)
+        let results = query_files(&conn, None, Some("Rose".into()), None, None);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "rose.pes");
     }
 }

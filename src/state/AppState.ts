@@ -9,6 +9,7 @@ const initialState: State = {
   selectedFileId: null,
   selectedFileIds: [],
   searchQuery: "",
+  searchParams: {},
   formatFilter: null,
   settings: {},
   theme: "hell",

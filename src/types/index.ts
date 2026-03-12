@@ -104,6 +104,24 @@ export interface CustomFieldDef {
   createdAt: string;
 }
 
+export interface SearchParams {
+  text?: string;
+  tags?: string[];
+  stitchCountMin?: number;
+  stitchCountMax?: number;
+  colorCountMin?: number;
+  colorCountMax?: number;
+  widthMmMin?: number;
+  widthMmMax?: number;
+  heightMmMin?: number;
+  heightMmMax?: number;
+  fileSizeMin?: number;
+  fileSizeMax?: number;
+  aiAnalyzed?: boolean;
+  aiConfirmed?: boolean;
+  colorSearch?: string;
+}
+
 export interface SelectedFields {
   name?: boolean;
   theme?: boolean;
@@ -136,6 +154,7 @@ export interface State {
   selectedFileId: number | null;
   selectedFileIds: number[];
   searchQuery: string;
+  searchParams: SearchParams;
   formatFilter: string | null;
   settings: Record<string, string>;
   theme: ThemeMode;

@@ -151,3 +151,33 @@ pub struct FileUpdate {
     pub description: Option<String>,
     pub license: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchParams {
+    /// Free-text query: searches name, filename, theme, description,
+    /// design_name, category, author, keywords, comments, license
+    pub text: Option<String>,
+
+    /// Tags: file must have ALL listed tags (AND logic)
+    pub tags: Option<Vec<String>>,
+
+    /// Numeric range filters
+    pub stitch_count_min: Option<i32>,
+    pub stitch_count_max: Option<i32>,
+    pub color_count_min: Option<i32>,
+    pub color_count_max: Option<i32>,
+    pub width_mm_min: Option<f64>,
+    pub width_mm_max: Option<f64>,
+    pub height_mm_min: Option<f64>,
+    pub height_mm_max: Option<f64>,
+    pub file_size_min: Option<i64>,
+    pub file_size_max: Option<i64>,
+
+    /// Boolean filters
+    pub ai_analyzed: Option<bool>,
+    pub ai_confirmed: Option<bool>,
+
+    /// Thread color name or brand search
+    pub color_search: Option<String>,
+}

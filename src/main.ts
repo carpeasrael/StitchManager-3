@@ -308,7 +308,8 @@ async function reloadFiles(): Promise<void> {
   const folderId = appState.get("selectedFolderId");
   const search = appState.get("searchQuery");
   const formatFilter = appState.get("formatFilter");
-  const updatedFiles = await FileService.getFiles(folderId, search, formatFilter);
+  const searchParams = appState.get("searchParams");
+  const updatedFiles = await FileService.getFiles(folderId, search, formatFilter, searchParams);
   appState.set("files", updatedFiles);
 }
 
