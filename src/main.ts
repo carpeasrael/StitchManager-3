@@ -23,7 +23,9 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import * as FileService from "./services/FileService";
 import * as BatchService from "./services/BatchService";
 import * as AiService from "./services/AiService";
+import * as ScannerService from "./services/ScannerService";
 import * as SettingsService from "./services/SettingsService";
+import * as FolderService from "./services/FolderService";
 import type { ThemeMode } from "./types/index";
 
 async function initTheme(): Promise<void> {
@@ -87,6 +89,12 @@ async function initTauriBridge(): Promise<void> {
     listen("ai:error", (e) => EventBus.emit("ai:error", e.payload)),
     listen("batch:progress", (e) =>
       EventBus.emit("batch:progress", e.payload)
+    ),
+    listen("import:discovery", (e) =>
+      EventBus.emit("import:discovery", e.payload)
+    ),
+    listen("import:progress", (e) =>
+      EventBus.emit("import:progress", e.payload)
     ),
     listen("fs:new-files", (e) =>
       EventBus.emit("fs:new-files", e.payload)
@@ -231,6 +239,50 @@ function initEventHandlers(): () => void {
           console.warn("Batch export failed:", e);
           ToastContainer.show("error", "Export fehlgeschlagen");
         }
+      }
+    }),
+
+    EventBus.on("toolbar:mass-import", async () => {
+      // Guard against concurrent imports
+      const importBtn = document.querySelector<HTMLButtonElement>(".toolbar-btn-mass-import");
+      if (importBtn?.disabled) return;
+
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Ordner f\u00FCr Massenimport w\u00E4hlen",
+      });
+      if (!selected) return;
+
+      const path = typeof selected === "string" ? selected : String(selected);
+      if (!path) return;
+
+      if (importBtn) importBtn.disabled = true;
+      BatchDialog.open("Massenimport", 0, "import");
+
+      try {
+        const result = await ScannerService.massImport(path);
+
+        // Reload folders (new folder may have been created)
+        const folders = await FolderService.getAll();
+        appState.set("folders", folders);
+
+        // Select the imported folder and reload files
+        appState.set("selectedFileIds", []);
+        appState.set("selectedFileId", null);
+        appState.set("selectedFolderId", result.folderId);
+        await reloadFiles();
+
+        const elapsed = (result.elapsedMs / 1000).toFixed(1);
+        ToastContainer.show(
+          "success",
+          `${result.importedCount} Dateien importiert, ${result.skippedCount} übersprungen (${elapsed}s)`
+        );
+      } catch (e) {
+        console.warn("Mass import failed:", e);
+        ToastContainer.show("error", "Massenimport fehlgeschlagen");
+      } finally {
+        if (importBtn) importBtn.disabled = false;
       }
     }),
 

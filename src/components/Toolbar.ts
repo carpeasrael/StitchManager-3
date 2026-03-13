@@ -40,6 +40,12 @@ export class Toolbar extends Component {
     );
 
     actions.appendChild(
+      this.createButton("toolbar-btn-mass-import", "\uD83D\uDCE5", "Massenimport", () =>
+        EventBus.emit("toolbar:mass-import")
+      )
+    );
+
+    actions.appendChild(
       this.createButton("toolbar-btn-save", "\uD83D\uDCBE", "Speichern", () =>
         EventBus.emit("toolbar:save")
       )

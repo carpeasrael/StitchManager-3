@@ -1,3 +1,4 @@
+use std::time::Instant;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
@@ -271,6 +272,345 @@ pub fn import_files(
     }
 
     Ok(imported)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MassImportResult {
+    pub folder_id: i64,
+    pub imported_count: u32,
+    pub skipped_count: u32,
+    pub error_count: u32,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportDiscoveryPayload {
+    scanned_files: u32,
+    found_files: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportProgressPayload {
+    current: u32,
+    total: u32,
+    filename: String,
+    status: String,
+    elapsed_ms: u64,
+    estimated_remaining_ms: u64,
+}
+
+#[tauri::command]
+pub fn mass_import(
+    db: State<'_, DbState>,
+    thumb_state: State<'_, ThumbnailState>,
+    path: String,
+    app_handle: AppHandle,
+) -> Result<MassImportResult, AppError> {
+    let dir = std::path::Path::new(&path);
+    if !dir.is_dir() {
+        return Err(AppError::Validation(format!(
+            "Pfad ist kein Verzeichnis: {path}"
+        )));
+    }
+
+    let start = Instant::now();
+
+    // --- Phase 0: Create or find folder ---
+    let folder_name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Import")
+        .to_string();
+
+    let folder_id: i64;
+    {
+        let conn = lock_db(&db)?;
+        // Check if a folder with this path already exists
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM folders WHERE path = ?1",
+                [&path],
+                |row| row.get(0),
+            )
+            .ok();
+
+        folder_id = match existing {
+            Some(id) => id,
+            None => {
+                conn.execute(
+                    "INSERT INTO folders (name, path) VALUES (?1, ?2)",
+                    rusqlite::params![folder_name, path],
+                )?;
+                conn.last_insert_rowid()
+            }
+        };
+    }
+
+    // --- Phase 1: Discovery ---
+    let mut embroidery_paths: Vec<String> = Vec::new();
+    let mut scanned_files: u32 = 0;
+
+    for entry in WalkDir::new(dir).follow_links(false) {
+        match entry {
+            Ok(e) => {
+                if !e.file_type().is_file() {
+                    continue;
+                }
+                scanned_files += 1;
+                if is_embroidery_file(e.path()) {
+                    embroidery_paths.push(e.path().to_string_lossy().to_string());
+                }
+                if scanned_files % 50 == 0 {
+                    let _ = app_handle.emit(
+                        "import:discovery",
+                        ImportDiscoveryPayload {
+                            scanned_files,
+                            found_files: embroidery_paths.len() as u32,
+                        },
+                    );
+                }
+            }
+            Err(e) => {
+                log::warn!("Discovery walk error: {e}");
+            }
+        }
+    }
+
+    // Emit final discovery result
+    let _ = app_handle.emit(
+        "import:discovery",
+        ImportDiscoveryPayload {
+            scanned_files,
+            found_files: embroidery_paths.len() as u32,
+        },
+    );
+
+    let total = embroidery_paths.len() as u32;
+
+    // --- Phase 2: Import ---
+    let import_start = Instant::now();
+    let mut imported_count: u32 = 0;
+    let mut skipped_count: u32 = 0;
+    let mut error_count: u32 = 0;
+
+    // Pre-parse all files outside DB lock
+    struct PreParsed {
+        filepath: String,
+        filename: String,
+        file_size: Option<i64>,
+        parsed: Option<ParsedFileInfo>,
+        ext: Option<String>,
+    }
+
+    let file_infos: Vec<PreParsed> = embroidery_paths
+        .iter()
+        .map(|filepath| {
+            let p = std::path::Path::new(filepath);
+            let filename = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let file_size: Option<i64> = std::fs::metadata(p)
+                .ok()
+                .and_then(|m| i64::try_from(m.len()).ok());
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase());
+            let parsed = ext
+                .as_deref()
+                .and_then(|e| parsers::get_parser(e))
+                .and_then(|parser| {
+                    std::fs::read(p)
+                        .ok()
+                        .and_then(|data| parser.parse(&data).ok())
+                });
+            PreParsed {
+                filepath: filepath.clone(),
+                filename,
+                file_size,
+                parsed,
+                ext,
+            }
+        })
+        .collect();
+
+    let conn = lock_db(&db)?;
+
+    // Verify folder still exists
+    let folder_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM folders WHERE id = ?1",
+        [folder_id],
+        |row| row.get(0),
+    )?;
+    if !folder_exists {
+        return Err(AppError::NotFound(format!(
+            "Ordner {folder_id} nicht gefunden"
+        )));
+    }
+
+    let mut thumb_pending: Vec<(i64, String, String)> = Vec::new();
+
+    // Transaction for DB inserts
+    {
+        let tx = conn.unchecked_transaction()?;
+
+        for (idx, info) in file_infos.iter().enumerate() {
+            let current = (idx + 1) as u32;
+            let status: String;
+
+            let result = tx.execute(
+                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size],
+            );
+
+            match result {
+                Ok(changes) if changes > 0 => {
+                    let id = tx.last_insert_rowid();
+                    if let Some(pinfo) = &info.parsed {
+                        if let Err(e) = tx.execute(
+                            "UPDATE embroidery_files SET \
+                             stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
+                             design_name = ?6, jump_count = ?7, trim_count = ?8, \
+                             hoop_width_mm = ?9, hoop_height_mm = ?10, \
+                             category = ?11, author = ?12, keywords = ?13, comments = ?14 \
+                             WHERE id = ?1",
+                            rusqlite::params![
+                                id,
+                                pinfo.stitch_count,
+                                pinfo.color_count,
+                                pinfo.width_mm,
+                                pinfo.height_mm,
+                                pinfo.design_name,
+                                pinfo.jump_count,
+                                pinfo.trim_count,
+                                pinfo.hoop_width_mm,
+                                pinfo.hoop_height_mm,
+                                pinfo.category,
+                                pinfo.author,
+                                pinfo.keywords,
+                                pinfo.comments,
+                            ],
+                        ) {
+                            log::warn!("Failed to update metadata for {}: {e}", info.filepath);
+                        }
+
+                        for (cidx, color) in pinfo.colors.iter().enumerate() {
+                            if let Err(e) = tx.execute(
+                                "INSERT INTO file_thread_colors (file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai) \
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+                                rusqlite::params![
+                                    id,
+                                    cidx as i32,
+                                    color.hex,
+                                    color.name,
+                                    color.brand,
+                                    color.brand_code,
+                                ],
+                            ) {
+                                log::warn!("Failed to insert color for {}: {e}", info.filepath);
+                            }
+                        }
+
+                        if let Err(e) = tx.execute(
+                            "INSERT INTO file_formats (file_id, format, format_version, filepath, file_size_bytes, parsed) \
+                             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                            rusqlite::params![
+                                id,
+                                pinfo.format,
+                                pinfo.format_version,
+                                info.filepath,
+                                info.file_size,
+                            ],
+                        ) {
+                            log::warn!("Failed to insert format for {}: {e}", info.filepath);
+                        }
+                    }
+
+                    if let Some(ext) = &info.ext {
+                        thumb_pending.push((id, info.filepath.clone(), ext.clone()));
+                    }
+
+                    imported_count += 1;
+                    status = "ok".to_string();
+                }
+                Ok(_) => {
+                    skipped_count += 1;
+                    status = "skipped".to_string();
+                }
+                Err(e) => {
+                    error_count += 1;
+                    status = format!("error:{e}");
+                    log::warn!("Failed to import {}: {e}", info.filepath);
+                }
+            }
+
+            // Throttle progress events: emit every 10 files + always the last one
+            // to reduce DB lock contention from cross-thread event serialization
+            if current % 10 == 0 || current == total {
+                let elapsed = import_start.elapsed().as_millis() as u64;
+                let avg_per_file = if current > 0 { elapsed / current as u64 } else { 0 };
+                let remaining = total.saturating_sub(current);
+                let estimated_remaining_ms = avg_per_file * remaining as u64;
+
+                let _ = app_handle.emit(
+                    "import:progress",
+                    ImportProgressPayload {
+                        current,
+                        total,
+                        filename: info.filename.clone(),
+                        status,
+                        elapsed_ms: elapsed,
+                        estimated_remaining_ms,
+                    },
+                );
+            }
+        }
+
+        tx.commit()?;
+    }
+
+    // Drop DB lock before thumbnail generation to avoid blocking other commands
+    drop(conn);
+
+    // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
+    for (id, filepath, ext) in &thumb_pending {
+        if let Ok(data) = std::fs::read(std::path::Path::new(filepath)) {
+            match thumb_state.0.generate(*id, &data, ext) {
+                Ok(thumb_path) => {
+                    if let Ok(c) = lock_db(&db) {
+                        let _ = c.execute(
+                            "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                            rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                }
+            }
+        }
+    }
+
+    let total_elapsed_ms = start.elapsed().as_millis() as u64;
+
+    let result = MassImportResult {
+        folder_id,
+        imported_count,
+        skipped_count,
+        error_count,
+        elapsed_ms: total_elapsed_ms,
+    };
+
+    // Emit completion event (reuses same struct as the return value)
+    let _ = app_handle.emit("import:complete", &result);
+
+    Ok(result)
 }
 
 #[tauri::command]

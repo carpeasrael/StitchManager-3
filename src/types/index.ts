@@ -130,6 +130,23 @@ export interface SelectedFields {
   colors?: boolean;
 }
 
+export interface ImportProgress {
+  current: number;
+  total: number;
+  filename: string;
+  status: string;
+  elapsedMs: number;
+  estimatedRemainingMs: number;
+}
+
+export interface MassImportResult {
+  folderId: number;
+  importedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  elapsedMs: number;
+}
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface BatchResult {

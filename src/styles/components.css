@@ -1498,7 +1498,25 @@
   transition: width 0.3s ease;
 }
 
+.batch-progress-indeterminate {
+  animation: batch-indeterminate 1.5s ease-in-out infinite;
+  opacity: 0.6;
+}
+
+@keyframes batch-indeterminate {
+  0% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+  100% { opacity: 0.3; }
+}
+
 .batch-progress-text {
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  text-align: right;
+  margin-bottom: 4px;
+}
+
+.batch-time-label {
   font-size: var(--font-size-caption);
   color: var(--color-muted);
   text-align: right;

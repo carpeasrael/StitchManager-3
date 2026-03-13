@@ -1,24 +1,37 @@
 import { EventBus } from "../state/EventBus";
 
+function formatTime(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, "0")}`;
+}
+
+export type BatchMode = "batch" | "import";
+
 export class BatchDialog {
   private overlay: HTMLElement | null = null;
   private progressFill: HTMLElement | null = null;
   private progressText: HTMLElement | null = null;
   private logContainer: HTMLElement | null = null;
   private stepLabel: HTMLElement | null = null;
+  private timeLabel: HTMLElement | null = null;
   private cancelBtn: HTMLButtonElement | null = null;
   private total: number;
-  private unsubscribe: (() => void) | null = null;
+  private mode: BatchMode;
+  private unsubscribers: (() => void)[] = [];
 
   constructor(
     private operation: string,
-    total: number
+    total: number,
+    mode: BatchMode = "batch"
   ) {
     this.total = total;
+    this.mode = mode;
   }
 
-  static open(operation: string, total: number): BatchDialog {
-    const dialog = new BatchDialog(operation, total);
+  static open(operation: string, total: number, mode: BatchMode = "batch"): BatchDialog {
+    const dialog = new BatchDialog(operation, total, mode);
     dialog.show();
     return dialog;
   }
@@ -44,7 +57,11 @@ export class BatchDialog {
     // Step indicator
     this.stepLabel = document.createElement("div");
     this.stepLabel.className = "batch-step-label";
-    this.stepLabel.textContent = `${this.operation} — 0 von ${this.total} Dateien`;
+    if (this.mode === "import" && this.total === 0) {
+      this.stepLabel.textContent = `${this.operation} — Dateien werden gesucht...`;
+    } else {
+      this.stepLabel.textContent = `${this.operation} — 0 von ${this.total} Dateien`;
+    }
     body.appendChild(this.stepLabel);
 
     // Progress bar
@@ -53,15 +70,28 @@ export class BatchDialog {
 
     this.progressFill = document.createElement("div");
     this.progressFill.className = "batch-progress-fill";
-    this.progressFill.style.width = "0%";
+    if (this.mode === "import" && this.total === 0) {
+      this.progressFill.classList.add("batch-progress-indeterminate");
+    }
+    this.progressFill.style.width = this.mode === "import" && this.total === 0 ? "100%" : "0%";
     progressBar.appendChild(this.progressFill);
 
     body.appendChild(progressBar);
 
     this.progressText = document.createElement("div");
     this.progressText.className = "batch-progress-text";
-    this.progressText.textContent = "0 / " + this.total;
+    this.progressText.textContent = this.mode === "import" && this.total === 0
+      ? "Suche..."
+      : "0 / " + this.total;
     body.appendChild(this.progressText);
+
+    // Time display (import mode only)
+    if (this.mode === "import") {
+      this.timeLabel = document.createElement("div");
+      this.timeLabel.className = "batch-time-label";
+      this.timeLabel.textContent = "";
+      body.appendChild(this.timeLabel);
+    }
 
     // Log view
     this.logContainer = document.createElement("div");
@@ -87,22 +117,69 @@ export class BatchDialog {
     this.overlay.appendChild(dialog);
     document.body.appendChild(this.overlay);
 
-    // Listen for batch:progress events
-    this.unsubscribe = EventBus.on("batch:progress", (payload: unknown) => {
-      const p = payload as {
-        current: number;
-        total: number;
-        filename: string;
-        status: string;
-      };
-      const isError = p.status.startsWith("error");
-      this.addLogEntry(
-        p.filename,
-        isError ? "error" : "success",
-        isError ? p.status : undefined
+    // Listen for progress events
+    if (this.mode === "import") {
+      this.unsubscribers.push(
+        EventBus.on("import:discovery", (payload: unknown) => {
+          const p = payload as { scannedFiles: number; foundFiles: number };
+          this.updateDiscovery(p.scannedFiles, p.foundFiles);
+        })
       );
-      this.setProgress(p.current, p.total);
-    });
+      this.unsubscribers.push(
+        EventBus.on("import:progress", (payload: unknown) => {
+          const p = payload as {
+            current: number;
+            total: number;
+            filename: string;
+            status: string;
+            elapsedMs: number;
+            estimatedRemainingMs: number;
+          };
+          const isError = p.status.startsWith("error");
+          const isSkipped = p.status === "skipped";
+          if (!isSkipped) {
+            this.addLogEntry(
+              p.filename,
+              isError ? "error" : "success",
+              isError ? p.status : undefined
+            );
+          }
+          this.setProgress(p.current, p.total);
+          this.updateTime(p.elapsedMs, p.estimatedRemainingMs);
+        })
+      );
+    } else {
+      this.unsubscribers.push(
+        EventBus.on("batch:progress", (payload: unknown) => {
+          const p = payload as {
+            current: number;
+            total: number;
+            filename: string;
+            status: string;
+          };
+          const isError = p.status.startsWith("error");
+          this.addLogEntry(
+            p.filename,
+            isError ? "error" : "success",
+            isError ? p.status : undefined
+          );
+          this.setProgress(p.current, p.total);
+        })
+      );
+    }
+  }
+
+  private updateDiscovery(scannedFiles: number, foundFiles: number): void {
+    if (this.stepLabel) {
+      this.stepLabel.textContent = `${this.operation} — ${foundFiles} Stickdateien gefunden (${scannedFiles} Dateien durchsucht)`;
+    }
+  }
+
+  private updateTime(elapsedMs: number, estimatedRemainingMs: number): void {
+    if (!this.timeLabel) return;
+    const elapsed = formatTime(elapsedMs);
+    const remaining = formatTime(estimatedRemainingMs);
+    this.timeLabel.textContent = `Laufzeit: ${elapsed} — Verbleibend: ~${remaining}`;
   }
 
   addLogEntry(
@@ -134,6 +211,7 @@ export class BatchDialog {
     const pct = total > 0 ? Math.round((current / total) * 100) : 0;
 
     if (this.progressFill) {
+      this.progressFill.classList.remove("batch-progress-indeterminate");
       this.progressFill.style.width = `${pct}%`;
     }
     if (this.progressText) {
@@ -144,7 +222,7 @@ export class BatchDialog {
     }
 
     // Auto-close on completion
-    if (current >= total) {
+    if (current >= total && total > 0) {
       this.onComplete();
     }
   }
@@ -156,6 +234,13 @@ export class BatchDialog {
       this.cancelBtn.onclick = () => this.close();
     }
 
+    // Show final time
+    if (this.timeLabel) {
+      const text = this.timeLabel.textContent || "";
+      const elapsed = text.split(" — ")[0] || "";
+      this.timeLabel.textContent = elapsed ? `${elapsed} — Abgeschlossen` : "Abgeschlossen";
+    }
+
     // Auto-close after 2 seconds
     setTimeout(() => {
       this.close();
@@ -163,10 +248,10 @@ export class BatchDialog {
   }
 
   close(): void {
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = null;
+    for (const unsub of this.unsubscribers) {
+      unsub();
     }
+    this.unsubscribers = [];
     if (this.overlay) {
       this.overlay.remove();
       this.overlay = null;
