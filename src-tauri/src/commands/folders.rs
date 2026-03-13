@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use tauri::State;
 use crate::DbState;
 use crate::db::models::Folder;
@@ -110,7 +111,7 @@ pub fn delete_folder(db: State<'_, DbState>, folder_id: i64) -> Result<(), AppEr
     let conn = lock_db(&db)?;
 
     // Collect thumbnail paths before cascade delete removes the file rows.
-    // Use recursive CTE to include files in nested subfolders (parent_id cascade).
+    // Single recursive CTE for both thumbnail paths and file count.
     let mut stmt = conn.prepare(
         "WITH RECURSIVE folder_tree(id) AS (
              SELECT id FROM folders WHERE id = ?1
@@ -118,25 +119,20 @@ pub fn delete_folder(db: State<'_, DbState>, folder_id: i64) -> Result<(), AppEr
              SELECT f.id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
          )
          SELECT e.thumbnail_path FROM embroidery_files e
-         JOIN folder_tree ft ON e.folder_id = ft.id
-         WHERE e.thumbnail_path IS NOT NULL AND e.thumbnail_path != ''",
+         JOIN folder_tree ft ON e.folder_id = ft.id",
     )?;
-    let thumbnail_paths: Vec<String> = stmt
-        .query_map([folder_id], |row| row.get(0))?
+    let all_thumb_paths: Vec<Option<String>> = stmt
+        .query_map([folder_id], |row| row.get::<_, Option<String>>(0))?
         .filter_map(|r| r.ok())
         .collect();
 
-    let file_count: i64 = conn.query_row(
-        "WITH RECURSIVE folder_tree(id) AS (
-             SELECT id FROM folders WHERE id = ?1
-             UNION ALL
-             SELECT f.id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
-         )
-         SELECT COUNT(*) FROM embroidery_files e
-         JOIN folder_tree ft ON e.folder_id = ft.id",
-        [folder_id],
-        |row| row.get(0),
-    )?;
+    let file_count = all_thumb_paths.len();
+    let thumbnail_paths: Vec<String> = all_thumb_paths
+        .into_iter()
+        .flatten()
+        .filter(|p| !p.is_empty())
+        .collect();
+
     if file_count > 0 {
         log::warn!(
             "Deleting folder {folder_id} will cascade-delete {file_count} associated file(s)"
@@ -176,6 +172,23 @@ pub fn get_folder_file_count(
     )?;
 
     Ok(count)
+}
+
+#[tauri::command]
+pub fn get_all_folder_file_counts(
+    db: State<'_, DbState>,
+) -> Result<HashMap<i64, i64>, AppError> {
+    let conn = lock_db(&db)?;
+
+    let mut stmt = conn.prepare(
+        "SELECT folder_id, COUNT(*) FROM embroidery_files GROUP BY folder_id",
+    )?;
+    let counts = stmt
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(counts)
 }
 
 #[cfg(test)]

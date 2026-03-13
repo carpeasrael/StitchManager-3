@@ -104,6 +104,7 @@ pub fn run() {
             commands::folders::update_folder,
             commands::folders::delete_folder,
             commands::folders::get_folder_file_count,
+            commands::folders::get_all_folder_file_counts,
             commands::scanner::scan_directory,
             commands::scanner::import_files,
             commands::files::get_files,

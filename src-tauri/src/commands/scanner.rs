@@ -11,6 +11,111 @@ use crate::parsers::{self, ParsedFileInfo, StitchSegment};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3"];
 
+/// Pre-parsed file data collected outside the DB lock.
+/// Shared across import_files, mass_import, watcher_auto_import, and migrate_from_2stitch.
+pub struct PreParsedFile {
+    pub filepath: String,
+    pub filename: String,
+    pub file_size: Option<i64>,
+    pub parsed: Option<ParsedFileInfo>,
+    pub ext: Option<String>,
+}
+
+/// Collect filesystem metadata and parse an embroidery file.
+/// Performs I/O (stat + read + parse) — call outside DB lock.
+pub fn pre_parse_file(filepath: &str) -> PreParsedFile {
+    let path = std::path::Path::new(filepath);
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let file_size: Option<i64> = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| i64::try_from(m.len()).ok());
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+    let parsed = ext
+        .as_deref()
+        .and_then(|e| parsers::get_parser(e))
+        .and_then(|parser| {
+            std::fs::read(path)
+                .ok()
+                .and_then(|data| parser.parse(&data).ok())
+        });
+    PreParsedFile { filepath: filepath.to_string(), filename, file_size, parsed, ext }
+}
+
+/// Persist parsed metadata, thread colors, and format record for a newly inserted file.
+/// Call inside a transaction after INSERT INTO embroidery_files.
+pub fn persist_parsed_metadata(
+    tx: &rusqlite::Transaction,
+    file_id: i64,
+    pinfo: &ParsedFileInfo,
+    filepath: &str,
+    file_size: Option<i64>,
+) {
+    if let Err(e) = tx.execute(
+        "UPDATE embroidery_files SET \
+         stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
+         design_name = ?6, jump_count = ?7, trim_count = ?8, \
+         hoop_width_mm = ?9, hoop_height_mm = ?10, \
+         category = ?11, author = ?12, keywords = ?13, comments = ?14 \
+         WHERE id = ?1",
+        rusqlite::params![
+            file_id,
+            pinfo.stitch_count,
+            pinfo.color_count,
+            pinfo.width_mm,
+            pinfo.height_mm,
+            pinfo.design_name,
+            pinfo.jump_count,
+            pinfo.trim_count,
+            pinfo.hoop_width_mm,
+            pinfo.hoop_height_mm,
+            pinfo.category,
+            pinfo.author,
+            pinfo.keywords,
+            pinfo.comments,
+        ],
+    ) {
+        log::warn!("Failed to update metadata for {filepath}: {e}");
+    }
+
+    for (idx, color) in pinfo.colors.iter().enumerate() {
+        if let Err(e) = tx.execute(
+            "INSERT INTO file_thread_colors (file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+            rusqlite::params![
+                file_id,
+                idx as i32,
+                color.hex,
+                color.name,
+                color.brand,
+                color.brand_code,
+            ],
+        ) {
+            log::warn!("Failed to insert color for {filepath}: {e}");
+        }
+    }
+
+    if let Err(e) = tx.execute(
+        "INSERT INTO file_formats (file_id, format, format_version, filepath, file_size_bytes, parsed) \
+         VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+        rusqlite::params![
+            file_id,
+            pinfo.format,
+            pinfo.format_version,
+            filepath,
+            file_size,
+        ],
+    ) {
+        log::warn!("Failed to insert format for {filepath}: {e}");
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanResult {
@@ -97,38 +202,9 @@ pub fn import_files(
 ) -> Result<Vec<EmbroideryFile>, AppError> {
     // Collect filesystem metadata and parse files before acquiring the DB lock
     // to avoid holding the mutex during potentially slow I/O.
-    struct PreParsed {
-        filepath: String,
-        filename: String,
-        file_size: Option<i64>,
-        parsed: Option<ParsedFileInfo>,
-        ext: Option<String>,
-    }
-    let file_info: Vec<PreParsed> = file_paths
+    let file_info: Vec<PreParsedFile> = file_paths
         .iter()
-        .map(|filepath| {
-            let path = std::path::Path::new(filepath);
-            let filename = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let file_size: Option<i64> = std::fs::metadata(path)
-                .ok()
-                .and_then(|m| i64::try_from(m.len()).ok());
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase());
-            let parsed = ext.as_deref()
-                .and_then(|e| parsers::get_parser(e))
-                .and_then(|parser| {
-                    std::fs::read(path)
-                        .ok()
-                        .and_then(|data| parser.parse(&data).ok())
-                });
-            PreParsed { filepath: filepath.clone(), filename, file_size, parsed, ext }
-        })
+        .map(|filepath| pre_parse_file(filepath))
         .collect();
 
     let conn = lock_db(&db)?;
@@ -162,67 +238,8 @@ pub fn import_files(
             match result {
                 Ok(changes) if changes > 0 => {
                     let id = tx.last_insert_rowid();
-                    // Persist parsed metadata if available
                     if let Some(pinfo) = &info.parsed {
-                        if let Err(e) = tx.execute(
-                            "UPDATE embroidery_files SET \
-                             stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
-                             design_name = ?6, jump_count = ?7, trim_count = ?8, \
-                             hoop_width_mm = ?9, hoop_height_mm = ?10, \
-                             category = ?11, author = ?12, keywords = ?13, comments = ?14 \
-                             WHERE id = ?1",
-                            rusqlite::params![
-                                id,
-                                pinfo.stitch_count,
-                                pinfo.color_count,
-                                pinfo.width_mm,
-                                pinfo.height_mm,
-                                pinfo.design_name,
-                                pinfo.jump_count,
-                                pinfo.trim_count,
-                                pinfo.hoop_width_mm,
-                                pinfo.hoop_height_mm,
-                                pinfo.category,
-                                pinfo.author,
-                                pinfo.keywords,
-                                pinfo.comments,
-                            ],
-                        ) {
-                            log::warn!("Failed to update metadata for {}: {e}", info.filepath);
-                        }
-
-                        // Persist parsed thread colors into file_thread_colors
-                        for (idx, color) in pinfo.colors.iter().enumerate() {
-                            if let Err(e) = tx.execute(
-                                "INSERT INTO file_thread_colors (file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai) \
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-                                rusqlite::params![
-                                    id,
-                                    idx as i32,
-                                    color.hex,
-                                    color.name,
-                                    color.brand,
-                                    color.brand_code,
-                                ],
-                            ) {
-                                log::warn!("Failed to insert color for {}: {e}", info.filepath);
-                            }
-                        }
-
-                        // Persist format record into file_formats
-                        if let Err(e) = tx.execute(
-                            "INSERT INTO file_formats (file_id, format, format_version, filepath, file_size_bytes, parsed) \
-                             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                            rusqlite::params![
-                                id,
-                                pinfo.format,
-                                pinfo.format_version,
-                                info.filepath,
-                                info.file_size,
-                            ],
-                        ) {
-                            log::warn!("Failed to insert format for {}: {e}", info.filepath);
-                        }
+                        persist_parsed_metadata(&tx, id, pinfo, &info.filepath, info.file_size);
                     }
 
                     if let Some(ext) = &info.ext {
@@ -397,46 +414,9 @@ pub fn mass_import(
     let mut error_count: u32 = 0;
 
     // Pre-parse all files outside DB lock
-    struct PreParsed {
-        filepath: String,
-        filename: String,
-        file_size: Option<i64>,
-        parsed: Option<ParsedFileInfo>,
-        ext: Option<String>,
-    }
-
-    let file_infos: Vec<PreParsed> = embroidery_paths
+    let file_infos: Vec<PreParsedFile> = embroidery_paths
         .iter()
-        .map(|filepath| {
-            let p = std::path::Path::new(filepath);
-            let filename = p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let file_size: Option<i64> = std::fs::metadata(p)
-                .ok()
-                .and_then(|m| i64::try_from(m.len()).ok());
-            let ext = p
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase());
-            let parsed = ext
-                .as_deref()
-                .and_then(|e| parsers::get_parser(e))
-                .and_then(|parser| {
-                    std::fs::read(p)
-                        .ok()
-                        .and_then(|data| parser.parse(&data).ok())
-                });
-            PreParsed {
-                filepath: filepath.clone(),
-                filename,
-                file_size,
-                parsed,
-                ext,
-            }
-        })
+        .map(|filepath| pre_parse_file(filepath))
         .collect();
 
     let conn = lock_db(&db)?;
@@ -473,63 +453,7 @@ pub fn mass_import(
                 Ok(changes) if changes > 0 => {
                     let id = tx.last_insert_rowid();
                     if let Some(pinfo) = &info.parsed {
-                        if let Err(e) = tx.execute(
-                            "UPDATE embroidery_files SET \
-                             stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
-                             design_name = ?6, jump_count = ?7, trim_count = ?8, \
-                             hoop_width_mm = ?9, hoop_height_mm = ?10, \
-                             category = ?11, author = ?12, keywords = ?13, comments = ?14 \
-                             WHERE id = ?1",
-                            rusqlite::params![
-                                id,
-                                pinfo.stitch_count,
-                                pinfo.color_count,
-                                pinfo.width_mm,
-                                pinfo.height_mm,
-                                pinfo.design_name,
-                                pinfo.jump_count,
-                                pinfo.trim_count,
-                                pinfo.hoop_width_mm,
-                                pinfo.hoop_height_mm,
-                                pinfo.category,
-                                pinfo.author,
-                                pinfo.keywords,
-                                pinfo.comments,
-                            ],
-                        ) {
-                            log::warn!("Failed to update metadata for {}: {e}", info.filepath);
-                        }
-
-                        for (cidx, color) in pinfo.colors.iter().enumerate() {
-                            if let Err(e) = tx.execute(
-                                "INSERT INTO file_thread_colors (file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai) \
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-                                rusqlite::params![
-                                    id,
-                                    cidx as i32,
-                                    color.hex,
-                                    color.name,
-                                    color.brand,
-                                    color.brand_code,
-                                ],
-                            ) {
-                                log::warn!("Failed to insert color for {}: {e}", info.filepath);
-                            }
-                        }
-
-                        if let Err(e) = tx.execute(
-                            "INSERT INTO file_formats (file_id, format, format_version, filepath, file_size_bytes, parsed) \
-                             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                            rusqlite::params![
-                                id,
-                                pinfo.format,
-                                pinfo.format_version,
-                                info.filepath,
-                                info.file_size,
-                            ],
-                        ) {
-                            log::warn!("Failed to insert format for {}: {e}", info.filepath);
-                        }
+                        persist_parsed_metadata(&tx, id, pinfo, &info.filepath, info.file_size);
                     }
 
                     if let Some(ext) = &info.ext {
@@ -669,38 +593,9 @@ pub fn watcher_auto_import(
     file_paths: Vec<String>,
 ) -> Result<u32, AppError> {
     // Collect file metadata and parse files without holding the DB lock
-    struct FileInfo {
-        filepath: String,
-        filename: String,
-        file_size: Option<i64>,
-        parsed: Option<ParsedFileInfo>,
-        ext: Option<String>,
-    }
-    let file_infos: Vec<FileInfo> = file_paths
+    let file_infos: Vec<PreParsedFile> = file_paths
         .iter()
-        .map(|filepath| {
-            let path = std::path::Path::new(filepath);
-            let filename = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let file_size: Option<i64> = std::fs::metadata(path)
-                .ok()
-                .and_then(|m| i64::try_from(m.len()).ok());
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase());
-            let parsed = ext.as_deref()
-                .and_then(|e| parsers::get_parser(e))
-                .and_then(|parser| {
-                    std::fs::read(path)
-                        .ok()
-                        .and_then(|data| parser.parse(&data).ok())
-                });
-            FileInfo { filepath: filepath.clone(), filename, file_size, parsed, ext }
-        })
+        .map(|filepath| pre_parse_file(filepath))
         .collect();
 
     let conn = lock_db(&db)?;
@@ -746,67 +641,8 @@ pub fn watcher_auto_import(
             if let Ok(changes) = result {
                 if changes > 0 {
                     let id = tx.last_insert_rowid();
-                    // Persist parsed metadata if available
                     if let Some(pinfo) = &info.parsed {
-                        if let Err(e) = tx.execute(
-                            "UPDATE embroidery_files SET \
-                             stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
-                             design_name = ?6, jump_count = ?7, trim_count = ?8, \
-                             hoop_width_mm = ?9, hoop_height_mm = ?10, \
-                             category = ?11, author = ?12, keywords = ?13, comments = ?14 \
-                             WHERE id = ?1",
-                            rusqlite::params![
-                                id,
-                                pinfo.stitch_count,
-                                pinfo.color_count,
-                                pinfo.width_mm,
-                                pinfo.height_mm,
-                                pinfo.design_name,
-                                pinfo.jump_count,
-                                pinfo.trim_count,
-                                pinfo.hoop_width_mm,
-                                pinfo.hoop_height_mm,
-                                pinfo.category,
-                                pinfo.author,
-                                pinfo.keywords,
-                                pinfo.comments,
-                            ],
-                        ) {
-                            log::warn!("Failed to update metadata for {}: {e}", info.filepath);
-                        }
-
-                        // Persist parsed thread colors
-                        for (idx, color) in pinfo.colors.iter().enumerate() {
-                            if let Err(e) = tx.execute(
-                                "INSERT INTO file_thread_colors (file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai) \
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-                                rusqlite::params![
-                                    id,
-                                    idx as i32,
-                                    color.hex,
-                                    color.name,
-                                    color.brand,
-                                    color.brand_code,
-                                ],
-                            ) {
-                                log::warn!("Failed to insert color for {}: {e}", info.filepath);
-                            }
-                        }
-
-                        // Persist format record
-                        if let Err(e) = tx.execute(
-                            "INSERT INTO file_formats (file_id, format, format_version, filepath, file_size_bytes, parsed) \
-                             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                            rusqlite::params![
-                                id,
-                                pinfo.format,
-                                pinfo.format_version,
-                                info.filepath,
-                                info.file_size,
-                            ],
-                        ) {
-                            log::warn!("Failed to insert format for {}: {e}", info.filepath);
-                        }
+                        persist_parsed_metadata(&tx, id, pinfo, &info.filepath, info.file_size);
                     }
 
                     if let Some(ext) = &info.ext {

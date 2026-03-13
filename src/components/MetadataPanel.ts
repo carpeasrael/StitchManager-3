@@ -38,10 +38,10 @@ export class MetadataPanel extends Component {
   constructor(container: HTMLElement) {
     super(container);
     this.subscribe(
-      appState.on("selectedFileId", () => this.onSelectionChanged())
+      appState.on("selectedFileId", () => this.onSelectionChanged(false))
     );
     this.subscribe(
-      EventBus.on("file:refresh", () => this.onSelectionChanged())
+      EventBus.on("file:refresh", () => this.onSelectionChanged(true))
     );
     this.subscribe(
       EventBus.on("metadata:save", () => this.save())
@@ -54,8 +54,9 @@ export class MetadataPanel extends Component {
     super.destroy();
   }
 
-  private async onSelectionChanged(): Promise<void> {
+  private async onSelectionChanged(force: boolean): Promise<void> {
     const fileId = appState.get("selectedFileId");
+    if (!force && fileId !== null && fileId === this.currentFile?.id) return;
     if (fileId === null) {
       this.currentFile = null;
       this.currentTags = [];

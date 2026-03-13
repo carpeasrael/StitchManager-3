@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 3;
+const CURRENT_VERSION: i32 = 4;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -55,6 +55,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 3 {
         apply_v3(conn)?;
+    }
+
+    if current < 4 {
+        apply_v4(conn)?;
     }
 
     Ok(())
@@ -253,6 +257,21 @@ fn apply_v3(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v4(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE INDEX IF NOT EXISTS idx_file_thread_colors_hex ON file_thread_colors(color_hex);
+        CREATE INDEX IF NOT EXISTS idx_ai_analysis_accepted ON ai_analysis_results(accepted);
+
+        INSERT INTO schema_version (version, description) VALUES (4, 'Add indexes for color search and AI status queries');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,7 +316,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3, "Schema version must be 3");
+        assert_eq!(version, 4, "Schema version must be 4");
     }
 
     #[test]
@@ -320,22 +339,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_three() {
+    fn test_schema_version_is_four() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 3",
+                "SELECT description FROM schema_version WHERE version = 4",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add PES extended metadata fields");
+        assert_eq!(desc, "Add indexes for color search and AI status queries");
     }
 
     #[test]

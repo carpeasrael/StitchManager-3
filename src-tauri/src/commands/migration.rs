@@ -6,9 +6,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{DbState, ThumbnailState};
 use crate::error::{lock_db, AppError};
-use crate::parsers;
 
-use super::scanner::ImportProgressPayload;
+use super::scanner::{ImportProgressPayload, PreParsedFile, pre_parse_file, persist_parsed_metadata};
 
 /// Result returned by the migration command.
 #[derive(Debug, Clone, Serialize)]
@@ -234,53 +233,20 @@ pub fn migrate_from_2stitch(
     let mut tags_imported: u32 = 0;
 
     // Pre-parse files and collect filesystem metadata outside the DB lock
-    struct PreParsed {
+    struct MigrationFile {
         ts_file: TwoStitchFile,
-        filename: String,
-        file_size: Option<i64>,
-        parsed: Option<parsers::ParsedFileInfo>,
-        ext: Option<String>,
+        pre: PreParsedFile,
     }
 
-    let pre_parsed: Vec<PreParsed> = twostitch_files
+    let pre_parsed: Vec<MigrationFile> = twostitch_files
         .into_iter()
         .map(|ts_file| {
-            let path = Path::new(&ts_file.filepath);
-            let file_exists = path.exists();
-            let filename = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let file_size: Option<i64> = if file_exists {
-                std::fs::metadata(path)
-                    .ok()
-                    .and_then(|m| i64::try_from(m.len()).ok())
-            } else {
-                ts_file.file_size
-            };
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase());
-            let parsed = if file_exists {
-                ext.as_deref()
-                    .and_then(|e| parsers::get_parser(e))
-                    .and_then(|parser| {
-                        std::fs::read(path)
-                            .ok()
-                            .and_then(|data| parser.parse(&data).ok())
-                    })
-            } else {
-                None
-            };
-            PreParsed {
-                ts_file,
-                filename,
-                file_size,
-                parsed,
-                ext,
+            let mut pre = pre_parse_file(&ts_file.filepath);
+            // Fall back to 2stitch file_size when file doesn't exist on disk
+            if pre.file_size.is_none() {
+                pre.file_size = ts_file.file_size;
             }
+            MigrationFile { ts_file, pre }
         })
         .collect();
 
@@ -358,86 +324,30 @@ pub fn migrate_from_2stitch(
             let result = tx.execute(
                 "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
                  VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![folder_id, info.filename, info.ts_file.filepath, info.file_size],
+                rusqlite::params![folder_id, info.pre.filename, info.ts_file.filepath, info.pre.file_size],
             );
 
             match result {
                 Ok(changes) if changes > 0 => {
                     let id = tx.last_insert_rowid();
 
-                    // Apply parser metadata (authoritative for dimensions, stitches, etc.)
-                    if let Some(pinfo) = &info.parsed {
-                        if let Err(e) = tx.execute(
-                            "UPDATE embroidery_files SET \
-                             stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
-                             design_name = ?6, jump_count = ?7, trim_count = ?8, \
-                             hoop_width_mm = ?9, hoop_height_mm = ?10, \
-                             category = ?11, author = ?12, keywords = ?13, comments = ?14 \
-                             WHERE id = ?1",
-                            rusqlite::params![
-                                id,
-                                pinfo.stitch_count,
-                                pinfo.color_count,
-                                pinfo.width_mm,
-                                pinfo.height_mm,
-                                pinfo.design_name,
-                                pinfo.jump_count,
-                                pinfo.trim_count,
-                                pinfo.hoop_width_mm,
-                                pinfo.hoop_height_mm,
-                                pinfo.category,
-                                pinfo.author,
-                                pinfo.keywords,
-                                pinfo.comments,
-                            ],
-                        ) {
-                            log::warn!("Failed to update metadata for {}: {e}", info.ts_file.filepath);
-                        }
+                    // Apply parser metadata, colors, and format record
+                    if let Some(pinfo) = &info.pre.parsed {
+                        persist_parsed_metadata(&tx, id, pinfo, &info.ts_file.filepath, info.pre.file_size);
 
-                        // Insert parser colors, enriched with 2stitch brand/name
-                        for (cidx, color) in pinfo.colors.iter().enumerate() {
-                            let mut color_name = color.name.clone();
-                            let mut brand = color.brand.clone();
-
-                            // Enrich from 2stitch if parser has no name/brand at this index
+                        // Enrich colors with 2stitch brand/name (post-processing)
+                        for (cidx, _) in pinfo.colors.iter().enumerate() {
                             if let Some(ts_thread) = info.ts_file.threads.get(cidx) {
-                                if color_name.is_none() {
-                                    color_name = ts_thread.color_name.clone();
-                                }
-                                if brand.is_none() {
-                                    brand = ts_thread.chart.clone();
+                                if ts_thread.color_name.is_some() || ts_thread.chart.is_some() {
+                                    let _ = tx.execute(
+                                        "UPDATE file_thread_colors SET \
+                                         color_name = COALESCE(color_name, ?3), \
+                                         brand = COALESCE(brand, ?4) \
+                                         WHERE file_id = ?1 AND sort_order = ?2",
+                                        rusqlite::params![id, cidx as i32, ts_thread.color_name, ts_thread.chart],
+                                    );
                                 }
                             }
-
-                            if let Err(e) = tx.execute(
-                                "INSERT INTO file_thread_colors (file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai) \
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-                                rusqlite::params![
-                                    id,
-                                    cidx as i32,
-                                    color.hex,
-                                    color_name,
-                                    brand,
-                                    color.brand_code,
-                                ],
-                            ) {
-                                log::warn!("Failed to insert color for {}: {e}", info.ts_file.filepath);
-                            }
-                        }
-
-                        // Insert format record
-                        if let Err(e) = tx.execute(
-                            "INSERT INTO file_formats (file_id, format, format_version, filepath, file_size_bytes, parsed) \
-                             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                            rusqlite::params![
-                                id,
-                                pinfo.format,
-                                pinfo.format_version,
-                                info.ts_file.filepath,
-                                info.file_size,
-                            ],
-                        ) {
-                            log::warn!("Failed to insert format for {}: {e}", info.ts_file.filepath);
                         }
                     } else {
                         // No parser data — use 2stitch metadata as fallback
@@ -515,7 +425,7 @@ pub fn migrate_from_2stitch(
                     }
 
                     // Queue thumbnail generation
-                    if let Some(ext) = &info.ext {
+                    if let Some(ext) = &info.pre.ext {
                         thumb_pending.push((
                             id,
                             info.ts_file.filepath.clone(),
@@ -550,7 +460,7 @@ pub fn migrate_from_2stitch(
                     ImportProgressPayload {
                         current,
                         total,
-                        filename: info.filename.clone(),
+                        filename: info.pre.filename.clone(),
                         status,
                         elapsed_ms: elapsed,
                         estimated_remaining_ms,

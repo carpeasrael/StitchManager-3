@@ -18,6 +18,7 @@ export class FileList extends Component {
   private visibleEnd = 0;
   private scrollRafPending = false;
   private thumbCache = new Map<number, string>();
+  private renderedCards = new Map<number, HTMLElement>();
 
   constructor(container: HTMLElement) {
     super(container);
@@ -66,6 +67,7 @@ export class FileList extends Component {
     const files = appState.get("files");
     this.lastClickedIndex = null;
     this.thumbCache.clear();
+    this.renderedCards.clear();
 
     this.el.innerHTML = "";
 
@@ -132,123 +134,132 @@ export class FileList extends Component {
     const selectedId = appState.get("selectedFileId");
     const selectedIds = appState.get("selectedFileIds");
 
-    // Clear existing cards
-    this.listEl.innerHTML = "";
-
     // Update spacer height in case file count changed
     this.listEl.style.height = `${files.length * CARD_HEIGHT}px`;
 
+    // Remove cards outside the visible range
+    for (const [index, card] of this.renderedCards) {
+      if (index < this.visibleStart || index >= this.visibleEnd) {
+        card.remove();
+        this.renderedCards.delete(index);
+      }
+    }
+
+    // Add cards that entered the visible range
     for (let i = this.visibleStart; i < this.visibleEnd; i++) {
+      if (this.renderedCards.has(i)) continue;
       const file = files[i];
       if (!file) continue;
 
-      const card = document.createElement("div");
-      card.className = "file-card";
-      card.style.position = "absolute";
-      card.style.top = `${i * CARD_HEIGHT}px`;
-      card.style.left = "0";
-      card.style.right = "0";
-      card.style.height = `${CARD_HEIGHT}px`;
-      card.style.boxSizing = "border-box";
-
-      const isMultiSelected = selectedIds.includes(file.id);
-      const isSingleSelected = file.id === selectedId && selectedIds.length === 0;
-      if (isMultiSelected || isSingleSelected) {
-        card.classList.add("selected");
-      }
-
-      const thumb = document.createElement("div");
-      thumb.className = "file-card-thumb";
-      // Load thumbnail with in-memory cache to avoid re-fetching on scroll
-      thumb.textContent = getFormatLabel(file.filename);
-      const cachedUri = this.thumbCache.get(file.id);
-      if (cachedUri) {
-        const img = document.createElement("img");
-        img.src = cachedUri;
-        img.alt = file.name || file.filename;
-        img.className = "file-card-thumb-img";
-        thumb.textContent = "";
-        thumb.appendChild(img);
-      } else {
-        FileService.getThumbnail(file.id).then((dataUri) => {
-          if (dataUri) {
-            this.thumbCache.set(file.id, dataUri);
-            // Evict oldest entries if cache exceeds max
-            if (this.thumbCache.size > THUMB_CACHE_MAX) {
-              const firstKey = this.thumbCache.keys().next().value;
-              if (firstKey !== undefined) this.thumbCache.delete(firstKey);
-            }
-            // Only update DOM if element is still attached
-            if (thumb.isConnected) {
-              const img = document.createElement("img");
-              img.src = dataUri;
-              img.alt = file.name || file.filename;
-              img.className = "file-card-thumb-img";
-              thumb.textContent = "";
-              thumb.appendChild(img);
-            }
-          }
-        }).catch(() => { /* keep format label fallback */ });
-      }
-      card.appendChild(thumb);
-
-      const info = document.createElement("div");
-      info.className = "file-card-info";
-
-      const nameEl = document.createElement("div");
-      nameEl.className = "file-card-name";
-      nameEl.textContent = file.name || file.filename;
-      info.appendChild(nameEl);
-
-      // AI badge
-      if (file.aiAnalyzed) {
-        const badge = document.createElement("span");
-        if (file.aiConfirmed) {
-          badge.className = "ai-badge ai-badge--confirmed";
-          badge.textContent = "KI";
-          badge.title = "KI-analysiert und best\u00E4tigt";
-        } else {
-          badge.className = "ai-badge ai-badge--pending";
-          badge.textContent = "KI";
-          badge.title = "KI-analysiert, nicht best\u00E4tigt";
-        }
-        nameEl.appendChild(badge);
-      }
-
-      const meta = document.createElement("div");
-      meta.className = "file-card-meta";
-      const parts: string[] = [];
-      if (file.fileSizeBytes) {
-        parts.push(formatSize(file.fileSizeBytes));
-      }
-      const ext = getFormatLabel(file.filename);
-      if (ext) {
-        parts.push(ext);
-      }
-      meta.textContent = parts.join(" \u00B7 ");
-      info.appendChild(meta);
-
-      card.appendChild(info);
-
-      const index = i;
-      card.addEventListener("click", (e) => {
-        this.handleClick(file.id, index, e);
-      });
-
+      const card = this.createCard(file, i, selectedId, selectedIds);
       this.listEl.appendChild(card);
+      this.renderedCards.set(i, card);
     }
   }
 
+  private createCard(
+    file: { id: number; name: string | null; filename: string; fileSizeBytes: number | null; aiAnalyzed: boolean; aiConfirmed: boolean },
+    index: number,
+    selectedId: number | null,
+    selectedIds: number[],
+  ): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "file-card";
+    card.style.position = "absolute";
+    card.style.top = `${index * CARD_HEIGHT}px`;
+    card.style.left = "0";
+    card.style.right = "0";
+    card.style.height = `${CARD_HEIGHT}px`;
+    card.style.boxSizing = "border-box";
+
+    const isMultiSelected = selectedIds.includes(file.id);
+    const isSingleSelected = file.id === selectedId && selectedIds.length === 0;
+    if (isMultiSelected || isSingleSelected) {
+      card.classList.add("selected");
+    }
+
+    const thumb = document.createElement("div");
+    thumb.className = "file-card-thumb";
+    thumb.textContent = getFormatLabel(file.filename);
+    const cachedUri = this.thumbCache.get(file.id);
+    if (cachedUri) {
+      const img = document.createElement("img");
+      img.src = cachedUri;
+      img.alt = file.name || file.filename;
+      img.className = "file-card-thumb-img";
+      thumb.textContent = "";
+      thumb.appendChild(img);
+    } else {
+      FileService.getThumbnail(file.id).then((dataUri) => {
+        if (dataUri) {
+          this.thumbCache.set(file.id, dataUri);
+          if (this.thumbCache.size > THUMB_CACHE_MAX) {
+            const firstKey = this.thumbCache.keys().next().value;
+            if (firstKey !== undefined) this.thumbCache.delete(firstKey);
+          }
+          if (thumb.isConnected) {
+            const img = document.createElement("img");
+            img.src = dataUri;
+            img.alt = file.name || file.filename;
+            img.className = "file-card-thumb-img";
+            thumb.textContent = "";
+            thumb.appendChild(img);
+          }
+        }
+      }).catch(() => { /* keep format label fallback */ });
+    }
+    card.appendChild(thumb);
+
+    const info = document.createElement("div");
+    info.className = "file-card-info";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "file-card-name";
+    nameEl.textContent = file.name || file.filename;
+    info.appendChild(nameEl);
+
+    if (file.aiAnalyzed) {
+      const badge = document.createElement("span");
+      if (file.aiConfirmed) {
+        badge.className = "ai-badge ai-badge--confirmed";
+        badge.textContent = "KI";
+        badge.title = "KI-analysiert und best\u00E4tigt";
+      } else {
+        badge.className = "ai-badge ai-badge--pending";
+        badge.textContent = "KI";
+        badge.title = "KI-analysiert, nicht best\u00E4tigt";
+      }
+      nameEl.appendChild(badge);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "file-card-meta";
+    const parts: string[] = [];
+    if (file.fileSizeBytes) {
+      parts.push(formatSize(file.fileSizeBytes));
+    }
+    const ext = getFormatLabel(file.filename);
+    if (ext) {
+      parts.push(ext);
+    }
+    meta.textContent = parts.join(" \u00B7 ");
+    info.appendChild(meta);
+
+    card.appendChild(info);
+
+    card.addEventListener("click", (e) => {
+      this.handleClick(file.id, index, e);
+    });
+
+    return card;
+  }
+
   private updateSelection(): void {
-    if (!this.listEl) return;
     const files = appState.get("files");
     const selectedId = appState.get("selectedFileId");
     const selectedIds = appState.get("selectedFileIds");
 
-    for (const child of Array.from(this.listEl.children)) {
-      const card = child as HTMLElement;
-      const topPx = parseInt(card.style.top, 10);
-      const index = Math.round(topPx / CARD_HEIGHT);
+    for (const [index, card] of this.renderedCards) {
       const file = files[index];
       if (!file) continue;
 

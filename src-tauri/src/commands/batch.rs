@@ -118,45 +118,61 @@ pub async fn batch_rename(
     let mut failed: i64 = 0;
     let mut errors: Vec<String> = Vec::new();
     let pattern_has_format = pattern.contains("{format}");
-
-    // Track claimed target paths within this batch to detect collisions
     let mut claimed: HashSet<std::path::PathBuf> = HashSet::new();
 
-    for (i, file_id) in file_ids.iter().enumerate() {
-        let result = (|| -> Result<String, AppError> {
-            // Query file data under lock, then drop lock before file I/O.
-            // Note: TOCTOU window exists between lock release and re-acquisition
-            // for the DB update. Acceptable for a single-user desktop app.
-            let file = {
-                let conn = lock_db(&db)?;
-                conn.query_row(
+    // Phase 1: Load all file metadata in a single DB lock
+    let files: Vec<(i64, Option<EmbroideryFile>)> = {
+        let conn = lock_db(&db)?;
+        file_ids
+            .iter()
+            .map(|id| {
+                let file = match conn.query_row(
                     &format!("{FILE_SELECT} WHERE id = ?1"),
-                    [file_id],
+                    [id],
                     |row| row_to_file(row),
-                )
-                .map_err(|e| match e {
-                    rusqlite::Error::QueryReturnedNoRows => {
-                        AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
+                ) {
+                    Ok(f) => Some(f),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(e) => {
+                        log::warn!("batch_rename: DB error loading file {id}: {e}");
+                        None
                     }
-                    other => AppError::Database(other),
-                })?
-            };
+                };
+                (*id, file)
+            })
+            .collect()
+    };
 
-            let ext = file
-                .filename
-                .rsplit('.')
-                .next()
-                .unwrap_or("");
-            let base = apply_pattern(&pattern, &file);
+    // Phase 2: Perform filesystem renames without holding the DB lock.
+    // Progress events emitted here report "success" per file. If Phase 3
+    // (DB transaction) fails, all renames are rolled back and the command
+    // returns Err — the frontend receives the error and can discard the
+    // per-file progress. This is an inherent trade-off of the 3-phase design.
+    // TOCTOU window between Phase 1 read and Phase 3 write is acceptable
+    // for a single-user desktop app.
+    struct RenameOp {
+        file_id: i64,
+        new_filename: String,
+        new_path: std::path::PathBuf,
+        old_path: std::path::PathBuf,
+        did_rename: bool,
+    }
+    let mut pending_updates: Vec<RenameOp> = Vec::new();
 
-            // If the pattern already includes {format}, don't append the extension again
+    for (i, (file_id, file_opt)) in files.iter().enumerate() {
+        let result = (|| -> Result<RenameOp, AppError> {
+            let file = file_opt.as_ref().ok_or_else(|| {
+                AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
+            })?;
+
+            let ext = file.filename.rsplit('.').next().unwrap_or("");
+            let base = apply_pattern(&pattern, file);
             let desired_filename = if pattern_has_format || ext.is_empty() {
                 base
             } else {
                 format!("{base}.{ext}")
             };
 
-            // Build desired filepath, then deduplicate against collisions
             let old_path = std::path::Path::new(&file.filepath);
             let canonical_old = if old_path.exists() {
                 old_path.canonicalize()?
@@ -172,7 +188,6 @@ pub async fn batch_rename(
                 .unwrap_or(&desired_filename)
                 .to_string();
 
-            // Rename physical file if it exists and target differs (no lock held)
             let did_rename = if old_path.exists() && canonical_old != new_path {
                 std::fs::rename(old_path, &new_path)?;
                 true
@@ -180,40 +195,33 @@ pub async fn batch_rename(
                 false
             };
 
-            // Re-acquire lock for DB update — rollback filesystem on failure
-            let conn = lock_db(&db)?;
-            if let Err(db_err) = conn.execute(
-                "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
-                 updated_at = datetime('now') WHERE id = ?3",
-                rusqlite::params![new_filename, new_path.to_string_lossy().as_ref(), file_id],
-            ) {
-                if did_rename {
-                    let _ = std::fs::rename(&new_path, old_path);
-                }
-                claimed.remove(&new_path);
-                return Err(AppError::Database(db_err));
-            }
-
-            Ok(new_filename)
+            Ok(RenameOp {
+                file_id: *file_id,
+                new_filename,
+                new_path,
+                old_path: old_path.to_path_buf(),
+                did_rename,
+            })
         })();
 
         match result {
-            Ok(ref new_filename) => {
+            Ok(op) => {
                 success += 1;
                 let _ = app_handle.emit(
                     "batch:progress",
                     BatchProgressPayload {
                         current: (i + 1) as i64,
                         total,
-                        filename: new_filename.clone(),
+                        filename: op.new_filename.clone(),
                         status: "success".to_string(),
                     },
                 );
+                pending_updates.push(op);
             }
             Err(e) => {
                 failed += 1;
                 let msg = format!("Datei {file_id}: {e}");
-                errors.push(msg.clone());
+                errors.push(msg);
                 let _ = app_handle.emit(
                     "batch:progress",
                     BatchProgressPayload {
@@ -227,12 +235,33 @@ pub async fn batch_rename(
         }
     }
 
-    Ok(BatchResult {
-        total,
-        success,
-        failed,
-        errors,
-    })
+    // Phase 3: Update all successful renames in a single DB transaction
+    if !pending_updates.is_empty() {
+        let conn = lock_db(&db)?;
+        let tx_result = (|| -> Result<(), rusqlite::Error> {
+            let tx = conn.unchecked_transaction()?;
+            for op in &pending_updates {
+                tx.execute(
+                    "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
+                     updated_at = datetime('now') WHERE id = ?3",
+                    rusqlite::params![op.new_filename, op.new_path.to_string_lossy().as_ref(), op.file_id],
+                )?;
+            }
+            tx.commit()
+        })();
+
+        if let Err(e) = tx_result {
+            // Rollback all filesystem renames on transaction failure
+            for op in &pending_updates {
+                if op.did_rename {
+                    let _ = std::fs::rename(&op.new_path, &op.old_path);
+                }
+            }
+            return Err(AppError::Database(e));
+        }
+    }
+
+    Ok(BatchResult { total, success, failed, errors })
 }
 
 #[tauri::command]
@@ -242,15 +271,35 @@ pub async fn batch_organize(
     file_ids: Vec<i64>,
     pattern: String,
 ) -> Result<BatchResult, AppError> {
-    // Read library_root from settings
-    let library_root = {
+    // Phase 1: Load library_root and all file metadata in a single DB lock
+    let (library_root, files): (String, Vec<(i64, Option<EmbroideryFile>)>) = {
         let conn = lock_db(&db)?;
-        conn.query_row(
-            "SELECT value FROM settings WHERE key = 'library_root'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap_or_else(|_| "~/Stickdateien".to_string())
+        let root = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'library_root'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap_or_else(|_| "~/Stickdateien".to_string());
+        let file_list = file_ids
+            .iter()
+            .map(|id| {
+                let file = match conn.query_row(
+                    &format!("{FILE_SELECT} WHERE id = ?1"),
+                    [id],
+                    |row| row_to_file(row),
+                ) {
+                    Ok(f) => Some(f),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(e) => {
+                        log::warn!("batch_organize: DB error loading file {id}: {e}");
+                        None
+                    }
+                };
+                (*id, file)
+            })
+            .collect();
+        (root, file_list)
     };
 
     // Expand ~ to home directory
@@ -268,11 +317,8 @@ pub async fn batch_organize(
     let mut success: i64 = 0;
     let mut failed: i64 = 0;
     let mut errors: Vec<String> = Vec::new();
-
-    // Track claimed target paths within this batch to detect collisions
     let mut claimed: HashSet<std::path::PathBuf> = HashSet::new();
 
-    // Canonicalize base_dir early — if it doesn't exist, fail fast
     let canonical_base = base_dir.canonicalize().map_err(|e| {
         AppError::Validation(format!(
             "Bibliotheksverzeichnis nicht gefunden: {}: {e}",
@@ -280,34 +326,33 @@ pub async fn batch_organize(
         ))
     })?;
 
-    for (i, file_id) in file_ids.iter().enumerate() {
-        // Note: folder_id is intentionally not updated — organize is a filesystem-only
-        // operation. The file retains its original folder association in the UI.
-        let result = (|| -> Result<String, AppError> {
-            // Query file data under lock, then drop lock before file I/O.
-            // Note: TOCTOU window exists between lock release and re-acquisition
-            // for the DB update. Acceptable for a single-user desktop app.
-            let file = {
-                let conn = lock_db(&db)?;
-                conn.query_row(
-                    &format!("{FILE_SELECT} WHERE id = ?1"),
-                    [file_id],
-                    |row| row_to_file(row),
-                )
-                .map_err(|e| match e {
-                    rusqlite::Error::QueryReturnedNoRows => {
-                        AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
-                    }
-                    other => AppError::Database(other),
-                })?
-            };
+    // Phase 2: Perform filesystem moves without holding the DB lock.
+    // Progress events emitted here report "success" per file. If Phase 3
+    // (DB transaction) fails, all moves are rolled back and the command
+    // returns Err — the frontend receives the error and can discard the
+    // per-file progress. This is an inherent trade-off of the 3-phase design.
+    // Note: folder_id is intentionally not updated — organize is a filesystem-only
+    // operation. The file retains its original folder association in the UI.
+    // TOCTOU window between Phase 1 read and Phase 3 write is acceptable
+    // for a single-user desktop app.
+    struct MoveOp {
+        file_id: i64,
+        new_filename: String,
+        new_path: std::path::PathBuf,
+        old_path: std::path::PathBuf,
+        did_rename: bool,
+    }
+    let mut pending_updates: Vec<MoveOp> = Vec::new();
 
-            // Build target subdirectory from pattern (sanitized against path traversal)
-            let sub_path = apply_pattern(&pattern, &file);
+    for (i, (file_id, file_opt)) in files.iter().enumerate() {
+        let result = (|| -> Result<MoveOp, AppError> {
+            let file = file_opt.as_ref().ok_or_else(|| {
+                AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
+            })?;
+
+            let sub_path = apply_pattern(&pattern, file);
             let target_dir = base_dir.join(&sub_path);
 
-            // Validate target is under base_dir before creating directories
-            // Normalize by collecting components to resolve any remaining ".." segments
             let normalized: std::path::PathBuf = target_dir.components().collect();
             if !normalized.starts_with(&canonical_base) {
                 return Err(AppError::Validation(
@@ -315,7 +360,6 @@ pub async fn batch_organize(
                 ));
             }
 
-            // File I/O without holding the DB lock
             std::fs::create_dir_all(&target_dir)?;
 
             let old_path = std::path::Path::new(&file.filepath);
@@ -327,7 +371,6 @@ pub async fn batch_organize(
             let desired_path = target_dir.join(&file.filename);
             let new_path = dedup_path(&desired_path, &mut claimed);
 
-            // Move physical file if it exists and target differs (no lock held)
             let did_rename = if old_path.exists() && canonical_old != new_path {
                 std::fs::rename(old_path, &new_path)?;
                 true
@@ -335,46 +378,39 @@ pub async fn batch_organize(
                 false
             };
 
-            // Re-acquire lock for DB update — rollback filesystem on failure
             let new_filename = new_path
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or(&file.filename)
                 .to_string();
 
-            let conn = lock_db(&db)?;
-            if let Err(db_err) = conn.execute(
-                "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
-                 updated_at = datetime('now') WHERE id = ?3",
-                rusqlite::params![new_filename, new_path.to_string_lossy().as_ref(), file_id],
-            ) {
-                if did_rename {
-                    let _ = std::fs::rename(&new_path, old_path);
-                }
-                claimed.remove(&new_path);
-                return Err(AppError::Database(db_err));
-            }
-
-            Ok(new_filename)
+            Ok(MoveOp {
+                file_id: *file_id,
+                new_filename,
+                new_path,
+                old_path: old_path.to_path_buf(),
+                did_rename,
+            })
         })();
 
         match result {
-            Ok(ref filename) => {
+            Ok(op) => {
                 success += 1;
                 let _ = app_handle.emit(
                     "batch:progress",
                     BatchProgressPayload {
                         current: (i + 1) as i64,
                         total,
-                        filename: filename.clone(),
+                        filename: op.new_filename.clone(),
                         status: "success".to_string(),
                     },
                 );
+                pending_updates.push(op);
             }
             Err(e) => {
                 failed += 1;
                 let msg = format!("Datei {file_id}: {e}");
-                errors.push(msg.clone());
+                errors.push(msg);
                 let _ = app_handle.emit(
                     "batch:progress",
                     BatchProgressPayload {
@@ -388,12 +424,32 @@ pub async fn batch_organize(
         }
     }
 
-    Ok(BatchResult {
-        total,
-        success,
-        failed,
-        errors,
-    })
+    // Phase 3: Update all successful moves in a single DB transaction
+    if !pending_updates.is_empty() {
+        let conn = lock_db(&db)?;
+        let tx_result = (|| -> Result<(), rusqlite::Error> {
+            let tx = conn.unchecked_transaction()?;
+            for op in &pending_updates {
+                tx.execute(
+                    "UPDATE embroidery_files SET filename = ?1, filepath = ?2, \
+                     updated_at = datetime('now') WHERE id = ?3",
+                    rusqlite::params![op.new_filename, op.new_path.to_string_lossy().as_ref(), op.file_id],
+                )?;
+            }
+            tx.commit()
+        })();
+
+        if let Err(e) = tx_result {
+            for op in &pending_updates {
+                if op.did_rename {
+                    let _ = std::fs::rename(&op.new_path, &op.old_path);
+                }
+            }
+            return Err(AppError::Database(e));
+        }
+    }
+
+    Ok(BatchResult { total, success, failed, errors })
 }
 
 #[tauri::command]
@@ -408,34 +464,43 @@ pub async fn batch_export_usb(
         std::fs::create_dir_all(target_dir)?;
     }
 
+    // Phase 1: Load all file paths in a single DB lock
+    let files: Vec<(i64, Option<(String, String)>)> = {
+        let conn = lock_db(&db)?;
+        file_ids
+            .iter()
+            .map(|id| {
+                let result = match conn.query_row(
+                    "SELECT filename, filepath FROM embroidery_files WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                ) {
+                    Ok(pair) => Some(pair),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(e) => {
+                        log::warn!("batch_export_usb: DB error loading file {id}: {e}");
+                        None
+                    }
+                };
+                (*id, result)
+            })
+            .collect()
+    };
+
     let total = file_ids.len() as i64;
     let mut success: i64 = 0;
     let mut failed: i64 = 0;
     let mut errors: Vec<String> = Vec::new();
-
-    // Track claimed target paths within this batch to detect collisions
     let mut claimed: HashSet<std::path::PathBuf> = HashSet::new();
 
-    for (i, file_id) in file_ids.iter().enumerate() {
+    // Phase 2: Copy files without holding the DB lock
+    for (i, (file_id, file_opt)) in files.iter().enumerate() {
         let result = (|| -> Result<String, AppError> {
-            // Query file data under lock, then drop lock before file I/O
-            let (filename, filepath): (String, String) = {
-                let conn = lock_db(&db)?;
-                conn.query_row(
-                    "SELECT filename, filepath FROM embroidery_files WHERE id = ?1",
-                    [file_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .map_err(|e| match e {
-                    rusqlite::Error::QueryReturnedNoRows => {
-                        AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
-                    }
-                    other => AppError::Database(other),
-                })?
-            };
+            let (filename, filepath) = file_opt.as_ref().ok_or_else(|| {
+                AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
+            })?;
 
-            // File I/O without holding the DB lock
-            let source = std::path::Path::new(&filepath);
+            let source = std::path::Path::new(filepath);
             if !source.exists() {
                 return Err(AppError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -443,13 +508,11 @@ pub async fn batch_export_usb(
                 )));
             }
 
-            // Handle filename collisions by appending numeric suffix
-            let desired = target_dir.join(&filename);
+            let desired = target_dir.join(filename);
             let dest = dedup_path(&desired, &mut claimed);
-
             std::fs::copy(source, &dest)?;
 
-            Ok(filename)
+            Ok(filename.clone())
         })();
 
         match result {
@@ -468,7 +531,7 @@ pub async fn batch_export_usb(
             Err(e) => {
                 failed += 1;
                 let msg = format!("Datei {file_id}: {e}");
-                errors.push(msg.clone());
+                errors.push(msg);
                 let _ = app_handle.emit(
                     "batch:progress",
                     BatchProgressPayload {
@@ -482,12 +545,7 @@ pub async fn batch_export_usb(
         }
     }
 
-    Ok(BatchResult {
-        total,
-        success,
-        failed,
-        errors,
-    })
+    Ok(BatchResult { total, success, failed, errors })
 }
 
 #[cfg(test)]

@@ -34,3 +34,7 @@ export async function remove(folderId: number): Promise<void> {
 export async function getFileCount(folderId: number): Promise<number> {
   return invoke<number>("get_folder_file_count", { folderId });
 }
+
+export async function getAllFileCounts(): Promise<Record<number, number>> {
+  return invoke<Record<number, number>>("get_all_folder_file_counts");
+}

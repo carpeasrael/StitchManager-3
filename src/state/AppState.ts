@@ -20,6 +20,13 @@ class AppStateClass {
   private state: State = { ...initialState };
   private listeners = new Map<keyof State, Set<Listener<keyof State>>>();
 
+  /** Returns a direct reference to the state value (no copy).
+   *  The `Readonly` type is compile-time only — do NOT mutate the
+   *  returned value at runtime. Use `set()` or `update()` to change state. */
+  getRef<K extends keyof State>(key: K): Readonly<State[K]> {
+    return this.state[key];
+  }
+
   get<K extends keyof State>(key: K): State[K] {
     const value = this.state[key];
     if (Array.isArray(value)) {

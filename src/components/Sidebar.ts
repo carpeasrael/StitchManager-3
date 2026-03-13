@@ -2,7 +2,6 @@ import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { ToastContainer } from "./Toast";
 import * as FolderService from "../services/FolderService";
-import type { Folder } from "../types/index";
 
 export class Sidebar extends Component {
   private folderCounts = new Map<number, number>();
@@ -22,26 +21,22 @@ export class Sidebar extends Component {
     try {
       const folders = await FolderService.getAll();
       appState.set("folders", folders);
-      await this.loadCounts(folders);
+      await this.loadCounts();
     } catch (e) {
       console.warn("Failed to load folders:", e);
       ToastContainer.show("error", "Ordner konnten nicht geladen werden");
     }
   }
 
-  private async loadCounts(folders: Folder[]): Promise<void> {
-    const results = await Promise.all(
-      folders.map(async (folder) => {
-        try {
-          const count = await FolderService.getFileCount(folder.id);
-          return [folder.id, count] as const;
-        } catch {
-          return [folder.id, 0] as const;
-        }
-      })
-    );
-    for (const [id, count] of results) {
-      this.folderCounts.set(id, count);
+  private async loadCounts(): Promise<void> {
+    try {
+      const counts = await FolderService.getAllFileCounts();
+      this.folderCounts.clear();
+      for (const [id, count] of Object.entries(counts)) {
+        this.folderCounts.set(Number(id), count);
+      }
+    } catch {
+      // Fall back to zero counts on error
     }
     this.render();
   }
