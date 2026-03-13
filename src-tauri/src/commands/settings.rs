@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tauri::State;
 
 use crate::DbState;
@@ -155,6 +156,146 @@ pub fn delete_custom_field(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn copy_background_image(
+    app: tauri::AppHandle,
+    db: State<'_, DbState>,
+    source_path: String,
+) -> Result<String, AppError> {
+    use tauri::Manager;
+
+    let src = PathBuf::from(&source_path);
+    if !src.exists() {
+        return Err(AppError::NotFound(format!("Datei nicht gefunden: {source_path}")));
+    }
+
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    let valid_exts = ["png", "jpg", "jpeg", "webp", "bmp"];
+    if !valid_exts.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Nicht unterstuetztes Bildformat: .{ext}"
+        )));
+    }
+
+    let app_data_dir = app.path().app_data_dir()
+        .map_err(|e| AppError::Internal(format!("App-Datenverzeichnis nicht gefunden: {e}")))?;
+    let bg_dir = app_data_dir.join("backgrounds");
+    std::fs::create_dir_all(&bg_dir)?;
+
+    let dest = bg_dir.join(format!("background.{ext}"));
+
+    // Resize large images to max 1920x1080 to keep data URIs manageable
+    match image::open(&src) {
+        Ok(img) => {
+            let resized = img.resize(1920, 1080, image::imageops::FilterType::Lanczos3);
+            resized.save(&dest).map_err(|e| AppError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Bild konnte nicht gespeichert werden: {e}"),
+            )))?;
+        }
+        Err(_) => {
+            // Fallback: copy file as-is, but enforce 10 MB limit
+            let meta = std::fs::metadata(&src)?;
+            if meta.len() > 10 * 1024 * 1024 {
+                return Err(AppError::Validation(
+                    "Bilddatei ist zu gross (max. 10 MB)".into(),
+                ));
+            }
+            std::fs::copy(&src, &dest)?;
+        }
+    }
+
+    let dest_str = dest.to_string_lossy().to_string();
+
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('bg_image_path', ?1, datetime('now'))",
+        rusqlite::params![dest_str],
+    )?;
+
+    Ok(dest_str)
+}
+
+#[tauri::command]
+pub fn remove_background_image(
+    db: State<'_, DbState>,
+) -> Result<(), AppError> {
+    // Read the path while holding the lock, then release before filesystem I/O
+    let path: String = {
+        let conn = lock_db(&db)?;
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = 'bg_image_path'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_default()
+    };
+
+    if !path.is_empty() {
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // Re-acquire lock to clear the DB setting
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('bg_image_path', '', datetime('now'))",
+        [],
+    )?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_background_image(
+    db: State<'_, DbState>,
+) -> Result<String, AppError> {
+    let conn = lock_db(&db)?;
+
+    let path: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'bg_image_path'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_default();
+
+    if path.is_empty() {
+        return Ok(String::new());
+    }
+
+    let file_path = PathBuf::from(&path);
+    if !file_path.exists() {
+        return Ok(String::new());
+    }
+
+    // Guard against oversized files on the read/encode path (max 10 MB)
+    let meta = std::fs::metadata(&file_path)?;
+    if meta.len() > 10 * 1024 * 1024 {
+        return Ok(String::new());
+    }
+
+    let data = std::fs::read(&file_path)?;
+    let ext = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png");
+
+    let mime = match ext {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    };
+
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+    Ok(format!("data:{mime};base64,{b64}"))
 }
 
 #[cfg(test)]

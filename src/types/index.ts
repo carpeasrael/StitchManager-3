@@ -166,6 +166,28 @@ export interface MigrationResult {
   elapsedMs: number;
 }
 
+export interface UsbDevice {
+  name: string;
+  mountPoint: string;
+  totalSpaceBytes: number;
+  freeSpaceBytes: number;
+}
+
+export interface ThreadMatch {
+  brand: string;
+  code: string;
+  name: string;
+  hex: string;
+  deltaE: number;
+}
+
+export interface BrandColor {
+  brand: string;
+  code: string;
+  name: string;
+  hex: string;
+}
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface BatchResult {
@@ -195,4 +217,5 @@ export interface State {
   settings: Record<string, string>;
   theme: ThemeMode;
   toasts: Toast[];
+  usbDevices: UsbDevice[];
 }

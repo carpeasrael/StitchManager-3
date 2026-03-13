@@ -46,6 +46,11 @@
   --radius-pill: 999px;
   --radius-swatch: 4px;
 
+  /* Background image */
+  --bg-image: none;
+  --bg-opacity: 0.15;
+  --bg-blur: 0px;
+
   /* Shadows */
   --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.06);
   --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.10);

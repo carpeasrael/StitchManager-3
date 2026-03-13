@@ -9,10 +9,12 @@ import { ToastContainer } from "./Toast";
 import { TagInput } from "./TagInput";
 import { ImagePreviewDialog } from "./ImagePreviewDialog";
 import { open } from "@tauri-apps/plugin-dialog";
+import * as ThreadColorService from "../services/ThreadColorService";
 import type {
   EmbroideryFile,
   FileAttachment,
   ThreadColor,
+  ThreadMatch,
   FileFormat,
   Tag,
   FileUpdate,
@@ -56,6 +58,8 @@ export class MetadataPanel extends Component {
   }
 
   destroy(): void {
+    // Increment previewGeneration to cancel any in-flight loadStitchPreview
+    this.previewGeneration++;
     if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
     if (this.tagInput) { this.tagInput.destroy(); this.tagInput = null; }
     super.destroy();
@@ -433,8 +437,11 @@ export class MetadataPanel extends Component {
       swatchGrid.className = "metadata-swatch-grid";
 
       for (const color of colors) {
+        const swatchContainer = document.createElement("div");
+        swatchContainer.className = "metadata-swatch-container";
+
         const swatch = document.createElement("div");
-        swatch.className = "metadata-swatch";
+        swatch.className = "metadata-swatch metadata-swatch-expandable";
 
         const colorBox = document.createElement("div");
         colorBox.className = "metadata-swatch-color";
@@ -467,7 +474,47 @@ export class MetadataPanel extends Component {
         }
 
         swatch.appendChild(colorInfo);
-        swatchGrid.appendChild(swatch);
+
+        const expandIcon = document.createElement("span");
+        expandIcon.className = "metadata-swatch-expand";
+        expandIcon.textContent = "\u25B6";
+        swatch.appendChild(expandIcon);
+
+        swatchContainer.appendChild(swatch);
+
+        // Expandable matches container (lazy-loaded)
+        const matchesContainer = document.createElement("div");
+        matchesContainer.className = "metadata-swatch-matches";
+        matchesContainer.style.display = "none";
+        swatchContainer.appendChild(matchesContainer);
+
+        let expanded = false;
+        let loaded = false;
+
+        swatch.addEventListener("click", async () => {
+          expanded = !expanded;
+          matchesContainer.style.display = expanded ? "" : "none";
+          expandIcon.textContent = expanded ? "\u25BC" : "\u25B6";
+
+          if (expanded && !loaded && validHex) {
+            loaded = true;
+            matchesContainer.innerHTML =
+              '<div class="metadata-swatch-loading">Suche Garnfarben...</div>';
+            try {
+              const matches = await ThreadColorService.getThreadMatches(
+                color.colorHex,
+                undefined,
+                9
+              );
+              this.renderThreadMatches(matchesContainer, matches);
+            } catch {
+              matchesContainer.innerHTML =
+                '<div class="metadata-swatch-loading">Fehler beim Laden</div>';
+            }
+          }
+        });
+
+        swatchGrid.appendChild(swatchContainer);
       }
 
       colorSection.appendChild(swatchGrid);
@@ -921,6 +968,65 @@ export class MetadataPanel extends Component {
     };
   }
 
+  private renderThreadMatches(
+    container: HTMLElement,
+    matches: ThreadMatch[]
+  ): void {
+    container.innerHTML = "";
+
+    if (matches.length === 0) {
+      container.innerHTML =
+        '<div class="metadata-swatch-loading">Keine Treffer gefunden</div>';
+      return;
+    }
+
+    // Group by brand, show best match per brand
+    const byBrand = new Map<string, ThreadMatch>();
+    for (const m of matches) {
+      if (!byBrand.has(m.brand)) {
+        byBrand.set(m.brand, m);
+      }
+    }
+
+    for (const [, match] of byBrand) {
+      const row = document.createElement("div");
+      row.className = "metadata-swatch-match";
+
+      const matchColor = document.createElement("div");
+      matchColor.className = "metadata-swatch-match-color";
+      matchColor.style.backgroundColor = match.hex;
+      row.appendChild(matchColor);
+
+      const matchInfo = document.createElement("div");
+      matchInfo.className = "metadata-swatch-match-info";
+
+      const codeEl = document.createElement("span");
+      codeEl.className = "metadata-swatch-match-code";
+      codeEl.textContent = `${match.brand} ${match.code}`;
+      codeEl.title = "Klicken zum Suchen";
+      codeEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        appState.set("searchQuery", `${match.brand} ${match.code}`);
+        appState.update("searchParams", (sp) => ({ ...sp, colorSearch: match.hex }));
+      });
+      matchInfo.appendChild(codeEl);
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "metadata-swatch-match-name";
+      nameEl.textContent = match.name;
+      matchInfo.appendChild(nameEl);
+
+      row.appendChild(matchInfo);
+
+      const deltaEl = document.createElement("span");
+      deltaEl.className = "metadata-swatch-delta";
+      deltaEl.textContent = `\u0394E ${match.deltaE.toFixed(1)}`;
+      row.appendChild(deltaEl);
+
+      container.appendChild(row);
+    }
+  }
+
   private renderError(): void {
     this.el.innerHTML = "";
     const error = document.createElement("div");
@@ -996,7 +1102,7 @@ export class MetadataPanel extends Component {
       const path = typeof selected === "string" ? selected : String(selected);
       if (!path) return;
 
-      await FileService.attachFile(fileId, path, "license");
+      await FileService.attachFile(fileId, path, "other");
       ToastContainer.show("success", "Anhang hinzugef\u00FCgt");
 
       // Refresh the panel to show the new attachment

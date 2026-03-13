@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
+import { formatSize } from "../utils/format";
 
 export class StatusBar extends Component {
   private lastAction = "Bereit";
@@ -10,7 +11,9 @@ export class StatusBar extends Component {
   constructor(container: HTMLElement) {
     super(container);
     this.subscribe(appState.on("files", () => this.render()));
+    this.subscribe(appState.on("folders", () => this.render()));
     this.subscribe(appState.on("selectedFolderId", () => this.render()));
+    this.subscribe(appState.on("usbDevices", () => this.render()));
     this.subscribe(
       EventBus.on("scan:complete", (data) => {
         const payload = data as { foundFiles?: number } | undefined;
@@ -98,6 +101,36 @@ export class StatusBar extends Component {
       watcherIndicator.textContent = "Watcher inaktiv";
       watcherIndicator.title = "Automatischer Import deaktiviert";
       this.el.appendChild(watcherIndicator);
+    }
+
+    // USB device indicator
+    const usbDevices = appState.get("usbDevices");
+    if (usbDevices.length > 0) {
+      const usbIndicator = document.createElement("span");
+      usbIndicator.className = "status-usb";
+
+      const icon = document.createElement("span");
+      icon.className = "status-usb-icon";
+      icon.textContent = "\u{1F50C}";
+      usbIndicator.appendChild(icon);
+
+      const label = document.createElement("span");
+      if (usbDevices.length === 1) {
+        const dev = usbDevices[0];
+        label.textContent = `${dev.name} ${formatSize(dev.freeSpaceBytes)} frei`;
+      } else {
+        label.textContent = `${usbDevices.length} USB-Geraete`;
+        usbIndicator.title = usbDevices
+          .map((d) => `${d.name}: ${formatSize(d.freeSpaceBytes)} frei`)
+          .join("\n");
+      }
+      usbIndicator.appendChild(label);
+
+      usbIndicator.addEventListener("click", () => {
+        EventBus.emit("usb:quick-export");
+      });
+
+      this.el.appendChild(usbIndicator);
     }
 
     const right = document.createElement("span");

@@ -89,6 +89,23 @@ pub fn run() {
 
             app.manage(watcher_holder);
 
+            // Initialize USB monitor
+            let usb_holder = services::usb_monitor::UsbMonitorHolder(Mutex::new(None));
+            match services::usb_monitor::start_usb_monitor(app.handle()) {
+                Ok(state) => {
+                    match usb_holder.0.lock() {
+                        Ok(mut guard) => { *guard = Some(state); }
+                        Err(e) => {
+                            log::error!("USB monitor mutex poisoned: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to start USB monitor: {e}");
+                }
+            }
+            app.manage(usb_holder);
+
             Ok(())
         });
 
@@ -149,6 +166,15 @@ pub fn run() {
             services::file_watcher::watcher_start,
             services::file_watcher::watcher_stop,
             services::file_watcher::watcher_get_status,
+            services::usb_monitor::get_usb_devices,
+            services::usb_monitor::usb_monitor_start,
+            services::usb_monitor::usb_monitor_stop,
+            commands::settings::copy_background_image,
+            commands::settings::remove_background_image,
+            commands::settings::get_background_image,
+            commands::thread_colors::get_thread_matches,
+            commands::thread_colors::get_available_brands,
+            commands::thread_colors::get_brand_colors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

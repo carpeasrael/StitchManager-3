@@ -5,3 +5,4 @@ pub mod folders;
 pub mod migration;
 pub mod scanner;
 pub mod settings;
+pub mod thread_colors;

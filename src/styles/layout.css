@@ -9,10 +9,37 @@
     "status  status     status  status    status";
   height: 100vh;
   overflow: hidden;
+  position: relative;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-family);
   font-size: var(--font-size-body);
+}
+
+.app-layout::before {
+  content: "";
+  position: absolute;
+  inset: -20px;
+  z-index: 0;
+  background-image: var(--bg-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--bg-opacity);
+  filter: blur(var(--bg-blur));
+  pointer-events: none;
+}
+
+.app-menu,
+.app-toolbar,
+.app-sidebar,
+.app-center,
+.app-right,
+.app-splitter-l,
+.app-splitter-r,
+.app-status {
+  position: relative;
+  z-index: 1;
 }
 
 .app-menu {

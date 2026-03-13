@@ -5,6 +5,8 @@ import { trapFocus } from "../utils/focus-trap";
 import * as SettingsService from "../services/SettingsService";
 import * as AiService from "../services/AiService";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { applyFontSize } from "../utils/theme";
 import type { ThemeMode, CustomFieldDef } from "../types/index";
 
 export class SettingsDialog {
@@ -15,6 +17,12 @@ export class SettingsDialog {
   private originalTheme: ThemeMode = "hell";
   private originalFontSize: string = "medium";
   private originalLibraryRoot: string = "";
+  private originalBgImage: string = "";
+  private originalBgOpacity: string = "0.15";
+  private originalBgBlur: string = "0";
+  private originalBgImagePath: string = "";
+  private bgPathModified = false;
+  private pendingBgRemove = false;
 
   static async open(): Promise<void> {
     if (SettingsDialog.isOpen()) return;
@@ -41,6 +49,13 @@ export class SettingsDialog {
     this.originalTheme = appState.get("theme");
     this.originalFontSize = settings.font_size || "medium";
     this.originalLibraryRoot = settings.library_root || "";
+    const bgImageVal = getComputedStyle(document.documentElement).getPropertyValue("--bg-image").trim();
+    this.originalBgImage = bgImageVal && bgImageVal !== "" ? bgImageVal : "none";
+    this.originalBgOpacity = settings.bg_opacity || "0.15";
+    this.originalBgBlur = settings.bg_blur || "0";
+    this.originalBgImagePath = settings.bg_image_path || "";
+    this.bgPathModified = false;
+    this.pendingBgRemove = false;
 
     this.overlay = document.createElement("div");
     this.overlay.className = "dialog-overlay";
@@ -151,7 +166,20 @@ export class SettingsDialog {
       allOk = (await this.saveSettings(filesForm)) && allOk;
       // Custom fields are saved inline, not via the save button
 
+      // Execute deferred background image removal on save
+      if (allOk && this.pendingBgRemove) {
+        try {
+          await SettingsService.removeBackgroundImage();
+          this.bgPathModified = false;
+        } catch (e) {
+          console.warn("Failed to remove background:", e);
+          allOk = false;
+        }
+      }
+
       if (allOk) {
+        // Mark bg as committed so cancel won't revert
+        this.bgPathModified = false;
         // Update watcher if library_root changed
         const libraryInput = generalForm.querySelector<HTMLInputElement>('[data-key="library_root"]');
         if (libraryInput && libraryInput.value !== this.originalLibraryRoot) {
@@ -295,25 +323,165 @@ export class SettingsDialog {
       fontSelect.appendChild(option);
     }
     fontSelect.addEventListener("change", () => {
-      this.applyFontSize(fontSelect.value);
+      applyFontSize(fontSelect.value);
     });
     fontGroup.appendChild(fontSelect);
     form.appendChild(fontGroup);
 
     // Apply current font size
-    this.applyFontSize(settings.font_size || "medium");
-  }
+    applyFontSize(settings.font_size || "medium");
 
-  private applyFontSize(size: string): void {
-    const map: Record<string, string> = {
-      small: "12px",
-      medium: "13px",
-      large: "15px",
-    };
-    document.documentElement.style.setProperty(
-      "--font-size-body",
-      map[size] || "13px"
-    );
+    // Background image section
+    const bgGroup = document.createElement("div");
+    bgGroup.className = "settings-form-group settings-bg-group";
+
+    const bgLabel = document.createElement("label");
+    bgLabel.className = "settings-label";
+    bgLabel.textContent = "Hintergrundbild";
+    bgGroup.appendChild(bgLabel);
+
+    const bgDesc = document.createElement("div");
+    bgDesc.className = "settings-legend";
+    bgDesc.textContent = "Ein Bild als Hintergrund der Anwendung anzeigen.";
+    bgGroup.appendChild(bgDesc);
+
+    const bgPreview = document.createElement("div");
+    bgPreview.className = "settings-bg-preview";
+    const currentBgImage = getComputedStyle(document.documentElement)
+      .getPropertyValue("--bg-image")
+      .trim();
+    if (currentBgImage && currentBgImage !== "none") {
+      bgPreview.style.backgroundImage = currentBgImage;
+    } else {
+      bgPreview.textContent = "Kein Bild";
+    }
+    bgGroup.appendChild(bgPreview);
+
+    const bgBtnRow = document.createElement("div");
+    bgBtnRow.className = "settings-bg-buttons";
+
+    const bgSelectBtn = document.createElement("button");
+    bgSelectBtn.className = "dialog-btn dialog-btn-secondary";
+    bgSelectBtn.textContent = "Bild waehlen";
+    bgSelectBtn.addEventListener("click", async () => {
+      const selected = await open({
+        multiple: false,
+        title: "Hintergrundbild waehlen",
+        filters: [
+          {
+            name: "Bilder",
+            extensions: ["png", "jpg", "jpeg", "webp", "bmp"],
+          },
+        ],
+      });
+      if (!selected) return;
+      const path = typeof selected === "string" ? selected : String(selected);
+      if (!path) return;
+
+      try {
+        await SettingsService.copyBackgroundImage(path);
+        this.bgPathModified = true;
+        this.pendingBgRemove = false;
+        const dataUri = await SettingsService.getBackgroundImage();
+        if (dataUri) {
+          document.documentElement.style.setProperty(
+            "--bg-image",
+            `url("${dataUri}")`
+          );
+          bgPreview.style.backgroundImage = `url("${dataUri}")`;
+          bgPreview.textContent = "";
+          bgRemoveBtn.style.display = "";
+        }
+      } catch (e) {
+        console.warn("Failed to set background:", e);
+        ToastContainer.show("error", "Hintergrundbild konnte nicht gesetzt werden");
+      }
+    });
+    bgBtnRow.appendChild(bgSelectBtn);
+
+    const bgRemoveBtn = document.createElement("button");
+    bgRemoveBtn.className = "dialog-btn dialog-btn-secondary";
+    bgRemoveBtn.textContent = "Bild entfernen";
+    bgRemoveBtn.style.display =
+      settings.bg_image_path ? "" : "none";
+    bgRemoveBtn.addEventListener("click", () => {
+      // Defer actual deletion to save — cancel can revert
+      this.pendingBgRemove = true;
+      document.documentElement.style.setProperty("--bg-image", "none");
+      bgPreview.style.backgroundImage = "";
+      bgPreview.textContent = "Kein Bild";
+      bgRemoveBtn.style.display = "none";
+    });
+    bgBtnRow.appendChild(bgRemoveBtn);
+    bgGroup.appendChild(bgBtnRow);
+
+    // Opacity slider
+    const opacityGroup = document.createElement("div");
+    opacityGroup.className = "settings-form-group";
+    const opacityLabel = document.createElement("label");
+    opacityLabel.className = "settings-label";
+    opacityLabel.textContent = "Deckkraft";
+    opacityGroup.appendChild(opacityLabel);
+
+    const opacityWrapper = document.createElement("div");
+    opacityWrapper.className = "settings-range-wrapper";
+    const opacitySlider = document.createElement("input");
+    opacitySlider.type = "range";
+    opacitySlider.className = "settings-range";
+    opacitySlider.min = "0.05";
+    opacitySlider.max = "0.5";
+    opacitySlider.step = "0.05";
+    opacitySlider.dataset.key = "bg_opacity";
+    opacitySlider.value = settings.bg_opacity || "0.15";
+    const opacityDisplay = document.createElement("span");
+    opacityDisplay.className = "settings-range-value";
+    opacityDisplay.textContent = opacitySlider.value;
+    opacitySlider.addEventListener("input", () => {
+      opacityDisplay.textContent = opacitySlider.value;
+      document.documentElement.style.setProperty(
+        "--bg-opacity",
+        opacitySlider.value
+      );
+    });
+    opacityWrapper.appendChild(opacitySlider);
+    opacityWrapper.appendChild(opacityDisplay);
+    opacityGroup.appendChild(opacityWrapper);
+    bgGroup.appendChild(opacityGroup);
+
+    // Blur slider
+    const blurGroup = document.createElement("div");
+    blurGroup.className = "settings-form-group";
+    const blurLabel = document.createElement("label");
+    blurLabel.className = "settings-label";
+    blurLabel.textContent = "Unschaerfe (px)";
+    blurGroup.appendChild(blurLabel);
+
+    const blurWrapper = document.createElement("div");
+    blurWrapper.className = "settings-range-wrapper";
+    const blurSlider = document.createElement("input");
+    blurSlider.type = "range";
+    blurSlider.className = "settings-range";
+    blurSlider.min = "0";
+    blurSlider.max = "20";
+    blurSlider.step = "1";
+    blurSlider.dataset.key = "bg_blur";
+    blurSlider.value = settings.bg_blur || "0";
+    const blurDisplay = document.createElement("span");
+    blurDisplay.className = "settings-range-value";
+    blurDisplay.textContent = blurSlider.value;
+    blurSlider.addEventListener("input", () => {
+      blurDisplay.textContent = blurSlider.value;
+      document.documentElement.style.setProperty(
+        "--bg-blur",
+        blurSlider.value + "px"
+      );
+    });
+    blurWrapper.appendChild(blurSlider);
+    blurWrapper.appendChild(blurDisplay);
+    blurGroup.appendChild(blurWrapper);
+    bgGroup.appendChild(blurGroup);
+
+    form.appendChild(bgGroup);
   }
 
   private buildKiTab(
@@ -700,7 +868,15 @@ export class SettingsDialog {
       // Revert live-preview changes
       document.documentElement.setAttribute("data-theme", this.originalTheme);
       appState.set("theme", this.originalTheme);
-      this.applyFontSize(this.originalFontSize);
+      applyFontSize(this.originalFontSize);
+      // Revert background changes
+      document.documentElement.style.setProperty("--bg-image", this.originalBgImage);
+      document.documentElement.style.setProperty("--bg-opacity", this.originalBgOpacity);
+      document.documentElement.style.setProperty("--bg-blur", this.originalBgBlur + "px");
+      // Undo any background image DB changes from copyBackgroundImage
+      if (this.bgPathModified) {
+        SettingsService.setSetting("bg_image_path", this.originalBgImagePath).catch(() => {});
+      }
     }
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();

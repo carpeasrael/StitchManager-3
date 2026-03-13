@@ -26,7 +26,8 @@ import * as AiService from "./services/AiService";
 import * as ScannerService from "./services/ScannerService";
 import * as SettingsService from "./services/SettingsService";
 import * as FolderService from "./services/FolderService";
-import type { ThemeMode } from "./types/index";
+import { applyFontSize } from "./utils/theme";
+import type { ThemeMode, UsbDevice } from "./types/index";
 
 async function initTheme(): Promise<void> {
   try {
@@ -38,6 +39,9 @@ async function initTheme(): Promise<void> {
     // Apply persisted font size
     const fontSize = settings.font_size || "medium";
     applyFontSize(fontSize);
+
+    // Apply background image
+    await applyBackground(settings);
   } catch (e) {
     console.warn("Failed to load theme from DB, using default:", e);
     applyTheme("hell");
@@ -45,16 +49,33 @@ async function initTheme(): Promise<void> {
   }
 }
 
-function applyFontSize(size: string): void {
-  const map: Record<string, string> = {
-    small: "12px",
-    medium: "13px",
-    large: "15px",
-  };
-  document.documentElement.style.setProperty(
-    "--font-size-body",
-    map[size] || map.medium
-  );
+export async function applyBackground(
+  settings?: Record<string, string>
+): Promise<void> {
+  const s = settings || (await SettingsService.getAllSettings());
+  const opacity = s.bg_opacity || "0.15";
+  const blur = s.bg_blur || "0";
+
+  document.documentElement.style.setProperty("--bg-opacity", opacity);
+  document.documentElement.style.setProperty("--bg-blur", blur + "px");
+
+  if (s.bg_image_path) {
+    try {
+      const dataUri = await SettingsService.getBackgroundImage();
+      if (dataUri) {
+        document.documentElement.style.setProperty(
+          "--bg-image",
+          `url("${dataUri}")`
+        );
+      } else {
+        document.documentElement.style.setProperty("--bg-image", "none");
+      }
+    } catch {
+      document.documentElement.style.setProperty("--bg-image", "none");
+    }
+  } else {
+    document.documentElement.style.setProperty("--bg-image", "none");
+  }
 }
 
 function applyTheme(theme: ThemeMode): void {
@@ -101,6 +122,12 @@ async function initTauriBridge(): Promise<void> {
     ),
     listen("fs:files-removed", (e) =>
       EventBus.emit("fs:files-removed", e.payload)
+    ),
+    listen("usb:connected", (e) =>
+      EventBus.emit("usb:connected", e.payload)
+    ),
+    listen("usb:disconnected", (e) =>
+      EventBus.emit("usb:disconnected", e.payload)
     ),
   ]);
 }
@@ -334,11 +361,60 @@ function initEventHandlers(): () => void {
 
       try {
         const pdfPath = await FileService.generatePdfReport(fileIds);
-        ToastContainer.show("success", `PDF erstellt: ${pdfPath.split("/").pop()}`);
+        ToastContainer.show("success", `PDF erstellt: ${pdfPath.split(/[\\/]/).pop()}`);
         await revealItemInDir(pdfPath);
       } catch (e) {
         console.warn("PDF export failed:", e);
         ToastContainer.show("error", "PDF-Export fehlgeschlagen");
+      }
+    }),
+
+    EventBus.on("usb:connected", (data) => {
+      const device = data as UsbDevice;
+      appState.update("usbDevices", (current) => [
+        ...current.filter((d) => d.mountPoint !== device.mountPoint),
+        device,
+      ]);
+    }),
+
+    EventBus.on("usb:disconnected", (data) => {
+      const device = data as UsbDevice;
+      appState.update("usbDevices", (current) =>
+        current.filter((d) => d.mountPoint !== device.mountPoint)
+      );
+    }),
+
+    EventBus.on("usb:quick-export", async () => {
+      const devices = appState.get("usbDevices");
+      if (devices.length === 0) return;
+
+      let fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) {
+        const singleId = appState.get("selectedFileId");
+        if (singleId === null) {
+          ToastContainer.show("info", "Keine Dateien ausgewaehlt");
+          return;
+        }
+        fileIds = [singleId];
+      }
+
+      const targetPath = devices[0].mountPoint;
+
+      if (fileIds.length === 1) {
+        try {
+          await BatchService.exportUsb(fileIds, targetPath);
+          ToastContainer.show("success", `Datei auf ${devices[0].name} exportiert`);
+        } catch {
+          ToastContainer.show("error", "Export fehlgeschlagen");
+        }
+      } else {
+        BatchDialog.open("USB-Export", fileIds.length);
+        try {
+          await BatchService.exportUsb(fileIds, targetPath);
+          ToastContainer.show("success", `${fileIds.length} Dateien auf ${devices[0].name} exportiert`);
+        } catch {
+          ToastContainer.show("error", "Export fehlgeschlagen");
+        }
       }
     }),
 
@@ -546,6 +622,14 @@ async function init(): Promise<void> {
   destroyTauriBridge();
   await initTauriBridge();
   if (generation !== initGeneration) return;
+
+  // Seed initial USB device state
+  try {
+    const usbDevices = await invoke<UsbDevice[]>("get_usb_devices");
+    appState.set("usbDevices", usbDevices);
+  } catch {
+    // USB detection not available — ignore
+  }
 
   const destroyThemeToggle = setupThemeToggle();
   const destroyShortcuts = initShortcuts();

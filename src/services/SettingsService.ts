@@ -32,3 +32,15 @@ export async function createCustomField(
 export async function deleteCustomField(fieldId: number): Promise<void> {
   return invoke<void>("delete_custom_field", { fieldId });
 }
+
+export async function copyBackgroundImage(sourcePath: string): Promise<string> {
+  return invoke<string>("copy_background_image", { sourcePath });
+}
+
+export async function removeBackgroundImage(): Promise<void> {
+  return invoke<void>("remove_background_image");
+}
+
+export async function getBackgroundImage(): Promise<string> {
+  return invoke<string>("get_background_image");
+}
