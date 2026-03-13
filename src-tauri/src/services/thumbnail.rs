@@ -110,7 +110,7 @@ impl ThumbnailGenerator {
         Ok(())
     }
 
-    fn thumbnail_path(&self, file_id: i64) -> PathBuf {
+    pub fn thumbnail_path(&self, file_id: i64) -> PathBuf {
         self.cache_dir.join(format!("{file_id}_v2.png"))
     }
 }

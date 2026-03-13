@@ -286,6 +286,33 @@ function initEventHandlers(): () => void {
       }
     }),
 
+    EventBus.on("migration:2stitch", async () => {
+      const dialog = BatchDialog.open("2stitch Import", 0, "import");
+
+      try {
+        const result = await ScannerService.migrateFrom2Stitch();
+        dialog.close();
+
+        // Reload folders and files
+        const folders = await FolderService.getAll();
+        appState.set("folders", folders);
+        appState.set("selectedFileIds", []);
+        appState.set("selectedFileId", null);
+        appState.set("selectedFolderId", null);
+        await reloadFiles();
+
+        const elapsed = (result.elapsedMs / 1000).toFixed(1);
+        ToastContainer.show(
+          "success",
+          `${result.filesImported} Dateien, ${result.foldersCreated} Ordner, ${result.tagsImported} Tags importiert (${elapsed}s)`
+        );
+      } catch (e) {
+        dialog.close();
+        console.warn("2stitch migration failed:", e);
+        ToastContainer.show("error", "2stitch Import fehlgeschlagen");
+      }
+    }),
+
     EventBus.on("toolbar:batch-ai", async () => {
       const fileIds = appState.get("selectedFileIds");
       if (fileIds.length === 0) return;

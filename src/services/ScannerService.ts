@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { EmbroideryFile, MassImportResult } from "../types/index";
+import type { EmbroideryFile, MassImportResult, MigrationResult } from "../types/index";
 
 export interface ScanResult {
   foundFiles: string[];
@@ -20,4 +20,8 @@ export async function importFiles(
 
 export async function massImport(path: string): Promise<MassImportResult> {
   return invoke<MassImportResult>("mass_import", { path });
+}
+
+export async function migrateFrom2Stitch(xmlPath?: string): Promise<MigrationResult> {
+  return invoke<MigrationResult>("migrate_from_2stitch", { xmlPath: xmlPath ?? null });
 }

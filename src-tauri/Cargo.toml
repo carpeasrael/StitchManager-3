@@ -36,6 +36,7 @@ thiserror = "1"
 byteorder = "1"
 log = "0.4"
 tauri-plugin-opener = "2.5.3"
+roxmltree = "0.20"
 
 [dev-dependencies]
 tempfile = "3"

@@ -147,6 +147,14 @@ export interface MassImportResult {
   elapsedMs: number;
 }
 
+export interface MigrationResult {
+  foldersCreated: number;
+  filesImported: number;
+  filesSkipped: number;
+  tagsImported: number;
+  elapsedMs: number;
+}
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface BatchResult {

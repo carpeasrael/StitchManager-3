@@ -129,6 +129,7 @@ pub fn run() {
             commands::ai::ai_analyze_batch,
             commands::scanner::watcher_auto_import,
             commands::scanner::watcher_remove_by_paths,
+            commands::migration::migrate_from_2stitch,
             services::file_watcher::watcher_start,
             services::file_watcher::watcher_stop,
         ])

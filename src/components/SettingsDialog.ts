@@ -1,4 +1,5 @@
 import { appState } from "../state/AppState";
+import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import * as SettingsService from "../services/SettingsService";
 import * as AiService from "../services/AiService";
@@ -204,6 +205,32 @@ export class SettingsDialog {
     metaInput.placeholder = "~/Stickdateien/.stichman";
     metaGroup.appendChild(metaInput);
     form.appendChild(metaGroup);
+
+    // Migration section
+    const migrationGroup = document.createElement("div");
+    migrationGroup.className = "settings-form-group settings-migration-group";
+
+    const migrationLabel = document.createElement("label");
+    migrationLabel.className = "settings-label";
+    migrationLabel.textContent = "Datenimport";
+    migrationGroup.appendChild(migrationLabel);
+
+    const migrationDesc = document.createElement("div");
+    migrationDesc.className = "settings-legend";
+    migrationDesc.textContent =
+      "Dateien, Ordner, Metadaten und Tags aus 2stitch Organizer importieren.";
+    migrationGroup.appendChild(migrationDesc);
+
+    const migrationBtn = document.createElement("button");
+    migrationBtn.className = "dialog-btn dialog-btn-secondary";
+    migrationBtn.textContent = "2stitch Import starten";
+    migrationBtn.addEventListener("click", () => {
+      this.close();
+      EventBus.emit("migration:2stitch");
+    });
+    migrationGroup.appendChild(migrationBtn);
+
+    form.appendChild(migrationGroup);
   }
 
   private buildAppearanceTab(

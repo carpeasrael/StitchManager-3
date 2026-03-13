@@ -293,13 +293,13 @@ struct ImportDiscoveryPayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ImportProgressPayload {
-    current: u32,
-    total: u32,
-    filename: String,
-    status: String,
-    elapsed_ms: u64,
-    estimated_remaining_ms: u64,
+pub struct ImportProgressPayload {
+    pub current: u32,
+    pub total: u32,
+    pub filename: String,
+    pub status: String,
+    pub elapsed_ms: u64,
+    pub estimated_remaining_ms: u64,
 }
 
 #[tauri::command]
