@@ -205,17 +205,8 @@ fn apply_v1(conn: &Connection) -> Result<(), AppError> {
         );
         CREATE INDEX IF NOT EXISTS idx_custom_field_values_file_id ON custom_field_values(file_id);
 
-        -- Default settings
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('library_root', '~/Stickdateien');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('metadata_root', '~/Stickdateien/.stichman');
+        -- Default settings (only essential rendering defaults)
         INSERT OR IGNORE INTO settings (key, value) VALUES ('theme_mode', 'hell');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_provider', 'ollama');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_url', 'http://localhost:11434');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_model', 'llama3.2-vision');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_temperature', '0.3');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_timeout_ms', '30000');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('rename_pattern', '{name}_{theme}');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('organize_pattern', '{theme}/{name}');
 
         -- Record migration
         INSERT INTO schema_version (version, description) VALUES (1, 'Initial schema');
@@ -405,7 +396,7 @@ mod tests {
         let count: i32 = conn
             .query_row("SELECT COUNT(*) FROM settings", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 10, "All 10 default settings must exist");
+        assert_eq!(count, 1, "Only essential default settings must exist");
 
         let theme: String = conn
             .query_row(

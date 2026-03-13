@@ -6,17 +6,37 @@ import * as FolderService from "../services/FolderService";
 import * as ScannerService from "../services/ScannerService";
 import * as FileService from "../services/FileService";
 
+interface MenuItem {
+  className: string;
+  icon: string;
+  label: string;
+  shortcut?: string;
+  onClick: () => void;
+}
+
+interface MenuGroup {
+  label: string;
+  items: MenuItem[];
+}
+
 export class Toolbar extends Component {
+  private menuOpen = false;
+  private panel: HTMLElement | null = null;
+  private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+
   constructor(container: HTMLElement) {
     super(container);
     this.subscribe(
-      appState.on("selectedFolderId", () => this.updateButtonStates())
+      appState.on("selectedFolderId", () => this.updateItemStates())
     );
     this.subscribe(
-      appState.on("selectedFileId", () => this.updateButtonStates())
+      appState.on("selectedFileId", () => this.updateItemStates())
     );
     this.subscribe(
-      appState.on("selectedFileIds", () => this.updateButtonStates())
+      appState.on("selectedFileIds", () => this.updateItemStates())
+    );
+    this.subscribe(
+      EventBus.on("burger:close", () => this.closeMenu())
     );
     this.render();
   }
@@ -24,155 +44,249 @@ export class Toolbar extends Component {
   render(): void {
     this.el.innerHTML = "";
 
-    const actions = document.createElement("div");
-    actions.className = "toolbar-actions";
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-add", "\uD83D\uDCC1", "Ordner hinzuf\u00FCgen", () =>
-        this.addFolder()
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-scan", "\uD83D\uDD0D", "Ordner scannen", () =>
-        this.scanFolder()
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-mass-import", "\uD83D\uDCE5", "Massenimport", () =>
-        EventBus.emit("toolbar:mass-import")
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-save", "\uD83D\uDCBE", "Speichern", () =>
-        EventBus.emit("toolbar:save")
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-reveal", "\uD83D\uDCCD", "Im Ordner anzeigen", () =>
-        EventBus.emit("toolbar:reveal-in-folder")
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-ai", "\u2728", "KI Analyse", () =>
-        EventBus.emit("toolbar:ai-analyze")
-      )
-    );
-
-    // Batch actions (shown when multiple files selected)
-    actions.appendChild(
-      this.createButton("toolbar-btn-batch-rename", "\u270F", "Batch Umbenennen", () =>
-        EventBus.emit("toolbar:batch-rename")
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-batch-organize", "\uD83D\uDCC2", "Batch Organisieren", () =>
-        EventBus.emit("toolbar:batch-organize")
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-batch-export", "\uD83D\uDCE4", "USB-Export", () =>
-        EventBus.emit("toolbar:batch-export")
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-batch-ai", "\u2728", "Batch KI", () =>
-        EventBus.emit("toolbar:batch-ai")
-      )
-    );
-
-    actions.appendChild(
-      this.createButton("toolbar-btn-pdf", "\uD83D\uDCC4", "PDF Export", () =>
-        EventBus.emit("toolbar:pdf-export")
-      )
-    );
-
-    const settingsBtn = this.createButton(
-      "toolbar-btn-settings",
-      "\u2699",
-      "Einstellungen",
-      () => EventBus.emit("toolbar:settings")
-    );
-    actions.appendChild(settingsBtn);
-
-    this.el.appendChild(actions);
-    this.updateButtonStates();
-  }
-
-  private createButton(
-    className: string,
-    icon: string,
-    label: string,
-    onClick: () => void
-  ): HTMLButtonElement {
     const btn = document.createElement("button");
-    btn.className = `toolbar-btn ${className}`;
-    btn.title = label;
-    btn.setAttribute("aria-label", label);
-
-    const iconSpan = document.createElement("span");
-    iconSpan.className = "toolbar-btn-icon";
-    iconSpan.textContent = icon;
-    btn.appendChild(iconSpan);
-
-    const labelSpan = document.createElement("span");
-    labelSpan.className = "toolbar-btn-label";
-    labelSpan.textContent = label;
-    btn.appendChild(labelSpan);
-
-    btn.addEventListener("click", onClick);
-    return btn;
+    btn.className = "burger-btn";
+    btn.title = "Menue";
+    btn.setAttribute("aria-label", "Menue oeffnen");
+    btn.setAttribute("aria-haspopup", "true");
+    btn.setAttribute("aria-expanded", "false");
+    btn.textContent = "\u2630";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.toggleMenu(btn);
+    });
+    this.el.appendChild(btn);
   }
 
-  private updateButtonStates(): void {
+  private getMenuGroups(): MenuGroup[] {
+    return [
+      {
+        label: "Ordner",
+        items: [
+          {
+            className: "menu-item-add",
+            icon: "\uD83D\uDCC1",
+            label: "Ordner hinzufuegen",
+            onClick: () => this.addFolder(),
+          },
+          {
+            className: "menu-item-scan",
+            icon: "\uD83D\uDD0D",
+            label: "Ordner scannen",
+            onClick: () => this.scanFolder(),
+          },
+          {
+            className: "menu-item-mass-import",
+            icon: "\uD83D\uDCE5",
+            label: "Massenimport",
+            onClick: () => EventBus.emit("toolbar:mass-import"),
+          },
+        ],
+      },
+      {
+        label: "Datei",
+        items: [
+          {
+            className: "menu-item-save",
+            icon: "\uD83D\uDCBE",
+            label: "Speichern",
+            shortcut: "Ctrl+S",
+            onClick: () => EventBus.emit("toolbar:save"),
+          },
+          {
+            className: "menu-item-reveal",
+            icon: "\uD83D\uDCCD",
+            label: "Im Ordner anzeigen",
+            shortcut: "Ctrl+Shift+R",
+            onClick: () => EventBus.emit("toolbar:reveal-in-folder"),
+          },
+          {
+            className: "menu-item-pdf",
+            icon: "\uD83D\uDCC4",
+            label: "PDF Export",
+            onClick: () => EventBus.emit("toolbar:pdf-export"),
+          },
+        ],
+      },
+      {
+        label: "KI",
+        items: [
+          {
+            className: "menu-item-ai",
+            icon: "\u2728",
+            label: "KI Analyse",
+            onClick: () => EventBus.emit("toolbar:ai-analyze"),
+          },
+          {
+            className: "menu-item-batch-ai",
+            icon: "\u2728",
+            label: "Batch KI",
+            onClick: () => EventBus.emit("toolbar:batch-ai"),
+          },
+        ],
+      },
+      {
+        label: "Batch",
+        items: [
+          {
+            className: "menu-item-batch-rename",
+            icon: "\u270F",
+            label: "Batch Umbenennen",
+            onClick: () => EventBus.emit("toolbar:batch-rename"),
+          },
+          {
+            className: "menu-item-batch-organize",
+            icon: "\uD83D\uDCC2",
+            label: "Batch Organisieren",
+            onClick: () => EventBus.emit("toolbar:batch-organize"),
+          },
+          {
+            className: "menu-item-batch-export",
+            icon: "\uD83D\uDCE4",
+            label: "USB-Export",
+            shortcut: "Ctrl+Shift+U",
+            onClick: () => EventBus.emit("toolbar:batch-export"),
+          },
+        ],
+      },
+      {
+        label: "System",
+        items: [
+          {
+            className: "menu-item-settings",
+            icon: "\u2699",
+            label: "Einstellungen",
+            shortcut: "Ctrl+,",
+            onClick: () => EventBus.emit("toolbar:settings"),
+          },
+        ],
+      },
+    ];
+  }
+
+  private toggleMenu(btn: HTMLButtonElement): void {
+    if (this.menuOpen) {
+      this.closeMenu();
+    } else {
+      this.openMenu(btn);
+    }
+  }
+
+  private openMenu(btn: HTMLButtonElement): void {
+    this.menuOpen = true;
+    btn.setAttribute("aria-expanded", "true");
+    btn.classList.add("burger-btn--open");
+
+    this.panel = document.createElement("div");
+    this.panel.className = "burger-menu";
+    this.panel.setAttribute("role", "menu");
+
+    const groups = this.getMenuGroups();
+    for (let gi = 0; gi < groups.length; gi++) {
+      const group = groups[gi];
+
+      if (gi > 0) {
+        const divider = document.createElement("div");
+        divider.className = "burger-menu-divider";
+        this.panel.appendChild(divider);
+      }
+
+      const header = document.createElement("div");
+      header.className = "burger-menu-header";
+      header.textContent = group.label;
+      this.panel.appendChild(header);
+
+      for (const item of group.items) {
+        const row = document.createElement("button");
+        row.className = `burger-menu-item ${item.className}`;
+        row.setAttribute("role", "menuitem");
+
+        const iconSpan = document.createElement("span");
+        iconSpan.className = "burger-menu-item-icon";
+        iconSpan.textContent = item.icon;
+        row.appendChild(iconSpan);
+
+        const labelSpan = document.createElement("span");
+        labelSpan.className = "burger-menu-item-label";
+        labelSpan.textContent = item.label;
+        row.appendChild(labelSpan);
+
+        if (item.shortcut) {
+          const shortcutSpan = document.createElement("span");
+          shortcutSpan.className = "burger-menu-item-shortcut";
+          shortcutSpan.textContent = item.shortcut;
+          row.appendChild(shortcutSpan);
+        }
+
+        row.addEventListener("click", () => {
+          this.closeMenu();
+          item.onClick();
+        });
+
+        this.panel.appendChild(row);
+      }
+    }
+
+    this.el.appendChild(this.panel);
+    this.updateItemStates();
+
+    // Close on outside click (next tick to avoid immediate close)
+    requestAnimationFrame(() => {
+      if (!this.menuOpen) return;
+      this.outsideClickHandler = (e: MouseEvent) => {
+        if (this.panel && !this.el.contains(e.target as Node)) {
+          this.closeMenu();
+        }
+      };
+      document.addEventListener("click", this.outsideClickHandler);
+    });
+  }
+
+  private closeMenu(): void {
+    this.menuOpen = false;
+    const btn = this.el.querySelector<HTMLButtonElement>(".burger-btn");
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      btn.classList.remove("burger-btn--open");
+    }
+    if (this.panel) {
+      this.panel.remove();
+      this.panel = null;
+    }
+    if (this.outsideClickHandler) {
+      document.removeEventListener("click", this.outsideClickHandler);
+      this.outsideClickHandler = null;
+    }
+  }
+
+  private updateItemStates(): void {
+    if (!this.panel) return;
+
     const hasFolder = appState.get("selectedFolderId") !== null;
     const hasFile = appState.get("selectedFileId") !== null;
     const multiCount = appState.get("selectedFileIds").length;
     const hasMulti = multiCount > 1;
+    const hasAny = hasFile || hasMulti;
 
-    const scanBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-scan");
-    if (scanBtn) {
-      scanBtn.disabled = !hasFolder;
-      scanBtn.title = hasFolder ? "Ordner scannen" : "Ordner auswählen, um zu scannen";
-    }
+    const setDisabled = (cls: string, disabled: boolean) => {
+      const el = this.panel?.querySelector<HTMLButtonElement>(`.${cls}`);
+      if (el) el.disabled = disabled;
+    };
 
-    const revealBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-reveal");
-    if (revealBtn) revealBtn.disabled = !hasFile || hasMulti;
+    const setHidden = (cls: string, hidden: boolean) => {
+      const el = this.panel?.querySelector<HTMLButtonElement>(`.${cls}`);
+      if (el) el.style.display = hidden ? "none" : "";
+    };
 
-    const aiBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-ai");
-    if (aiBtn) aiBtn.disabled = !hasFile || hasMulti;
+    setDisabled("menu-item-scan", !hasFolder);
+    setDisabled("menu-item-reveal", !hasFile || hasMulti);
+    setDisabled("menu-item-ai", !hasFile || hasMulti);
 
-    // USB-Export: visible when any file is selected (single or multi)
-    const exportBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-batch-export");
-    if (exportBtn) {
-      exportBtn.style.display = hasFile || hasMulti ? "" : "none";
-    }
-
-    // PDF export: visible when any file is selected
-    const pdfBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-pdf");
-    if (pdfBtn) {
-      pdfBtn.style.display = hasFile || hasMulti ? "" : "none";
-    }
-
-    // Other batch buttons: visible only when multiple files selected
-    const batchBtns = [
-      ".toolbar-btn-batch-rename",
-      ".toolbar-btn-batch-organize",
-      ".toolbar-btn-batch-ai",
-    ];
-    for (const sel of batchBtns) {
-      const btn = this.el.querySelector<HTMLButtonElement>(sel);
-      if (btn) {
-        btn.style.display = hasMulti ? "" : "none";
-      }
-    }
+    setHidden("menu-item-pdf", !hasAny);
+    setHidden("menu-item-batch-export", !hasAny);
+    setHidden("menu-item-batch-rename", !hasMulti);
+    setHidden("menu-item-batch-organize", !hasMulti);
+    setHidden("menu-item-batch-ai", !hasMulti);
   }
 
   private async addFolder(): Promise<void> {
@@ -208,13 +322,6 @@ export class Toolbar extends Component {
     const folder = folders.find((f) => f.id === folderId);
     if (!folder) return;
 
-    const scanBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-scan");
-    if (scanBtn) {
-      scanBtn.disabled = true;
-      const label = scanBtn.querySelector(".toolbar-btn-label");
-      if (label) label.textContent = "Scanne...";
-    }
-
     try {
       const result = await ScannerService.scanDirectory(folder.path);
 
@@ -227,17 +334,15 @@ export class Toolbar extends Component {
         foundFiles: result.foundFiles.length,
       });
 
-      // Reload files for the selected folder
       const files = await FileService.getFiles(folderId);
       appState.set("files", files);
     } catch (e) {
       console.warn("Failed to scan folder:", e);
-    } finally {
-      if (scanBtn) {
-        const label = scanBtn.querySelector(".toolbar-btn-label");
-        if (label) label.textContent = "Ordner scannen";
-      }
-      this.updateButtonStates();
     }
+  }
+
+  destroy(): void {
+    this.closeMenu();
+    super.destroy();
   }
 }

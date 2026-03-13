@@ -235,7 +235,7 @@ export class SettingsDialog {
     libraryInput.type = "text";
     libraryInput.className = "settings-input";
     libraryInput.dataset.key = "library_root";
-    libraryInput.value = settings.library_root || "~/Stickdateien";
+    libraryInput.value = settings.library_root || "";
     libraryInput.placeholder = "~/Stickdateien";
     libraryGroup.appendChild(libraryInput);
     form.appendChild(libraryGroup);
@@ -246,7 +246,7 @@ export class SettingsDialog {
     metaInput.type = "text";
     metaInput.className = "settings-input";
     metaInput.dataset.key = "metadata_root";
-    metaInput.value = settings.metadata_root || "~/Stickdateien/.stichman";
+    metaInput.value = settings.metadata_root || "";
     metaInput.placeholder = "~/Stickdateien/.stichman";
     metaGroup.appendChild(metaInput);
     form.appendChild(metaGroup);
@@ -510,7 +510,7 @@ export class SettingsDialog {
     urlInput.type = "text";
     urlInput.className = "settings-input";
     urlInput.dataset.key = "ai_url";
-    urlInput.value = settings.ai_url || "http://localhost:11434";
+    urlInput.value = settings.ai_url || "";
     urlInput.placeholder = "http://localhost:11434";
     urlGroup.appendChild(urlInput);
     form.appendChild(urlGroup);
@@ -541,7 +541,7 @@ export class SettingsDialog {
     modelInput.type = "text";
     modelInput.className = "settings-input";
     modelInput.dataset.key = "ai_model";
-    modelInput.value = settings.ai_model || "llama3.2-vision";
+    modelInput.value = settings.ai_model || "";
     modelGroup.appendChild(modelInput);
     form.appendChild(modelGroup);
 
@@ -644,7 +644,7 @@ export class SettingsDialog {
     renameInput.type = "text";
     renameInput.className = "settings-input";
     renameInput.dataset.key = "rename_pattern";
-    renameInput.value = settings.rename_pattern || "{name}_{theme}";
+    renameInput.value = settings.rename_pattern || "";
     renameInput.placeholder = "{name}_{theme}";
     renameGroup.appendChild(renameInput);
     form.appendChild(renameGroup);
@@ -655,7 +655,7 @@ export class SettingsDialog {
     organizeInput.type = "text";
     organizeInput.className = "settings-input";
     organizeInput.dataset.key = "organize_pattern";
-    organizeInput.value = settings.organize_pattern || "{theme}/{name}";
+    organizeInput.value = settings.organize_pattern || "";
     organizeInput.placeholder = "{theme}/{name}";
     organizeGroup.appendChild(organizeInput);
     form.appendChild(organizeGroup);

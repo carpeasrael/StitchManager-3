@@ -280,7 +280,7 @@ pub async fn batch_organize(
                 [],
                 |row| row.get::<_, String>(0),
             )
-            .unwrap_or_else(|_| "~/Stickdateien".to_string());
+            .map_err(|_| AppError::Validation("library_root ist nicht konfiguriert".into()))?;
         let file_list = file_ids
             .iter()
             .map(|id| {

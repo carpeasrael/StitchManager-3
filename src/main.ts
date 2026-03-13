@@ -142,10 +142,9 @@ function setupThemeToggle(): () => void {
   if (!menuEl) return () => {};
 
   const btn = document.createElement("button");
+  btn.className = "menu-theme-btn";
   btn.textContent = "\u25D0";
   btn.title = "Theme wechseln";
-  btn.style.cssText =
-    "margin-left:auto;background:none;border:1px solid var(--color-border);border-radius:var(--radius-button);padding:2px 8px;cursor:pointer;color:var(--color-text);font-size:var(--font-size-body);";
   const onClick = () => toggleTheme();
   btn.addEventListener("click", onClick);
   menuEl.appendChild(btn);
@@ -270,10 +269,6 @@ function initEventHandlers(): () => void {
     }),
 
     EventBus.on("toolbar:mass-import", async () => {
-      // Guard against concurrent imports
-      const importBtn = document.querySelector<HTMLButtonElement>(".toolbar-btn-mass-import");
-      if (importBtn?.disabled) return;
-
       const selected = await open({
         directory: true,
         multiple: false,
@@ -284,7 +279,6 @@ function initEventHandlers(): () => void {
       const path = typeof selected === "string" ? selected : String(selected);
       if (!path) return;
 
-      if (importBtn) importBtn.disabled = true;
       BatchDialog.open("Massenimport", 0, "import");
 
       try {
@@ -308,8 +302,6 @@ function initEventHandlers(): () => void {
       } catch (e) {
         console.warn("Mass import failed:", e);
         ToastContainer.show("error", "Massenimport fehlgeschlagen");
-      } finally {
-        if (importBtn) importBtn.disabled = false;
       }
     }),
 
@@ -493,6 +485,12 @@ function initEventHandlers(): () => void {
     }),
 
     EventBus.on("shortcut:escape", () => {
+      // Close burger menu if open
+      const burgerMenu = document.querySelector(".burger-menu");
+      if (burgerMenu) {
+        EventBus.emit("burger:close");
+        return;
+      }
       // Close any open dialog via its own close method (to revert live previews)
       if (SettingsDialog.isOpen()) {
         SettingsDialog.dismiss();
@@ -557,23 +555,31 @@ function initComponents(): AppInstances {
     components.push(new Sidebar(sidebarEl));
   }
 
-  const toolbarEl = document.querySelector<HTMLElement>(".app-toolbar");
-  if (toolbarEl) {
-    toolbarEl.innerHTML = "";
+  const menuEl = document.querySelector<HTMLElement>(".app-menu");
+  if (menuEl) {
+    const titleEl = menuEl.querySelector(".app-title");
+
+    // Burger menu before the title
+    const burgerContainer = document.createElement("div");
+    burgerContainer.className = "burger-container";
+    if (titleEl) {
+      menuEl.insertBefore(burgerContainer, titleEl);
+    } else {
+      menuEl.prepend(burgerContainer);
+    }
+    components.push(new Toolbar(burgerContainer));
+
+    // Search bar in the menu
     const searchContainer = document.createElement("div");
     searchContainer.className = "toolbar-search";
-    toolbarEl.appendChild(searchContainer);
+    menuEl.appendChild(searchContainer);
     components.push(new SearchBar(searchContainer));
 
+    // Format filter chips in the menu
     const filterContainer = document.createElement("div");
     filterContainer.className = "toolbar-filters";
-    toolbarEl.appendChild(filterContainer);
+    menuEl.appendChild(filterContainer);
     components.push(new FilterChips(filterContainer));
-
-    const actionsContainer = document.createElement("div");
-    actionsContainer.className = "toolbar-actions-container";
-    toolbarEl.appendChild(actionsContainer);
-    components.push(new Toolbar(actionsContainer));
   }
 
   const centerEl = document.querySelector<HTMLElement>(".app-center");

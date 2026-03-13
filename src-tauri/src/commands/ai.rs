@@ -810,9 +810,16 @@ mod tests {
     fn test_load_ai_config_empty_api_key_is_none() {
         use super::load_ai_config;
 
-        // Relies on migration defaults for: ai_provider, ai_url, ai_model,
-        // ai_temperature, ai_timeout_ms.
         let conn = init_database_in_memory().unwrap();
+
+        // Insert required AI settings (no longer seeded by migrations)
+        conn.execute_batch(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_provider', 'ollama');
+             INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_url', 'http://localhost:11434');
+             INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_model', 'llama3.2-vision');
+             INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_temperature', '0.3');
+             INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_timeout_ms', '30000');",
+        ).unwrap();
 
         // Set a non-empty API key first
         conn.execute(

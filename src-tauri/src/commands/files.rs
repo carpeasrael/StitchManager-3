@@ -651,7 +651,7 @@ pub fn attach_file(
 
     let library_root: String = conn
         .query_row("SELECT value FROM settings WHERE key = 'library_root'", [], |row| row.get(0))
-        .unwrap_or_else(|_| "~/Stickdateien".to_string());
+        .map_err(|_| AppError::Validation("library_root ist nicht konfiguriert".into()))?;
 
     let base_dir = if library_root.starts_with("~/") {
         if let Some(home) = dirs::home_dir() {
