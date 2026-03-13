@@ -167,3 +167,14 @@ pub fn watcher_stop(
     *guard = None;
     Ok(())
 }
+
+#[tauri::command]
+pub fn watcher_get_status(
+    holder: tauri::State<'_, WatcherHolder>,
+) -> Result<bool, String> {
+    let guard = holder
+        .0
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?;
+    Ok(guard.is_some())
+}

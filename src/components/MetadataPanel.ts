@@ -33,6 +33,7 @@ export class MetadataPanel extends Component {
   private dirty = false;
   private saving = false;
   private previewCleanup: (() => void) | null = null;
+  private previewGeneration = 0;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -181,14 +182,17 @@ export class MetadataPanel extends Component {
     zoomInBtn.className = "stitch-preview-btn";
     zoomInBtn.textContent = "+";
     zoomInBtn.title = "Vergr\u00F6\u00DFern";
+    zoomInBtn.setAttribute("aria-label", "Vergr\u00F6\u00DFern");
     const zoomOutBtn = document.createElement("button");
     zoomOutBtn.className = "stitch-preview-btn";
     zoomOutBtn.textContent = "\u2212";
     zoomOutBtn.title = "Verkleinern";
+    zoomOutBtn.setAttribute("aria-label", "Verkleinern");
     const zoomResetBtn = document.createElement("button");
     zoomResetBtn.className = "stitch-preview-btn";
     zoomResetBtn.textContent = "\u21BA";
     zoomResetBtn.title = "Zur\u00FCcksetzen";
+    zoomResetBtn.setAttribute("aria-label", "Zur\u00FCcksetzen");
     const zoomLabel = document.createElement("span");
     zoomLabel.className = "stitch-preview-zoom-label";
     zoomLabel.textContent = "100%";
@@ -607,6 +611,7 @@ export class MetadataPanel extends Component {
     const removeBtn = document.createElement("button");
     removeBtn.className = "tag-chip-remove";
     removeBtn.textContent = "\u00D7";
+    removeBtn.setAttribute("aria-label", `Tag ${tagName} entfernen`);
     removeBtn.addEventListener("click", () => {
       chip.remove();
       this.checkDirty();
@@ -762,13 +767,14 @@ export class MetadataPanel extends Component {
       zoomResetBtn: HTMLButtonElement;
     }
   ): Promise<void> {
+    const gen = ++this.previewGeneration;
     let segments: StitchSegment[];
     try {
       segments = await FileService.getStitchSegments(filepath);
     } catch {
       return;
     }
-    if (this.currentFile?.id !== fileId || segments.length === 0) return;
+    if (gen !== this.previewGeneration || this.currentFile?.id !== fileId || segments.length === 0) return;
 
     // Compute bounding box
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -864,12 +870,13 @@ export class MetadataPanel extends Component {
     // Pan with mouse drag
     let dragging = false;
     let lastX = 0, lastY = 0;
-    canvas.addEventListener("mousedown", (e) => {
+    const onMouseDown = (e: MouseEvent) => {
       dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
       canvas.style.cursor = "grabbing";
-    });
+    };
+    canvas.addEventListener("mousedown", onMouseDown);
     const onMouseMove = (e: MouseEvent) => {
       if (!dragging) return;
       panX += e.clientX - lastX;
@@ -886,22 +893,17 @@ export class MetadataPanel extends Component {
     document.addEventListener("mouseup", onMouseUp);
     canvas.style.cursor = "grab";
 
-    // Register cleanup for document-level listeners
-    this.previewCleanup = () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-
     // Double-click to reset
-    canvas.addEventListener("dblclick", () => {
+    const onDblClick = () => {
       zoom = 1;
       panX = 0;
       panY = 0;
       drawPreview();
-    });
+    };
+    canvas.addEventListener("dblclick", onDblClick);
 
     // Zoom buttons
-    controls.zoomInBtn.addEventListener("click", () => {
+    const onZoomIn = () => {
       const center = canvas.clientWidth / 2;
       const centerY = canvas.clientHeight / 2;
       const oldZoom = zoom;
@@ -909,8 +911,9 @@ export class MetadataPanel extends Component {
       panX = center - (center - panX) * (zoom / oldZoom);
       panY = centerY - (centerY - panY) * (zoom / oldZoom);
       drawPreview();
-    });
-    controls.zoomOutBtn.addEventListener("click", () => {
+    };
+    controls.zoomInBtn.addEventListener("click", onZoomIn);
+    const onZoomOut = () => {
       const center = canvas.clientWidth / 2;
       const centerY = canvas.clientHeight / 2;
       const oldZoom = zoom;
@@ -918,13 +921,27 @@ export class MetadataPanel extends Component {
       panX = center - (center - panX) * (zoom / oldZoom);
       panY = centerY - (centerY - panY) * (zoom / oldZoom);
       drawPreview();
-    });
-    controls.zoomResetBtn.addEventListener("click", () => {
+    };
+    controls.zoomOutBtn.addEventListener("click", onZoomOut);
+    const onZoomReset = () => {
       zoom = 1;
       panX = 0;
       panY = 0;
       drawPreview();
-    });
+    };
+    controls.zoomResetBtn.addEventListener("click", onZoomReset);
+
+    // Register cleanup for ALL listeners (canvas + document + buttons)
+    this.previewCleanup = () => {
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("dblclick", onDblClick);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      controls.zoomInBtn.removeEventListener("click", onZoomIn);
+      controls.zoomOutBtn.removeEventListener("click", onZoomOut);
+      controls.zoomResetBtn.removeEventListener("click", onZoomReset);
+    };
   }
 
   private renderError(): void {

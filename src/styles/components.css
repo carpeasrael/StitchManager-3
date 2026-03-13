@@ -1050,6 +1050,13 @@
   text-align: right;
 }
 
+.status-watcher-inactive {
+  font-size: var(--font-size-caption);
+  color: var(--color-warning, #e07c00);
+  flex-shrink: 0;
+  padding: 0 var(--spacing-2);
+}
+
 /* Dialog Overlay */
 .dialog-overlay {
   position: fixed;

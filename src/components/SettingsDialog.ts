@@ -1,6 +1,7 @@
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
+import { trapFocus } from "../utils/focus-trap";
 import * as SettingsService from "../services/SettingsService";
 import * as AiService from "../services/AiService";
 import { invoke } from "@tauri-apps/api/core";
@@ -9,6 +10,7 @@ import type { ThemeMode, CustomFieldDef } from "../types/index";
 export class SettingsDialog {
   private static instance: SettingsDialog | null = null;
   private overlay: HTMLElement | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
   private originalTheme: ThemeMode = "hell";
   private originalFontSize: string = "medium";
   private originalLibraryRoot: string = "";
@@ -47,6 +49,9 @@ export class SettingsDialog {
 
     const dialog = document.createElement("div");
     dialog.className = "dialog dialog-settings";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "Einstellungen");
 
     // Header
     const header = document.createElement("div");
@@ -56,6 +61,7 @@ export class SettingsDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close";
     closeBtn.textContent = "\u00D7";
+    closeBtn.setAttribute("aria-label", "Schliessen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -170,6 +176,7 @@ export class SettingsDialog {
     dialog.appendChild(footer);
     this.overlay.appendChild(dialog);
     document.body.appendChild(this.overlay);
+    this.releaseFocusTrap = trapFocus(dialog);
   }
 
   private createTabContent(key: string, visible = false): HTMLElement {
@@ -684,6 +691,10 @@ export class SettingsDialog {
       document.documentElement.setAttribute("data-theme", this.originalTheme);
       appState.set("theme", this.originalTheme);
       this.applyFontSize(this.originalFontSize);
+    }
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
     }
     if (this.overlay) {
       this.overlay.remove();

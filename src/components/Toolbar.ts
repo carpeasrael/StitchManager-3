@@ -109,6 +109,7 @@ export class Toolbar extends Component {
     const btn = document.createElement("button");
     btn.className = `toolbar-btn ${className}`;
     btn.title = label;
+    btn.setAttribute("aria-label", label);
 
     const iconSpan = document.createElement("span");
     iconSpan.className = "toolbar-btn-icon";

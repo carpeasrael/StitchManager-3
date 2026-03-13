@@ -1,5 +1,6 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { ToastContainer } from "./Toast";
 import * as FileService from "../services/FileService";
 import type { SearchParams, Tag } from "../types/index";
 
@@ -62,6 +63,7 @@ export class SearchBar extends Component {
     this.clearBtn.className = "search-bar-clear";
     this.clearBtn.textContent = "\u00D7";
     this.clearBtn.title = "Suche leeren";
+    this.clearBtn.setAttribute("aria-label", "Suche leeren");
     this.clearBtn.addEventListener("click", () => this.clear());
     this.updateClearVisibility();
     wrapper.appendChild(this.clearBtn);
@@ -72,6 +74,7 @@ export class SearchBar extends Component {
     this.filterToggle = document.createElement("button");
     this.filterToggle.className = "search-filter-toggle";
     this.filterToggle.title = "Erweiterte Filter";
+    this.filterToggle.setAttribute("aria-label", "Erweiterte Filter");
     this.filterToggle.innerHTML = `<span class="search-filter-toggle-icon">\u2699</span>`;
     this.filterBadge = document.createElement("span");
     this.filterBadge.className = "search-filter-badge";
@@ -130,8 +133,10 @@ export class SearchBar extends Component {
       // Load all tags for autocomplete
       try {
         this.allTags = await FileService.getAllTags();
-      } catch {
+      } catch (e) {
+        console.warn("Failed to load tags:", e);
         this.allTags = [];
+        ToastContainer.show("error", "Tags konnten nicht geladen werden");
       }
       this.renderPanel();
     } else {
@@ -235,6 +240,7 @@ export class SearchBar extends Component {
       const removeBtn = document.createElement("button");
       removeBtn.className = "search-tag-chip-remove";
       removeBtn.textContent = "\u00D7";
+      removeBtn.setAttribute("aria-label", `Tag ${tag} entfernen`);
       removeBtn.addEventListener("click", () => {
         const updated = { ...appState.get("searchParams") };
         updated.tags = (updated.tags || []).filter(t => t !== tag);

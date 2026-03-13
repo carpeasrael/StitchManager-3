@@ -1,6 +1,7 @@
 import { EventBus } from "../state/EventBus";
 import * as AiService from "../services/AiService";
 import * as FileService from "../services/FileService";
+import { trapFocus } from "../utils/focus-trap";
 import type {
   AiAnalysisResult,
   SelectedFields,
@@ -14,6 +15,7 @@ interface AiColor {
 
 export class AiResultDialog {
   private overlay: HTMLElement | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
   private result: AiAnalysisResult;
   private fileId: number;
   private existingColors: ThreadColor[];
@@ -47,6 +49,9 @@ export class AiResultDialog {
 
     const dialog = document.createElement("div");
     dialog.className = "dialog dialog-ai-result";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "KI-Ergebnis");
 
     // Header
     const header = document.createElement("div");
@@ -56,6 +61,7 @@ export class AiResultDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close";
     closeBtn.textContent = "\u00D7";
+    closeBtn.setAttribute("aria-label", "Schliessen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -189,6 +195,7 @@ export class AiResultDialog {
     dialog.appendChild(footer);
     this.overlay.appendChild(dialog);
     document.body.appendChild(this.overlay);
+    this.releaseFocusTrap = trapFocus(dialog);
   }
 
   private addFieldCheckbox(
@@ -299,6 +306,10 @@ export class AiResultDialog {
   }
 
   private close(): void {
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
+    }
     if (this.overlay) {
       this.overlay.remove();
       this.overlay = null;
