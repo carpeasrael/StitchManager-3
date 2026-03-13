@@ -121,14 +121,27 @@ fn build_prompt_for_file(
         .query_map([file_id], |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Load thread colors for richer context
+    let mut color_stmt = conn.prepare(
+        "SELECT color_hex, color_name, brand FROM file_thread_colors \
+         WHERE file_id = ?1 ORDER BY sort_order",
+    )?;
+    let thread_colors: Vec<(String, Option<String>, Option<String>)> = color_stmt
+        .query_map([file_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
     let mut prompt = String::from(
-        "Analysiere dieses Stickdatei-Vorschaubild und extrahiere Metadaten.\n\n\
+        "Du bist ein Experte fuer Stickdateien und Stickmuster. \
+         Analysiere dieses Stickdatei-Vorschaubild und extrahiere Metadaten, \
+         die direkt zum Ausfuellen der Anwendungsfelder verwendet werden.\n\n\
          Antworte ausschliesslich mit einem JSON-Objekt (ohne Markdown-Code-Block) mit diesen Feldern:\n\
-         - \"name\": Kurzer, beschreibender Name des Designs (deutsch)\n\
+         - \"name\": Kurzer, beschreibender Name des Designs (deutsch, z.B. \"Rote Rose\", \"Schmetterling Blau\")\n\
+         - \"description\": Kurze Beschreibung des Designs (1-2 Saetze, deutsch, beschreibe Motiv und Stil)\n\
+         - \"tags\": Array von maximal 3 relevanten Tags (deutsch, Kleinbuchstaben, z.B. [\"blumen\", \"natur\", \"fruehling\"])\n\
          - \"theme\": Thema/Kategorie (z.B. Blumen, Tiere, Geometrisch, Weihnachten)\n\
-         - \"description\": Kurze Beschreibung des Designs (1-2 Saetze, deutsch)\n\
-         - \"tags\": Array von relevanten Tags (deutsch, Kleinbuchstaben)\n\
-         - \"colors\": Array von Objekten mit {\"hex\": \"#RRGGBB\", \"name\": \"Farbname\"}\n\n",
+         - \"colors\": Array von Objekten mit {\"hex\": \"#RRGGBB\", \"name\": \"Farbname\"}\n\n\
+         WICHTIG: Das Feld \"tags\" darf maximal 3 Eintraege enthalten. \
+         Waehle die 3 relevantesten Tags, die das Design am besten beschreiben.\n\n",
     );
 
     prompt.push_str("Bestehende Metadaten zur Orientierung:\n");
@@ -157,6 +170,22 @@ fn build_prompt_for_file(
     }
     if let Some(cc) = file.color_count {
         prompt.push_str(&format!("- Farbanzahl: {cc}\n"));
+    }
+
+    // Include thread color details for richer context
+    if !thread_colors.is_empty() {
+        prompt.push_str("- Garnfarben:\n");
+        for (hex, name, brand) in &thread_colors {
+            let mut color_desc = format!("  - {hex}");
+            if let Some(n) = name {
+                color_desc.push_str(&format!(" ({n})"));
+            }
+            if let Some(b) = brand {
+                color_desc.push_str(&format!(" [{b}]"));
+            }
+            color_desc.push('\n');
+            prompt.push_str(&color_desc);
+        }
     }
 
     Ok(prompt)

@@ -6,6 +6,8 @@ import * as FileService from "../services/FileService";
 import * as SettingsService from "../services/SettingsService";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { ToastContainer } from "./Toast";
+import { TagInput } from "./TagInput";
+import { ImagePreviewDialog } from "./ImagePreviewDialog";
 import type {
   EmbroideryFile,
   ThreadColor,
@@ -34,6 +36,8 @@ export class MetadataPanel extends Component {
   private saving = false;
   private previewCleanup: (() => void) | null = null;
   private previewGeneration = 0;
+  private tagInput: TagInput | null = null;
+  private currentSegments: StitchSegment[] = [];
 
   constructor(container: HTMLElement) {
     super(container);
@@ -51,6 +55,7 @@ export class MetadataPanel extends Component {
 
   destroy(): void {
     if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
+    if (this.tagInput) { this.tagInput.destroy(); this.tagInput = null; }
     super.destroy();
   }
 
@@ -125,12 +130,7 @@ export class MetadataPanel extends Component {
       return el ? el.value : "";
     };
 
-    const tagChips = this.el.querySelectorAll<HTMLElement>(".tag-chip");
-    const tags: string[] = [];
-    tagChips.forEach((chip) => {
-      const name = chip.dataset.tag;
-      if (name) tags.push(name);
-    });
+    const tags: string[] = this.tagInput ? this.tagInput.getTags() : [];
 
     return {
       name: getValue("name"),
@@ -143,6 +143,8 @@ export class MetadataPanel extends Component {
 
   render(): void {
     if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
+    if (this.tagInput) { this.tagInput.destroy(); this.tagInput = null; }
+    this.currentSegments = [];
     this.el.innerHTML = "";
     const empty = document.createElement("div");
     empty.className = "metadata-empty";
@@ -160,6 +162,7 @@ export class MetadataPanel extends Component {
     tags: Tag[]
   ): void {
     if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
+    if (this.tagInput) { this.tagInput.destroy(); this.tagInput = null; }
     this.el.innerHTML = "";
 
     const wrapper = document.createElement("div");
@@ -203,10 +206,24 @@ export class MetadataPanel extends Component {
     controls.appendChild(zoomLabel);
     previewContainer.appendChild(controls);
 
+    // Click on preview to open full-screen image dialog
+    const expandBtn = document.createElement("button");
+    expandBtn.className = "stitch-preview-btn stitch-preview-expand";
+    expandBtn.textContent = "\u2922";
+    expandBtn.title = "Vollbild";
+    expandBtn.setAttribute("aria-label", "Vollbild");
+    expandBtn.addEventListener("click", () => {
+      if (this.currentSegments.length > 0) {
+        ImagePreviewDialog.open(this.currentSegments);
+      }
+    });
+    controls.appendChild(expandBtn);
+
     previewSection.appendChild(previewContainer);
     wrapper.appendChild(previewSection);
 
     // Load stitch segments and render on canvas
+    this.currentSegments = [];
     const previewFileId = file.id;
     if (file.filepath) {
       this.loadStitchPreview(canvas, file.filepath, previewFileId, zoomLabel, {
@@ -283,7 +300,14 @@ export class MetadataPanel extends Component {
     tagHeader.textContent = "Tags";
     tagSection.appendChild(tagHeader);
 
-    this.renderTagEditor(tagSection, tags);
+    const tagContainer = document.createElement("div");
+    tagSection.appendChild(tagContainer);
+    this.tagInput = new TagInput(tagContainer, {
+      allTags: this.allTags.map((t) => t.name),
+      selectedTags: tags.map((t) => t.name),
+      placeholder: "Tag hinzufügen...",
+      onChange: () => this.checkDirty(),
+    });
     wrapper.appendChild(tagSection);
 
     // Custom fields section
@@ -501,127 +525,6 @@ export class MetadataPanel extends Component {
     container.appendChild(group);
   }
 
-  private renderTagEditor(container: HTMLElement, tags: Tag[]): void {
-    const tagEditor = document.createElement("div");
-    tagEditor.className = "tag-editor";
-
-    const chipContainer = document.createElement("div");
-    chipContainer.className = "tag-chip-container";
-
-    for (const tag of tags) {
-      this.addTagChip(chipContainer, tag.name);
-    }
-
-    tagEditor.appendChild(chipContainer);
-
-    // Tag input with autocomplete
-    const inputWrapper = document.createElement("div");
-    inputWrapper.className = "tag-input-wrapper";
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "tag-input";
-    input.placeholder = "Tag hinzufügen...";
-
-    const suggestions = document.createElement("div");
-    suggestions.className = "tag-suggestions";
-    suggestions.style.display = "none";
-
-    input.addEventListener("input", () => {
-      const val = input.value.trim().toLowerCase();
-      if (val.length === 0) {
-        suggestions.style.display = "none";
-        return;
-      }
-
-      const currentTags = new Set(
-        Array.from(
-          chipContainer.querySelectorAll<HTMLElement>(".tag-chip")
-        ).map((c) => c.dataset.tag || "")
-      );
-
-      const matches = this.allTags.filter(
-        (t) =>
-          t.name.toLowerCase().includes(val) && !currentTags.has(t.name)
-      );
-
-      if (matches.length === 0) {
-        suggestions.style.display = "none";
-        return;
-      }
-
-      suggestions.innerHTML = "";
-      for (const match of matches.slice(0, 8)) {
-        const item = document.createElement("div");
-        item.className = "tag-suggestion-item";
-        item.textContent = match.name;
-        item.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          this.addTagChip(chipContainer, match.name);
-          input.value = "";
-          suggestions.style.display = "none";
-          this.checkDirty();
-        });
-        suggestions.appendChild(item);
-      }
-      suggestions.style.display = "block";
-    });
-
-    input.addEventListener("blur", () => {
-      setTimeout(() => {
-        suggestions.style.display = "none";
-      }, 150);
-    });
-
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === ",") {
-        e.preventDefault();
-        const val = input.value.trim().replace(/,$/g, "");
-        if (val) {
-          const currentTags = new Set(
-            Array.from(
-              chipContainer.querySelectorAll<HTMLElement>(".tag-chip")
-            ).map((c) => c.dataset.tag || "")
-          );
-          if (!currentTags.has(val)) {
-            this.addTagChip(chipContainer, val);
-            this.checkDirty();
-          }
-          input.value = "";
-          suggestions.style.display = "none";
-        }
-      }
-    });
-
-    inputWrapper.appendChild(input);
-    inputWrapper.appendChild(suggestions);
-    tagEditor.appendChild(inputWrapper);
-
-    container.appendChild(tagEditor);
-  }
-
-  private addTagChip(container: HTMLElement, tagName: string): void {
-    const chip = document.createElement("span");
-    chip.className = "tag-chip";
-    chip.dataset.tag = tagName;
-
-    const text = document.createElement("span");
-    text.textContent = tagName;
-    chip.appendChild(text);
-
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "tag-chip-remove";
-    removeBtn.textContent = "\u00D7";
-    removeBtn.setAttribute("aria-label", `Tag ${tagName} entfernen`);
-    removeBtn.addEventListener("click", () => {
-      chip.remove();
-      this.checkDirty();
-    });
-    chip.appendChild(removeBtn);
-
-    container.appendChild(chip);
-  }
-
   private async save(): Promise<void> {
     if (!this.currentFile || !this.dirty || this.saving) return;
 
@@ -776,6 +679,8 @@ export class MetadataPanel extends Component {
       return;
     }
     if (gen !== this.previewGeneration || this.currentFile?.id !== fileId || segments.length === 0) return;
+
+    this.currentSegments = segments;
 
     // Compute bounding box
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;

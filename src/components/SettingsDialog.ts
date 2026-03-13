@@ -11,6 +11,7 @@ export class SettingsDialog {
   private static instance: SettingsDialog | null = null;
   private overlay: HTMLElement | null = null;
   private releaseFocusTrap: (() => void) | null = null;
+  private resizeObserver: ResizeObserver | null = null;
   private originalTheme: ThemeMode = "hell";
   private originalFontSize: string = "medium";
   private originalLibraryRoot: string = "";
@@ -177,6 +178,15 @@ export class SettingsDialog {
     this.overlay.appendChild(dialog);
     document.body.appendChild(this.overlay);
     this.releaseFocusTrap = trapFocus(dialog);
+
+    // Responsive layout: toggle narrow mode based on dialog width
+    this.resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        dialog.classList.toggle("dialog-settings--narrow", width < 440);
+      }
+    });
+    this.resizeObserver.observe(dialog);
   }
 
   private createTabContent(key: string, visible = false): HTMLElement {
@@ -691,6 +701,10 @@ export class SettingsDialog {
       document.documentElement.setAttribute("data-theme", this.originalTheme);
       appState.set("theme", this.originalTheme);
       this.applyFontSize(this.originalFontSize);
+    }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
     }
     if (this.releaseFocusTrap) {
       this.releaseFocusTrap();

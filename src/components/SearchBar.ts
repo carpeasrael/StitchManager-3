@@ -1,6 +1,7 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { ToastContainer } from "./Toast";
+import { TagInput } from "./TagInput";
 import * as FileService from "../services/FileService";
 import type { SearchParams, Tag } from "../types/index";
 
@@ -28,6 +29,7 @@ export class SearchBar extends Component {
   private panelOpen = false;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private allTags: Tag[] = [];
+  private _panelTagInput: TagInput | null = null;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -146,6 +148,10 @@ export class SearchBar extends Component {
 
   private closePanel(): void {
     this.panelOpen = false;
+    if (this._panelTagInput) {
+      this._panelTagInput.destroy();
+      this._panelTagInput = null;
+    }
     if (this.panelEl) {
       this.panelEl.remove();
       this.panelEl = null;
@@ -153,6 +159,10 @@ export class SearchBar extends Component {
   }
 
   private renderPanel(): void {
+    if (this._panelTagInput) {
+      this._panelTagInput.destroy();
+      this._panelTagInput = null;
+    }
     if (this.panelEl) {
       this.panelEl.remove();
     }
@@ -229,97 +239,31 @@ export class SearchBar extends Component {
     label.textContent = "Tags";
     group.appendChild(label);
 
-    const chipContainer = document.createElement("div");
-    chipContainer.className = "search-tag-chips";
+    const tagContainer = document.createElement("div");
+    group.appendChild(tagContainer);
 
-    const currentTags = sp.tags || [];
-    for (const tag of currentTags) {
-      const chip = document.createElement("span");
-      chip.className = "search-tag-chip";
-      chip.textContent = tag;
-      const removeBtn = document.createElement("button");
-      removeBtn.className = "search-tag-chip-remove";
-      removeBtn.textContent = "\u00D7";
-      removeBtn.setAttribute("aria-label", `Tag ${tag} entfernen`);
-      removeBtn.addEventListener("click", () => {
+    const tagInput = new TagInput(tagContainer, {
+      allTags: this.allTags.map((t) => t.name),
+      selectedTags: sp.tags || [],
+      placeholder: "Tag hinzufügen\u2026",
+      onChange: (tags) => {
         const updated = { ...appState.get("searchParams") };
-        updated.tags = (updated.tags || []).filter(t => t !== tag);
-        if (updated.tags.length === 0) delete updated.tags;
-        appState.set("searchParams", updated);
-        this.renderPanel();
-      });
-      chip.appendChild(removeBtn);
-      chipContainer.appendChild(chip);
-    }
-    group.appendChild(chipContainer);
-
-    const inputWrapper = document.createElement("div");
-    inputWrapper.className = "search-tag-input-wrapper";
-    const tagInput = document.createElement("input");
-    tagInput.type = "text";
-    tagInput.className = "search-tag-input";
-    tagInput.placeholder = "Tag hinzuf\u00FCgen\u2026";
-    inputWrapper.appendChild(tagInput);
-
-    const suggestions = document.createElement("div");
-    suggestions.className = "search-tag-suggestions";
-    suggestions.style.display = "none";
-    inputWrapper.appendChild(suggestions);
-
-    tagInput.addEventListener("input", () => {
-      const val = tagInput.value.trim().toLowerCase();
-      if (!val) {
-        suggestions.style.display = "none";
-        return;
-      }
-      const existing = sp.tags || [];
-      const matches = this.allTags
-        .filter(t => t.name.toLowerCase().includes(val) && !existing.includes(t.name))
-        .slice(0, 8);
-      if (matches.length === 0) {
-        suggestions.style.display = "none";
-        return;
-      }
-      suggestions.innerHTML = "";
-      for (const m of matches) {
-        const item = document.createElement("div");
-        item.className = "search-tag-suggestion-item";
-        item.textContent = m.name;
-        item.addEventListener("click", () => {
-          this.addTag(m.name);
-          tagInput.value = "";
-          suggestions.style.display = "none";
-        });
-        suggestions.appendChild(item);
-      }
-      suggestions.style.display = "";
-    });
-
-    tagInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const val = tagInput.value.trim();
-        if (val) {
-          this.addTag(val);
-          tagInput.value = "";
-          suggestions.style.display = "none";
+        if (tags.length > 0) {
+          updated.tags = tags;
+        } else {
+          delete updated.tags;
         }
-      }
+        appState.set("searchParams", updated);
+        this.updateBadge();
+      },
     });
 
-    group.appendChild(inputWrapper);
-    return group;
-  }
-
-  private addTag(name: string): void {
-    const updated = { ...appState.get("searchParams") };
-    const tags = [...(updated.tags || [])];
-    if (!tags.includes(name)) {
-      tags.push(name);
+    // Store reference for cleanup
+    if (!this._panelTagInput) {
+      this._panelTagInput = tagInput;
     }
-    updated.tags = tags;
-    appState.set("searchParams", updated);
-    this.renderPanel();
+
+    return group;
   }
 
   private buildRangeRow(
