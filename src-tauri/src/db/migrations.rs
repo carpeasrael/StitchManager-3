@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 4;
+const CURRENT_VERSION: i32 = 5;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -59,6 +59,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 4 {
         apply_v4(conn)?;
+    }
+
+    if current < 5 {
+        apply_v5(conn)?;
     }
 
     Ok(())
@@ -272,6 +276,80 @@ fn apply_v4(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v5(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE embroidery_files ADD COLUMN unique_id TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_embroidery_files_unique_id ON embroidery_files(unique_id);
+
+        CREATE TABLE IF NOT EXISTS file_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL,
+            filename TEXT NOT NULL,
+            mime_type TEXT,
+            file_path TEXT NOT NULL,
+            attachment_type TEXT DEFAULT 'license',
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (file_id) REFERENCES embroidery_files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_attachments_file_id ON file_attachments(file_id);
+
+        INSERT INTO schema_version (version, description) VALUES (5, 'Add unique_id column and file_attachments table');
+
+        COMMIT;"
+    )?;
+
+    // Backfill unique IDs for existing records
+    backfill_unique_ids(conn)?;
+
+    Ok(())
+}
+
+/// Generate unique IDs for all existing records that don't have one.
+fn backfill_unique_ids(conn: &Connection) -> Result<(), AppError> {
+    let mut stmt = conn.prepare("SELECT id FROM embroidery_files WHERE unique_id IS NULL")?;
+    let ids: Vec<i64> = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    for id in ids {
+        let uid = generate_unique_id();
+        conn.execute(
+            "UPDATE embroidery_files SET unique_id = ?1 WHERE id = ?2",
+            rusqlite::params![uid, id],
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Generate a unique ID in the format SM-XXXXXXXX (8 alphanumeric chars).
+pub fn generate_unique_id() -> String {
+    let id = uuid::Uuid::new_v4();
+    let bytes = id.as_bytes();
+    // Take first 5 bytes → 8 base32 characters (without padding)
+    let encoded = base32_encode(&bytes[..5]);
+    format!("SM-{encoded}")
+}
+
+/// Simple base32 encoding (RFC 4648 without padding) for 5 bytes → 8 chars.
+fn base32_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut result = String::with_capacity(8);
+    let mut buffer: u64 = 0;
+    for &b in data {
+        buffer = (buffer << 8) | b as u64;
+    }
+    // 5 bytes = 40 bits → 8 × 5-bit groups
+    for i in (0..8).rev() {
+        let idx = ((buffer >> (i * 5)) & 0x1F) as usize;
+        result.push(ALPHABET[idx] as char);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +371,7 @@ mod tests {
             "custom_field_definitions",
             "custom_field_values",
             "embroidery_files",
+            "file_attachments",
             "file_formats",
             "file_tags",
             "file_thread_colors",
@@ -302,7 +381,7 @@ mod tests {
             "tags",
         ];
 
-        assert_eq!(tables, expected, "All 11 tables must exist");
+        assert_eq!(tables, expected, "All 12 tables must exist");
     }
 
     #[test]
@@ -316,7 +395,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4, "Schema version must be 4");
+        assert_eq!(version, 5, "Schema version must be 5");
     }
 
     #[test]
@@ -339,22 +418,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_four() {
+    fn test_schema_version_is_five() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 4",
+                "SELECT description FROM schema_version WHERE version = 5",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add indexes for color search and AI status queries");
+        assert_eq!(desc, "Add unique_id column and file_attachments table");
     }
 
     #[test]

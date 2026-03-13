@@ -326,6 +326,22 @@ function initEventHandlers(): () => void {
       await reloadFiles();
     }),
 
+    EventBus.on("toolbar:pdf-export", async () => {
+      const multiIds = appState.get("selectedFileIds");
+      const singleId = appState.get("selectedFileId");
+      const fileIds = multiIds.length > 0 ? multiIds : singleId !== null ? [singleId] : [];
+      if (fileIds.length === 0) return;
+
+      try {
+        const pdfPath = await FileService.generatePdfReport(fileIds);
+        ToastContainer.show("success", `PDF erstellt: ${pdfPath.split("/").pop()}`);
+        await revealItemInDir(pdfPath);
+      } catch (e) {
+        console.warn("PDF export failed:", e);
+        ToastContainer.show("error", "PDF-Export fehlgeschlagen");
+      }
+    }),
+
     EventBus.on("file:updated", async () => {
       await reloadFiles();
       EventBus.emit("file:refresh");

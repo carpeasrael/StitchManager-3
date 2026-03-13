@@ -146,6 +146,7 @@ export class FileList extends Component {
     }
 
     // Add cards that entered the visible range
+    const newFileIds: number[] = [];
     for (let i = this.visibleStart; i < this.visibleEnd; i++) {
       if (this.renderedCards.has(i)) continue;
       const file = files[i];
@@ -154,7 +155,43 @@ export class FileList extends Component {
       const card = this.createCard(file, i, selectedId, selectedIds);
       this.listEl.appendChild(card);
       this.renderedCards.set(i, card);
+      newFileIds.push(file.id);
     }
+
+    // Batch-load attachment counts for newly rendered cards
+    if (newFileIds.length > 0) {
+      FileService.getAttachmentCounts(newFileIds).then((counts) => {
+        for (const [fileIdStr, count] of Object.entries(counts)) {
+          if (count > 0) {
+            const fileId = Number(fileIdStr);
+            for (const [, card] of this.renderedCards) {
+              const nameEl = card.querySelector(".file-card-name");
+              if (nameEl && card.isConnected && !card.querySelector(".file-card-attachment")) {
+                const cardFileId = this.getCardFileId(card);
+                if (cardFileId === fileId) {
+                  const clip = document.createElement("span");
+                  clip.className = "file-card-attachment";
+                  clip.textContent = "\uD83D\uDCCE";
+                  clip.title = `${count} Anhang/Anh\u00E4nge`;
+                  nameEl.appendChild(clip);
+                }
+              }
+            }
+          }
+        }
+      }).catch(() => { /* ignore */ });
+    }
+  }
+
+  private getCardFileId(card: HTMLElement): number | null {
+    const files = appState.get("files");
+    for (const [index, c] of this.renderedCards) {
+      if (c === card) {
+        const file = files[index];
+        return file ? file.id : null;
+      }
+    }
+    return null;
   }
 
   private createCard(

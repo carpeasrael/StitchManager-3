@@ -548,6 +548,81 @@ pub async fn batch_export_usb(
     Ok(BatchResult { total, success, failed, errors })
 }
 
+/// Generate a PDF report for the given file IDs.
+/// Returns the file path where the PDF was saved.
+#[tauri::command]
+pub async fn generate_pdf_report(
+    db: State<'_, DbState>,
+    file_ids: Vec<i64>,
+) -> Result<String, AppError> {
+    use crate::db::models::FileThreadColor;
+
+    // Load all file and color data from DB, then drop the lock before CPU-bound QR generation
+    let mut db_data: Vec<(EmbroideryFile, Vec<FileThreadColor>)> = Vec::new();
+
+    {
+        let conn = lock_db(&db)?;
+
+        for file_id in &file_ids {
+            let file = match conn.query_row(
+                &format!("{FILE_SELECT} WHERE id = ?1"),
+                [file_id],
+                |row| row_to_file(row),
+            ) {
+                Ok(f) => f,
+                Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                Err(e) => return Err(AppError::Database(e)),
+            };
+
+            // Load thread colors
+            let mut stmt = conn.prepare(
+                "SELECT id, file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai \
+                 FROM file_thread_colors WHERE file_id = ?1 ORDER BY sort_order",
+            )?;
+            let colors: Vec<FileThreadColor> = stmt
+                .query_map([file_id], |row| {
+                    Ok(FileThreadColor {
+                        id: row.get(0)?,
+                        file_id: row.get(1)?,
+                        sort_order: row.get(2)?,
+                        color_hex: row.get(3)?,
+                        color_name: row.get(4)?,
+                        brand: row.get(5)?,
+                        brand_code: row.get(6)?,
+                        is_ai: row.get(7)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            db_data.push((file, colors));
+        }
+    } // DB lock dropped here
+
+    // Generate QR codes outside the DB lock (CPU-bound)
+    let mut report_data = Vec::new();
+    for (file, colors) in db_data {
+        let qr_png = if let Some(ref uid) = file.unique_id {
+            match crate::commands::files::generate_qr_code(uid.clone()) {
+                Ok(data) => Some(data),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        report_data.push((file, colors, qr_png));
+    }
+
+    let pdf_bytes = crate::services::pdf_report::generate_report(&report_data)?;
+
+    // Save to temp directory
+    let temp_dir = std::env::temp_dir();
+    let filename = format!("stichman_report_{}.pdf", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+    let path = temp_dir.join(&filename);
+    std::fs::write(&path, &pdf_bytes)?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,6 +654,7 @@ mod tests {
             author: None,
             keywords: None,
             comments: None,
+            unique_id: None,
             ai_analyzed: false,
             ai_confirmed: false,
             created_at: String::new(),
@@ -625,6 +701,7 @@ mod tests {
             author: None,
             keywords: None,
             comments: None,
+            unique_id: None,
             ai_analyzed: false,
             ai_confirmed: false,
             created_at: String::new(),
@@ -663,6 +740,7 @@ mod tests {
             author: None,
             keywords: None,
             comments: None,
+            unique_id: None,
             ai_analyzed: false,
             ai_confirmed: false,
             created_at: String::new(),
@@ -701,6 +779,7 @@ mod tests {
             author: None,
             keywords: None,
             comments: None,
+            unique_id: None,
             ai_analyzed: false,
             ai_confirmed: false,
             created_at: String::new(),

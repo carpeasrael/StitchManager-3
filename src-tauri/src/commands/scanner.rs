@@ -5,6 +5,7 @@ use walkdir::WalkDir;
 
 use crate::{DbState, ThumbnailState};
 use crate::db::models::EmbroideryFile;
+use crate::db::migrations::generate_unique_id;
 use crate::db::queries::{FILE_SELECT, row_to_file};
 use crate::error::{lock_db, AppError};
 use crate::parsers::{self, ParsedFileInfo, StitchSegment};
@@ -229,10 +230,11 @@ pub fn import_files(
         let tx = conn.unchecked_transaction()?;
 
         for info in &file_info {
+            let uid = generate_unique_id();
             let result = tx.execute(
-                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size],
+                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
             );
 
             match result {
@@ -443,10 +445,11 @@ pub fn mass_import(
             let current = (idx + 1) as u32;
             let status: String;
 
+            let uid = generate_unique_id();
             let result = tx.execute(
-                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size],
+                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
             );
 
             match result {
@@ -632,10 +635,11 @@ pub fn watcher_auto_import(
                 None => continue, // No matching folder, skip
             };
 
+            let uid = generate_unique_id();
             let result = tx.execute(
-                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size],
+                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
             );
 
             if let Ok(changes) = result {

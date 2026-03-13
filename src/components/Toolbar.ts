@@ -88,6 +88,12 @@ export class Toolbar extends Component {
       )
     );
 
+    actions.appendChild(
+      this.createButton("toolbar-btn-pdf", "\uD83D\uDCC4", "PDF Export", () =>
+        EventBus.emit("toolbar:pdf-export")
+      )
+    );
+
     const settingsBtn = this.createButton(
       "toolbar-btn-settings",
       "\u2699",
@@ -147,6 +153,12 @@ export class Toolbar extends Component {
     const exportBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-batch-export");
     if (exportBtn) {
       exportBtn.style.display = hasFile || hasMulti ? "" : "none";
+    }
+
+    // PDF export: visible when any file is selected
+    const pdfBtn = this.el.querySelector<HTMLButtonElement>(".toolbar-btn-pdf");
+    if (pdfBtn) {
+      pdfBtn.style.display = hasFile || hasMulti ? "" : "none";
     }
 
     // Other batch buttons: visible only when multiple files selected

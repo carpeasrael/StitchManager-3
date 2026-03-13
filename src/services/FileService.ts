@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   EmbroideryFile,
+  FileAttachment,
   FileFormat,
   FileUpdate,
   ThreadColor,
@@ -69,4 +70,52 @@ export async function getStitchSegments(
   filepath: string
 ): Promise<StitchSegment[]> {
   return invoke<StitchSegment[]>("get_stitch_segments", { filepath });
+}
+
+export async function getAttachments(
+  fileId: number
+): Promise<FileAttachment[]> {
+  return invoke<FileAttachment[]>("get_attachments", { fileId });
+}
+
+export async function attachFile(
+  fileId: number,
+  sourcePath: string,
+  attachmentType: string
+): Promise<FileAttachment> {
+  return invoke<FileAttachment>("attach_file", {
+    fileId,
+    sourcePath,
+    attachmentType,
+  });
+}
+
+export async function deleteAttachment(
+  attachmentId: number
+): Promise<void> {
+  return invoke<void>("delete_attachment", { attachmentId });
+}
+
+export async function openAttachment(
+  attachmentId: number
+): Promise<void> {
+  return invoke<void>("open_attachment", { attachmentId });
+}
+
+export async function getAttachmentCount(
+  fileId: number
+): Promise<number> {
+  return invoke<number>("get_attachment_count", { fileId });
+}
+
+export async function getAttachmentCounts(
+  fileIds: number[]
+): Promise<Record<number, number>> {
+  return invoke<Record<number, number>>("get_attachment_counts", { fileIds });
+}
+
+export async function generatePdfReport(
+  fileIds: number[]
+): Promise<string> {
+  return invoke<string>("generate_pdf_report", { fileIds });
 }

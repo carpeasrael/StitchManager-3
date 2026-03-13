@@ -8,8 +8,10 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { ToastContainer } from "./Toast";
 import { TagInput } from "./TagInput";
 import { ImagePreviewDialog } from "./ImagePreviewDialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   EmbroideryFile,
+  FileAttachment,
   ThreadColor,
   FileFormat,
   Tag,
@@ -72,13 +74,14 @@ export class MetadataPanel extends Component {
     }
 
     try {
-      const [file, formats, colors, tags, allTags, customFields] = await Promise.all([
+      const [file, formats, colors, tags, allTags, customFields, attachments] = await Promise.all([
         FileService.getFile(fileId),
         FileService.getFormats(fileId),
         FileService.getColors(fileId),
         FileService.getTags(fileId),
         FileService.getAllTags(),
         SettingsService.getCustomFields(),
+        FileService.getAttachments(fileId),
       ]);
       this.currentFile = file;
       this.currentTags = tags;
@@ -86,7 +89,7 @@ export class MetadataPanel extends Component {
       this.customFields = customFields;
       this.snapshot = this.takeSnapshot(file, tags);
       this.dirty = false;
-      this.renderFileInfo(file, formats, colors, tags);
+      this.renderFileInfo(file, formats, colors, tags, attachments);
     } catch (e) {
       console.warn("Failed to load file details:", e);
       this.renderError();
@@ -159,7 +162,8 @@ export class MetadataPanel extends Component {
     file: EmbroideryFile,
     formats: FileFormat[],
     colors: ThreadColor[],
-    tags: Tag[]
+    tags: Tag[],
+    attachments: FileAttachment[] = []
   ): void {
     if (this.previewCleanup) { this.previewCleanup(); this.previewCleanup = null; }
     if (this.tagInput) { this.tagInput.destroy(); this.tagInput = null; }
@@ -343,6 +347,9 @@ export class MetadataPanel extends Component {
     const infoGrid = document.createElement("div");
     infoGrid.className = "metadata-info-grid";
 
+    if (file.uniqueId) {
+      this.addCopyableInfoRow(infoGrid, "ID", file.uniqueId);
+    }
     this.addInfoRow(infoGrid, "Dateiname", file.filename);
     if (file.filepath) {
       this.addClickableInfoRow(infoGrid, "Speicherort", file.filepath);
@@ -472,6 +479,70 @@ export class MetadataPanel extends Component {
     }
 
     wrapper.appendChild(colorSection);
+
+    // Attachments section
+    const attachSection = document.createElement("div");
+    attachSection.className = "metadata-section";
+
+    const attachHeader = document.createElement("div");
+    attachHeader.className = "metadata-section-header";
+    attachHeader.textContent = "Anh\u00E4nge";
+    attachSection.appendChild(attachHeader);
+
+    const attachList = document.createElement("div");
+    attachList.className = "metadata-attachments";
+
+    for (const att of attachments) {
+      const item = document.createElement("div");
+      item.className = "metadata-attachment-item";
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "metadata-attachment-name";
+      nameEl.textContent = att.filename;
+      nameEl.title = "Klicken zum \u00D6ffnen";
+      nameEl.addEventListener("click", () => {
+        FileService.openAttachment(att.id).catch((e) => {
+          console.warn("Failed to open attachment:", e);
+          ToastContainer.show("error", "Anhang konnte nicht ge\u00F6ffnet werden");
+        });
+      });
+      item.appendChild(nameEl);
+
+      const typeEl = document.createElement("span");
+      typeEl.className = "metadata-attachment-type";
+      typeEl.textContent = att.attachmentType;
+      item.appendChild(typeEl);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "metadata-attachment-delete";
+      delBtn.textContent = "\u00D7";
+      delBtn.title = "Anhang entfernen";
+      delBtn.setAttribute("aria-label", `Anhang ${att.filename} entfernen`);
+      delBtn.addEventListener("click", async () => {
+        try {
+          await FileService.deleteAttachment(att.id);
+          item.remove();
+          ToastContainer.show("success", "Anhang entfernt");
+          EventBus.emit("file:refresh");
+        } catch (e) {
+          console.warn("Failed to delete attachment:", e);
+          ToastContainer.show("error", "Anhang konnte nicht entfernt werden");
+        }
+      });
+      item.appendChild(delBtn);
+
+      attachList.appendChild(item);
+    }
+
+    attachSection.appendChild(attachList);
+
+    const addAttachBtn = document.createElement("button");
+    addAttachBtn.className = "metadata-action-btn";
+    addAttachBtn.textContent = "\uD83D\uDCCE Anhang hinzuf\u00FCgen";
+    addAttachBtn.addEventListener("click", () => this.addAttachment());
+    attachSection.appendChild(addAttachBtn);
+
+    wrapper.appendChild(attachSection);
 
     // Save button
     const saveBar = document.createElement("div");
@@ -874,6 +945,66 @@ export class MetadataPanel extends Component {
     row.appendChild(valueEl);
 
     grid.appendChild(row);
+  }
+
+  private addCopyableInfoRow(grid: HTMLElement, label: string, value: string): void {
+    const row = document.createElement("div");
+    row.className = "metadata-info-row";
+
+    const labelEl = document.createElement("span");
+    labelEl.className = "metadata-info-label";
+    labelEl.textContent = label;
+    row.appendChild(labelEl);
+
+    const valueWrapper = document.createElement("span");
+    valueWrapper.className = "metadata-info-value metadata-info-copyable";
+
+    const valueEl = document.createElement("span");
+    valueEl.textContent = value;
+    valueWrapper.appendChild(valueEl);
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "metadata-copy-btn";
+    copyBtn.textContent = "\uD83D\uDCCB";
+    copyBtn.title = "Kopieren";
+    copyBtn.setAttribute("aria-label", `${label} kopieren`);
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(value);
+        ToastContainer.show("success", "ID kopiert");
+      } catch {
+        ToastContainer.show("error", "Kopieren fehlgeschlagen");
+      }
+    });
+    valueWrapper.appendChild(copyBtn);
+
+    row.appendChild(valueWrapper);
+    grid.appendChild(row);
+  }
+
+  private async addAttachment(): Promise<void> {
+    if (!this.currentFile) return;
+    const fileId = this.currentFile.id;
+
+    try {
+      const selected = await open({
+        multiple: false,
+        title: "Anhang ausw\u00E4hlen",
+      });
+      if (!selected) return;
+
+      const path = typeof selected === "string" ? selected : String(selected);
+      if (!path) return;
+
+      await FileService.attachFile(fileId, path, "license");
+      ToastContainer.show("success", "Anhang hinzugef\u00FCgt");
+
+      // Refresh the panel to show the new attachment
+      EventBus.emit("file:refresh");
+    } catch (e) {
+      console.warn("Failed to attach file:", e);
+      ToastContainer.show("error", "Anhang konnte nicht hinzugef\u00FCgt werden");
+    }
   }
 
   private addClickableInfoRow(grid: HTMLElement, label: string, filepath: string): void {

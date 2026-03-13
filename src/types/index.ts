@@ -32,6 +32,7 @@ export interface EmbroideryFile {
   author: string | null;
   keywords: string | null;
   comments: string | null;
+  uniqueId: string | null;
   aiAnalyzed: boolean;
   aiConfirmed: boolean;
   createdAt: string;
@@ -92,6 +93,16 @@ export interface StitchSegment {
   colorIndex: number;
   colorHex: string | null;
   points: [number, number][];
+}
+
+export interface FileAttachment {
+  id: number;
+  fileId: number;
+  filename: string;
+  mimeType: string | null;
+  filePath: string;
+  attachmentType: string;
+  createdAt: string;
 }
 
 export interface CustomFieldDef {

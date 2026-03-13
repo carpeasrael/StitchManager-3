@@ -51,6 +51,7 @@ pub struct EmbroideryFile {
     pub author: Option<String>,
     pub keywords: Option<String>,
     pub comments: Option<String>,
+    pub unique_id: Option<String>,
     pub ai_analyzed: bool,
     pub ai_confirmed: bool,
     pub created_at: String,
@@ -141,6 +142,18 @@ pub struct CustomFieldValue {
     pub file_id: i64,
     pub field_id: i64,
     pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileAttachment {
+    pub id: i64,
+    pub file_id: i64,
+    pub filename: String,
+    pub mime_type: Option<String>,
+    pub file_path: String,
+    pub attachment_type: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::{DbState, ThumbnailState};
 use crate::error::{lock_db, AppError};
 
+use crate::db::migrations::generate_unique_id;
 use super::scanner::{ImportProgressPayload, PreParsedFile, pre_parse_file, persist_parsed_metadata};
 
 /// Result returned by the migration command.
@@ -321,10 +322,11 @@ pub fn migrate_from_2stitch(
 
             let status: String;
 
+            let uid = generate_unique_id();
             let result = tx.execute(
-                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![folder_id, info.pre.filename, info.ts_file.filepath, info.pre.file_size],
+                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![folder_id, info.pre.filename, info.ts_file.filepath, info.pre.file_size, uid],
             );
 
             match result {

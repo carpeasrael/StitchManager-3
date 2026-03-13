@@ -37,6 +37,8 @@ byteorder = "1"
 log = "0.4"
 tauri-plugin-opener = "2.5.3"
 roxmltree = "0.20"
+qrcode = "0.14"
+printpdf = "0.7"
 
 [dev-dependencies]
 tempfile = "3"

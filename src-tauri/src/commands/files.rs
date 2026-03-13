@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::{DbState, ThumbnailState};
-use crate::db::models::{EmbroideryFile, FileFormat, FileThreadColor, FileUpdate, SearchParams, Tag};
+use crate::db::models::{EmbroideryFile, FileAttachment, FileFormat, FileThreadColor, FileUpdate, SearchParams, Tag};
 use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, row_to_file};
 use crate::error::{lock_db, AppError};
 
@@ -43,7 +43,7 @@ pub(crate) fn query_files_impl(
             let text_fields = [
                 "e.name", "e.filename", "e.theme", "e.description",
                 "e.design_name", "e.category", "e.author", "e.keywords",
-                "e.comments", "e.license",
+                "e.comments", "e.license", "e.unique_id",
             ];
             let clauses: Vec<String> = text_fields
                 .iter()
@@ -592,6 +592,292 @@ pub fn get_thumbnail(
             Ok(String::new())
         }
     }
+}
+
+/// Generate a QR code PNG for the given unique ID string.
+#[tauri::command]
+pub fn generate_qr_code(unique_id: String) -> Result<Vec<u8>, AppError> {
+    use qrcode::QrCode;
+    use image::Luma;
+
+    let code = QrCode::new(unique_id.as_bytes()).map_err(|e| {
+        AppError::Internal(format!("QR-Code Fehler: {e}"))
+    })?;
+
+    let img = code.render::<Luma<u8>>().quiet_zone(false).module_dimensions(4, 4).build();
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| {
+        AppError::Internal(format!("PNG-Encoding Fehler: {e}"))
+    })?;
+
+    Ok(buf.into_inner())
+}
+
+/// Attach a file to an embroidery file entry.
+#[tauri::command]
+pub fn attach_file(
+    db: State<'_, DbState>,
+    file_id: i64,
+    source_path: String,
+    attachment_type: String,
+) -> Result<FileAttachment, AppError> {
+    // Reject path traversal
+    if source_path.contains("..") {
+        return Err(AppError::Validation("Path traversal not allowed".to_string()));
+    }
+
+    let src = std::path::Path::new(&source_path);
+    if !src.exists() {
+        return Err(AppError::NotFound(format!("Datei nicht gefunden: {source_path}")));
+    }
+
+    let filename = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("attachment")
+        .to_string();
+
+    let mime_type = match src.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref() {
+        Some("pdf") => Some("application/pdf".to_string()),
+        Some("png") => Some("image/png".to_string()),
+        Some("jpg" | "jpeg") => Some("image/jpeg".to_string()),
+        Some("txt") => Some("text/plain".to_string()),
+        _ => None,
+    };
+
+    // Determine attachment storage directory
+    let conn = lock_db(&db)?;
+
+    let library_root: String = conn
+        .query_row("SELECT value FROM settings WHERE key = 'library_root'", [], |row| row.get(0))
+        .unwrap_or_else(|_| "~/Stickdateien".to_string());
+
+    let base_dir = if library_root.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(&library_root[2..])
+        } else {
+            std::path::PathBuf::from(&library_root)
+        }
+    } else {
+        std::path::PathBuf::from(&library_root)
+    };
+
+    let attach_dir = base_dir.join(".stichman").join("attachments").join(file_id.to_string());
+    std::fs::create_dir_all(&attach_dir)?;
+
+    // Deduplicate filename to avoid overwriting existing attachments
+    let mut dest = attach_dir.join(&filename);
+    if dest.exists() {
+        let stem = std::path::Path::new(&filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let ext = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let mut counter = 1u32;
+        loop {
+            let new_name = if ext.is_empty() {
+                format!("{stem}_{counter}")
+            } else {
+                format!("{stem}_{counter}.{ext}")
+            };
+            dest = attach_dir.join(&new_name);
+            if !dest.exists() {
+                break;
+            }
+            counter += 1;
+        }
+    }
+    std::fs::copy(src, &dest)?;
+
+    let dest_str = dest.to_string_lossy().to_string();
+
+    let actual_filename = dest.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&filename)
+        .to_string();
+
+    conn.execute(
+        "INSERT INTO file_attachments (file_id, filename, mime_type, file_path, attachment_type) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![file_id, actual_filename, mime_type, dest_str, attachment_type],
+    )?;
+
+    let id = conn.last_insert_rowid();
+
+    conn.query_row(
+        "SELECT id, file_id, filename, mime_type, file_path, attachment_type, created_at \
+         FROM file_attachments WHERE id = ?1",
+        [id],
+        |row| Ok(FileAttachment {
+            id: row.get(0)?,
+            file_id: row.get(1)?,
+            filename: row.get(2)?,
+            mime_type: row.get(3)?,
+            file_path: row.get(4)?,
+            attachment_type: row.get(5)?,
+            created_at: row.get(6)?,
+        }),
+    ).map_err(|e| AppError::Database(e))
+}
+
+/// Get all attachments for a file.
+#[tauri::command]
+pub fn get_attachments(
+    db: State<'_, DbState>,
+    file_id: i64,
+) -> Result<Vec<FileAttachment>, AppError> {
+    let conn = lock_db(&db)?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, file_id, filename, mime_type, file_path, attachment_type, created_at \
+         FROM file_attachments WHERE file_id = ?1 ORDER BY created_at",
+    )?;
+    let attachments = stmt
+        .query_map([file_id], |row| {
+            Ok(FileAttachment {
+                id: row.get(0)?,
+                file_id: row.get(1)?,
+                filename: row.get(2)?,
+                mime_type: row.get(3)?,
+                file_path: row.get(4)?,
+                attachment_type: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(attachments)
+}
+
+/// Delete an attachment (DB record + file on disk).
+#[tauri::command]
+pub fn delete_attachment(
+    db: State<'_, DbState>,
+    attachment_id: i64,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+
+    let file_path: String = conn
+        .query_row(
+            "SELECT file_path FROM file_attachments WHERE id = ?1",
+            [attachment_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Anhang {attachment_id} nicht gefunden"))
+            }
+            other => AppError::Database(other),
+        })?;
+
+    conn.execute("DELETE FROM file_attachments WHERE id = ?1", [attachment_id])?;
+
+    // Best-effort file deletion
+    if let Err(e) = std::fs::remove_file(&file_path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("Failed to remove attachment file {file_path}: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Open an attachment with the system default application.
+#[tauri::command]
+pub fn open_attachment(
+    db: State<'_, DbState>,
+    attachment_id: i64,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+
+    let file_path: String = conn
+        .query_row(
+            "SELECT file_path FROM file_attachments WHERE id = ?1",
+            [attachment_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Anhang {attachment_id} nicht gefunden"))
+            }
+            other => AppError::Database(other),
+        })?;
+
+    drop(conn);
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&file_path)
+            .spawn()
+            .map_err(|e| AppError::Internal(format!("Fehler beim Öffnen: {e}")))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&file_path)
+            .spawn()
+            .map_err(|e| AppError::Internal(format!("Fehler beim Öffnen: {e}")))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&file_path)
+            .spawn()
+            .map_err(|e| AppError::Internal(format!("Fehler beim Öffnen: {e}")))?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        return Err(AppError::Internal("Plattform nicht unterstützt".to_string()));
+    }
+    Ok(())
+}
+
+/// Get attachment count for a file.
+#[tauri::command]
+pub fn get_attachment_count(
+    db: State<'_, DbState>,
+    file_id: i64,
+) -> Result<i64, AppError> {
+    let conn = lock_db(&db)?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM file_attachments WHERE file_id = ?1",
+        [file_id],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Get attachment counts for multiple files in a single query.
+#[tauri::command]
+pub fn get_attachment_counts(
+    db: State<'_, DbState>,
+    file_ids: Vec<i64>,
+) -> Result<std::collections::HashMap<i64, i64>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut result = std::collections::HashMap::new();
+    if file_ids.is_empty() {
+        return Ok(result);
+    }
+    let placeholders: Vec<String> = file_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+    let sql = format!(
+        "SELECT file_id, COUNT(*) FROM file_attachments WHERE file_id IN ({}) GROUP BY file_id",
+        placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<Box<dyn rusqlite::types::ToSql>> = file_ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>).collect();
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    for row in rows {
+        let (file_id, count) = row?;
+        result.insert(file_id, count);
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
