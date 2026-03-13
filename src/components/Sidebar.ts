@@ -1,5 +1,6 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { ToastContainer } from "./Toast";
 import * as FolderService from "../services/FolderService";
 import type { Folder } from "../types/index";
 
@@ -24,6 +25,7 @@ export class Sidebar extends Component {
       await this.loadCounts(folders);
     } catch (e) {
       console.warn("Failed to load folders:", e);
+      ToastContainer.show("error", "Ordner konnten nicht geladen werden");
     }
   }
 
@@ -62,6 +64,7 @@ export class Sidebar extends Component {
     addBtn.className = "sidebar-add-btn";
     addBtn.textContent = "+";
     addBtn.title = "Neuer Ordner";
+    addBtn.setAttribute("aria-label", "Neuer Ordner");
     addBtn.addEventListener("click", () => this.createFolder());
     header.appendChild(addBtn);
 

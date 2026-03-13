@@ -1,9 +1,11 @@
+import { invoke } from "@tauri-apps/api/core";
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 
 export class StatusBar extends Component {
   private lastAction = "Bereit";
+  private watcherActive = true;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -23,7 +25,31 @@ export class StatusBar extends Component {
         this.render();
       })
     );
+    this.subscribe(
+      EventBus.on("watcher:status", (data) => {
+        const payload = data as { active: boolean; error?: string } | undefined;
+        this.watcherActive = payload?.active ?? true;
+        if (!this.watcherActive) {
+          this.lastAction = "Automatischer Import deaktiviert";
+        }
+        this.render();
+      })
+    );
     this.render();
+    this.queryWatcherStatus();
+  }
+
+  private async queryWatcherStatus(): Promise<void> {
+    try {
+      const active = await invoke<boolean>("watcher_get_status");
+      if (!active && this.watcherActive) {
+        this.watcherActive = false;
+        this.lastAction = "Automatischer Import deaktiviert";
+        this.render();
+      }
+    } catch {
+      // Watcher status unavailable — keep default
+    }
   }
 
   render(): void {
@@ -65,6 +91,14 @@ export class StatusBar extends Component {
     }
 
     this.el.appendChild(center);
+
+    if (!this.watcherActive) {
+      const watcherIndicator = document.createElement("span");
+      watcherIndicator.className = "status-watcher-inactive";
+      watcherIndicator.textContent = "Watcher inaktiv";
+      watcherIndicator.title = "Automatischer Import deaktiviert";
+      this.el.appendChild(watcherIndicator);
+    }
 
     const right = document.createElement("span");
     right.className = "status-right";

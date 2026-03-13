@@ -84,9 +84,6 @@ async function initTauriBridge(): Promise<void> {
       EventBus.emit("scan:file-found", e.payload)
     ),
     listen("scan:complete", (e) => EventBus.emit("scan:complete", e.payload)),
-    listen("ai:start", (e) => EventBus.emit("ai:start", e.payload)),
-    listen("ai:complete", (e) => EventBus.emit("ai:complete", e.payload)),
-    listen("ai:error", (e) => EventBus.emit("ai:error", e.payload)),
     listen("batch:progress", (e) =>
       EventBus.emit("batch:progress", e.payload)
     ),
@@ -95,6 +92,9 @@ async function initTauriBridge(): Promise<void> {
     ),
     listen("import:progress", (e) =>
       EventBus.emit("import:progress", e.payload)
+    ),
+    listen("watcher:status", (e) =>
+      EventBus.emit("watcher:status", e.payload)
     ),
     listen("fs:new-files", (e) =>
       EventBus.emit("fs:new-files", e.payload)

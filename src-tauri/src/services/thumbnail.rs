@@ -101,15 +101,6 @@ impl ThumbnailGenerator {
         }
     }
 
-    /// Delete the cached thumbnail for the given file ID.
-    pub fn invalidate(&self, file_id: i64) -> Result<(), AppError> {
-        let path = self.thumbnail_path(file_id);
-        if path.exists() {
-            std::fs::remove_file(&path)?;
-        }
-        Ok(())
-    }
-
     pub fn thumbnail_path(&self, file_id: i64) -> PathBuf {
         self.cache_dir.join(format!("{file_id}_v2.png"))
     }
@@ -347,27 +338,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let gen = ThumbnailGenerator::new(dir.path().to_path_buf());
         assert!(gen.get_cached(999).is_none());
-    }
-
-    #[test]
-    fn test_invalidate() {
-        let dir = tempfile::tempdir().unwrap();
-        let gen = ThumbnailGenerator::new(dir.path().to_path_buf());
-        let data = load_example("BayrischesHerz.PES");
-
-        gen.generate(20, &data, "pes").unwrap();
-        assert!(gen.get_cached(20).is_some());
-
-        gen.invalidate(20).unwrap();
-        assert!(gen.get_cached(20).is_none());
-    }
-
-    #[test]
-    fn test_invalidate_nonexistent() {
-        let dir = tempfile::tempdir().unwrap();
-        let gen = ThumbnailGenerator::new(dir.path().to_path_buf());
-        // Should not error on nonexistent file
-        gen.invalidate(999).unwrap();
     }
 
     #[test]

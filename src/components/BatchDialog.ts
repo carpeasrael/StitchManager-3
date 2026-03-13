@@ -1,4 +1,6 @@
 import { EventBus } from "../state/EventBus";
+import { trapFocus } from "../utils/focus-trap";
+import type { ImportProgress } from "../types/index";
 
 function formatTime(ms: number): string {
   const totalSec = Math.round(ms / 1000);
@@ -20,6 +22,8 @@ export class BatchDialog {
   private total: number;
   private mode: BatchMode;
   private unsubscribers: (() => void)[] = [];
+  private releaseFocusTrap: (() => void) | null = null;
+  private autoCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private operation: string,
@@ -43,6 +47,9 @@ export class BatchDialog {
 
     const dialog = document.createElement("div");
     dialog.className = "dialog dialog-batch";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", this.operation);
 
     // Header
     const header = document.createElement("div");
@@ -75,6 +82,13 @@ export class BatchDialog {
     }
     this.progressFill.style.width = this.mode === "import" && this.total === 0 ? "100%" : "0%";
     progressBar.appendChild(this.progressFill);
+
+    progressBar.setAttribute("role", "progressbar");
+    progressBar.setAttribute("aria-valuemin", "0");
+    progressBar.setAttribute("aria-valuemax", "100");
+    if (!(this.mode === "import" && this.total === 0)) {
+      progressBar.setAttribute("aria-valuenow", "0");
+    }
 
     body.appendChild(progressBar);
 
@@ -116,6 +130,7 @@ export class BatchDialog {
 
     this.overlay.appendChild(dialog);
     document.body.appendChild(this.overlay);
+    this.releaseFocusTrap = trapFocus(dialog);
 
     // Listen for progress events
     if (this.mode === "import") {
@@ -127,14 +142,7 @@ export class BatchDialog {
       );
       this.unsubscribers.push(
         EventBus.on("import:progress", (payload: unknown) => {
-          const p = payload as {
-            current: number;
-            total: number;
-            filename: string;
-            status: string;
-            elapsedMs: number;
-            estimatedRemainingMs: number;
-          };
+          const p = payload as ImportProgress;
           const isError = p.status.startsWith("error");
           const isSkipped = p.status === "skipped";
           if (!isSkipped) {
@@ -213,6 +221,8 @@ export class BatchDialog {
     if (this.progressFill) {
       this.progressFill.classList.remove("batch-progress-indeterminate");
       this.progressFill.style.width = `${pct}%`;
+      const bar = this.progressFill.parentElement;
+      if (bar) bar.setAttribute("aria-valuenow", String(pct));
     }
     if (this.progressText) {
       this.progressText.textContent = `${current} / ${total}`;
@@ -231,7 +241,6 @@ export class BatchDialog {
     if (this.cancelBtn) {
       this.cancelBtn.textContent = "Schliessen";
       this.cancelBtn.disabled = false;
-      this.cancelBtn.onclick = () => this.close();
     }
 
     // Show final time
@@ -242,16 +251,24 @@ export class BatchDialog {
     }
 
     // Auto-close after 2 seconds
-    setTimeout(() => {
+    this.autoCloseTimer = setTimeout(() => {
       this.close();
     }, 2000);
   }
 
   close(): void {
+    if (this.autoCloseTimer) {
+      clearTimeout(this.autoCloseTimer);
+      this.autoCloseTimer = null;
+    }
     for (const unsub of this.unsubscribers) {
       unsub();
     }
     this.unsubscribers = [];
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
+    }
     if (this.overlay) {
       this.overlay.remove();
       this.overlay = null;

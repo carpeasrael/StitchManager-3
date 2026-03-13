@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod commands;
 mod db;
@@ -69,12 +69,19 @@ pub fn run() {
                         app.handle(),
                     ) {
                         Ok(state) => {
-                            if let Ok(mut guard) = watcher_holder.0.lock() {
-                                *guard = Some(state);
+                            match watcher_holder.0.lock() {
+                                Ok(mut guard) => { *guard = Some(state); }
+                                Err(e) => {
+                                    log::error!("Watcher mutex poisoned: {e}");
+                                }
                             }
                         }
                         Err(e) => {
                             log::warn!("Failed to start file watcher: {e}");
+                            let _ = app.handle().emit("watcher:status", serde_json::json!({
+                                "active": false,
+                                "error": format!("{e}")
+                            }));
                         }
                     }
                 }
@@ -132,6 +139,7 @@ pub fn run() {
             commands::migration::migrate_from_2stitch,
             services::file_watcher::watcher_start,
             services::file_watcher::watcher_stop,
+            services::file_watcher::watcher_get_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

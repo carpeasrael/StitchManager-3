@@ -1,5 +1,6 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { ToastContainer } from "./Toast";
 import { getFormatLabel, formatSize } from "../utils/format";
 import * as FileService from "../services/FileService";
 
@@ -57,6 +58,7 @@ export class FileList extends Component {
       appState.set("files", files);
     } catch (e) {
       console.warn("Failed to load files:", e);
+      ToastContainer.show("error", "Dateien konnten nicht geladen werden");
     }
   }
 

@@ -11,6 +11,8 @@ export class ToastContainer {
   constructor() {
     this.el = document.createElement("div");
     this.el.className = "toast-container";
+    this.el.setAttribute("aria-live", "polite");
+    this.el.setAttribute("role", "status");
     document.body.appendChild(this.el);
 
     this.unsubscribe = appState.on("toasts", (toasts) => this.render(toasts));

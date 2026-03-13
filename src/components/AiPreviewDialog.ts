@@ -1,9 +1,11 @@
 import * as AiService from "../services/AiService";
 import * as FileService from "../services/FileService";
+import { trapFocus } from "../utils/focus-trap";
 import type { AiAnalysisResult, EmbroideryFile } from "../types/index";
 
 export class AiPreviewDialog {
   private overlay: HTMLElement | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
   private fileId: number;
   private file: EmbroideryFile;
   private onResult: (result: AiAnalysisResult) => void;
@@ -43,6 +45,9 @@ export class AiPreviewDialog {
 
     const dialog = document.createElement("div");
     dialog.className = "dialog dialog-ai-preview";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "KI-Analyse Vorschau");
 
     // Header
     const header = document.createElement("div");
@@ -52,6 +57,7 @@ export class AiPreviewDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close";
     closeBtn.textContent = "\u00D7";
+    closeBtn.setAttribute("aria-label", "Schliessen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -167,9 +173,14 @@ export class AiPreviewDialog {
 
     this.overlay.appendChild(dialog);
     document.body.appendChild(this.overlay);
+    this.releaseFocusTrap = trapFocus(dialog);
   }
 
   private close(): void {
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
+    }
     if (this.overlay) {
       this.overlay.remove();
       this.overlay = null;
