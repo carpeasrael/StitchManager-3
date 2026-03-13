@@ -10,30 +10,52 @@ StitchManager helps embroidery enthusiasts and professionals organize, browse, a
 - Native binary parsing for **PES**, **DST**, **JEF**, and **VP3** embroidery formats
 - Extracts stitch count, dimensions, thread colors, and color palettes (Brother, Janome)
 - Embedded thumbnail extraction (PES) with synthetic stitch-render fallback
+- Thread color database with manufacturer-specific color mapping
 
 ### File Management
 - Folder-based library with directory scanning and automatic file detection
 - Real-time file watcher — new files added to watched folders appear instantly
 - Multi-select with batch rename, batch organize (directory structure from patterns), and USB export
 - Configurable naming patterns with variables: `{name}`, `{theme}`, `{format}`, `{index}`
+- Mass import with progress tracking and runtime display
+- "Go to location" — reveal files in your OS file manager
+- File attachments and unique IDs per embroidery file
+- PDF report generation per file
+
+### Search
+- Global cross-folder search via "Alle Ordner" sidebar entry
+- Advanced search across all file parameters (name, theme, tags, format, etc.)
+- Debounced search bar with instant results
+
+### USB Export
+- USB drive detection with automatic device monitoring
+- Single-file and batch export to removable media
 
 ### AI-Powered Analysis
 - Integrates with **Ollama** (local) or **OpenAI** for vision-based metadata extraction
 - Analyzes embroidery thumbnails to suggest name, theme, description, tags, and colors
-- Preview prompt before sending, review results per-field, accept or reject individually
+- Preview and edit prompt before sending
+- Review results per-field, accept or reject individually
 - Batch analysis across multiple files with progress tracking
 
 ### Metadata & Tags
 - Edit name, theme, description, and license per file
-- Tag system with autocomplete from existing tags
+- Tag system with dedicated TagInput component and autocomplete
 - User-defined custom fields (text, number, date) configurable in settings
 - Dirty-state tracking with save indicator
 
+### Migration
+- Built-in 2stitch Organizer migration tool for importing existing collections
+
 ### UI & Design
 - **Aurora** light and dark theme with full design-token system (WCAG AA compliant)
+- Custom background support
 - Three-panel layout: sidebar (folders), center (file list), right (metadata detail)
+- Burger menu for streamlined navigation
 - Draggable splitter handles with persisted panel widths
+- Resizable settings dialog
 - Virtual scrolling for large collections (1000+ files)
+- Zoomable image preview dialog
 - Keyboard shortcuts (Ctrl+S save, Ctrl+F search, Ctrl+K AI, arrow navigation, and more)
 - Toast notifications for user feedback
 
@@ -47,6 +69,7 @@ StitchManager helps embroidery enthusiasts and professionals organize, browse, a
 | Database | SQLite via `rusqlite` + `tauri-plugin-sql` |
 | AI | Ollama / OpenAI (vision API) via `reqwest` |
 | File Watching | `notify` crate |
+| PDF | `printpdf` + `qrcode` crates |
 
 ## Prerequisites
 
@@ -103,10 +126,10 @@ src/                        # Frontend (TypeScript)
 
 src-tauri/                  # Backend (Rust)
   src/
-    commands/               # Tauri command handlers (files, folders, ai, batch, settings, scanner)
+    commands/               # Tauri command handlers (files, folders, ai, batch, settings, scanner, migration, thread_colors)
     db/                     # SQLite database, migrations, models, queries
     parsers/                # Embroidery format parsers (PES, DST, JEF, VP3)
-    services/               # Thumbnail generation, AI client, file watcher
+    services/               # Thumbnail generation, AI client, file watcher, PDF reports, USB monitor, thread DB
     error.rs                # Error types
     lib.rs                  # Tauri app setup and plugin registration
     main.rs                 # Binary entry point

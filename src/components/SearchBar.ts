@@ -30,6 +30,7 @@ export class SearchBar extends Component {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private allTags: Tag[] = [];
   private _panelTagInput: TagInput | null = null;
+  private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -156,6 +157,10 @@ export class SearchBar extends Component {
       this.panelEl.remove();
       this.panelEl = null;
     }
+    if (this.outsideClickHandler) {
+      document.removeEventListener("click", this.outsideClickHandler);
+      this.outsideClickHandler = null;
+    }
   }
 
   private renderPanel(): void {
@@ -227,7 +232,28 @@ export class SearchBar extends Component {
       this.panelEl.appendChild(chips);
     }
 
-    this.el.appendChild(this.panelEl);
+    // Append to body so z-index operates in root stacking context
+    document.body.appendChild(this.panelEl);
+
+    // Position below the filter toggle button
+    const toggleRect = this.filterToggle.getBoundingClientRect();
+    const panelWidth = this.panelEl.offsetWidth;
+    let left = toggleRect.right - panelWidth;
+    if (left < 4) left = 4;
+    this.panelEl.style.top = `${toggleRect.bottom + 4}px`;
+    this.panelEl.style.left = `${left}px`;
+
+    // Close on outside click (next tick to avoid immediate close)
+    requestAnimationFrame(() => {
+      if (!this.panelOpen) return;
+      this.outsideClickHandler = (e: MouseEvent) => {
+        const target = e.target as Node;
+        if (this.panelEl && !this.panelEl.contains(target) && !this.el.contains(target)) {
+          this.closePanel();
+        }
+      };
+      document.addEventListener("click", this.outsideClickHandler);
+    });
   }
 
   private buildTagFilter(sp: SearchParams): HTMLElement {

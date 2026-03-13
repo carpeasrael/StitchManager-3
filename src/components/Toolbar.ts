@@ -227,14 +227,22 @@ export class Toolbar extends Component {
       }
     }
 
-    this.el.appendChild(this.panel);
+    // Append to body so z-index operates in root stacking context
+    document.body.appendChild(this.panel);
+
+    // Position below the burger button
+    const btnRect = btn.getBoundingClientRect();
+    this.panel.style.top = `${btnRect.bottom + 2}px`;
+    this.panel.style.left = `${btnRect.left}px`;
+
     this.updateItemStates();
 
     // Close on outside click (next tick to avoid immediate close)
     requestAnimationFrame(() => {
       if (!this.menuOpen) return;
       this.outsideClickHandler = (e: MouseEvent) => {
-        if (this.panel && !this.el.contains(e.target as Node)) {
+        const target = e.target as Node;
+        if (this.panel && !this.panel.contains(target) && !this.el.contains(target)) {
           this.closeMenu();
         }
       };

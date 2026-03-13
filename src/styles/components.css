@@ -204,18 +204,15 @@
 
 /* Advanced filter panel */
 .search-advanced-panel {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  margin-top: var(--spacing-1);
+  position: fixed;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  z-index: 50;
+  z-index: 90;
   padding: var(--spacing-3);
   min-width: 360px;
+  max-width: 480px;
 }
 
 .search-advanced-header {
@@ -1106,8 +1103,6 @@
 
 .burger-menu {
   position: fixed;
-  top: 40px;
-  left: var(--spacing-3);
   min-width: 240px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
