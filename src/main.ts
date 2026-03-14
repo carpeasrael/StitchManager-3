@@ -223,7 +223,7 @@ function showInfoDialog(): void {
   dialog.innerHTML = `
     <h3 class="info-title">StichMan</h3>
     <div class="info-subtitle">Stickdateien-Verwaltung</div>
-    <div class="info-version">Version 26.03-a2</div>
+    <div class="info-version">Version 26.03-rc1</div>
     <div class="info-details">
       <div class="info-row"><span class="info-label">Autor</span><span>carpeasrael</span></div>
       <div class="info-row"><span class="info-label">E-Mail</span><a href="mailto:carpeasrael@chaostribunal.de">carpeasrael@chaostribunal.de</a></div>

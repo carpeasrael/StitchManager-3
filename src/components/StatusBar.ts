@@ -140,7 +140,7 @@ export class StatusBar extends Component {
 
     const version = document.createElement("span");
     version.className = "status-version";
-    version.textContent = "v26.03-a2";
+    version.textContent = "v26.03-rc1";
     this.el.appendChild(version);
   }
 }
