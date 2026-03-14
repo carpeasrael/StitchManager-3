@@ -1,74 +1,37 @@
 # Claude Task-Resolution Review
 
 **Date:** 2026-03-14
-**Task refs:** #79, #80, #81, #82, #83
-**Reviewer:** Claude CLI (task-resolution)
+**Task:** Ensure that all menus are in front when open
+**Reviewer:** Claude (task-resolution)
 
----
+## Verification
 
-## Issue #79: Rounded corners on columns, pop-ups, main window (subtle)
+### 1. Z-index stacking context issue resolved
 
-**Status: RESOLVED**
+The layout panels (`.app-menu`, `.app-sidebar`, `.app-center`, `.app-right`, `.app-splitter-l`, `.app-splitter-r`, `.app-status`) in `layout.css` lines 33-41 have `position: relative` but **no** `z-index` property. Without `z-index`, `position: relative` alone does not create a new stacking context. This means fixed-positioned children (menus, dialogs, toasts) now participate in the root stacking context and their z-index values are resolved against the viewport, not against a parent panel.
 
-- `--radius-panel: 8px` and `--radius-dialog: 12px` defined in `src/styles/aurora.css`
-- `.app-layout` has `border-radius: var(--radius-panel)` (main window) in `src/styles/layout.css:16`
-- `.app-sidebar` has `border-radius: var(--radius-panel) 0 0 var(--radius-panel)` (left column rounded) in `layout.css:69`
-- `.app-right` has `border-radius: 0 var(--radius-panel) var(--radius-panel) 0` (right column rounded) in `layout.css:85`
-- `.dialog` has `border-radius: var(--radius-dialog)` in `components.css:1614`
+### 2. Background pseudo-element stays behind content
 
-All columns, pop-ups (dialogs), and the main window have subtle rounded corners applied.
+`.app-layout::before` at line 19-31 uses `z-index: -1`, which correctly places the decorative background image behind all content while still being visible (it paints below the root stacking level of the layout).
 
-## Issue #80: batch_export_usb canonicalize + sanitize filenames + validate destination
+### 3. Menu/overlay z-index hierarchy verified
 
-**Status: RESOLVED**
+All overlay elements use `position: fixed` and their z-index values form a correct hierarchy:
 
-- `batch.rs:501`: Rejects `..` in `target_path` early
-- `batch.rs:510`: `target_dir.canonicalize()` resolves symlinks and normalizes the target directory
-- `batch.rs:559-562`: Filename sanitization strips `/`, `\`, and `..` from filenames
-- `batch.rs:563`: Uses `canonical_target.join(&safe_filename)` for destination path
-- `batch.rs:568-579`: Validates that the resolved destination stays within the canonical target directory
+| Element | Position | z-index | Status |
+|---------|----------|---------|--------|
+| `.tag-suggestion-list` | absolute (within panel) | 10 | OK - local dropdown |
+| `.search-tag-suggestions` | absolute | 51 | OK - above tag suggestions |
+| `.search-advanced-panel` | fixed | 90 | OK - overlays content |
+| `.burger-menu` | fixed | 90 | OK - overlays content |
+| `.dialog-overlay` | fixed | 100 | OK - above menus |
+| `.toast-container` | fixed | 200 | OK - topmost |
+| `.image-preview-close` | absolute (within dialog) | 2 | OK - local to preview |
 
-All three requirements (canonicalize, sanitize filenames, validate destination) are implemented.
+Since no layout panel creates a stacking context, all fixed-positioned elements (burger menu, search panel, dialogs, toasts) correctly participate in the root stacking context. Their z-index values are globally comparable, ensuring proper layering.
 
-## Issue #81: VP3 scan budget 10MB to 1MB, consecutive-miss early exit (10k), 3 functions
-
-**Status: RESOLVED**
-
-Scan budget reduced to 1MB in all three functions:
-- `parse_vp3_design` (`vp3.rs:237`): `data.len().min(pos + 1_000_000)`
-- `scan_vp3_structure` (`vp3.rs:478`): `data.len().min(1_000_000)`
-- `decode_vp3_stitch_segments` (`vp3.rs:610`): `data.len().min(pos + 1_000_000)`
-
-Consecutive-miss early exit at 10,000 in all three functions:
-- `parse_vp3_design` (`vp3.rs:272-275`): breaks after 10,000 consecutive misses with `log::warn`
-- `scan_vp3_structure` (`vp3.rs:488-489`): breaks after 10,000 consecutive misses with `log::warn`
-- `decode_vp3_stitch_segments` (`vp3.rs:655-658`): breaks after 10,000 consecutive misses with `log::warn`
-
-## Issue #82: log::warn when PES color count > 256
-
-**Status: RESOLVED**
-
-- `pes.rs:150-155`: When `num_colors > 256`, logs `log::warn!("PES: color count {num_colors} exceeds maximum 256, falling back to PEC palette")` and returns empty vec to trigger PEC palette fallback.
-
-## Issue #83: Thumbnail failure logging, file-read errors, failure counter, summary log (3 functions)
-
-**Status: RESOLVED**
-
-All three functions implement the required logging:
-
-1. `import_files` (`scanner.rs:267-304`):
-   - File-read error: `log::warn!("Failed to read file for thumbnail generation {filepath}: {e}")`
-   - Generation failure: `log::warn!("Failed to generate thumbnail for {filepath}: {e}")`
-   - DB lock failure: `log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}")`
-   - Failure counter: `thumb_failures` incremented on each failure
-   - Summary log: `log::warn!("Thumbnail generation: {thumb_ok}/{} succeeded, {thumb_failures} failed"...)`
-
-2. `mass_import` (`scanner.rs:537-568`): Same pattern as above.
-
-3. `watcher_auto_import` (`scanner.rs:714-751`): Same pattern as above, including DB lock failure logging.
-
----
-
-## Verdict: **PASS**
+## Verdict
 
 Task resolved. No findings.
+
+**PASS**
