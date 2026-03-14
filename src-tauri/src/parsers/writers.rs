@@ -39,10 +39,11 @@ pub fn write_dst(segments: &[StitchSegment], output_path: &Path) -> Result<(), A
     // Write header fields
     let stitch_count = all_stitches.len();
     let color_count = segments.len();
-    let plus_x = max_x.max(0.0) as i64;
-    let minus_x = (-min_x).max(0.0) as i64;
-    let plus_y = max_y.max(0.0) as i64;
-    let minus_y = (-min_y).max(0.0) as i64;
+    // DST header uses 0.1mm units; internal coordinates are in mm
+    let plus_x = (max_x.max(0.0) * 10.0) as i64;
+    let minus_x = ((-min_x).max(0.0) * 10.0) as i64;
+    let plus_y = (max_y.max(0.0) * 10.0) as i64;
+    let minus_y = ((-min_y).max(0.0) * 10.0) as i64;
 
     // DST header layout: label at field start, value follows (see dst.rs constants)
     write_header_field(&mut header, 0, &format!("LA:StichMan          \r"));
@@ -64,8 +65,9 @@ pub fn write_dst(segments: &[StitchSegment], output_path: &Path) -> Result<(), A
             stitch_data.extend_from_slice(&[0x00, 0x00, 0xC3]);
         }
 
-        let dx = (x - prev_x).round() as i32;
-        let dy = (y - prev_y).round() as i32;
+        // DST displacement uses 0.1mm units; internal coordinates are in mm
+        let dx = ((x - prev_x) * 10.0).round() as i32;
+        let dy = ((y - prev_y) * 10.0).round() as i32;
 
         // DST max per normal triplet: ±121. For jumps, limit to ±40 to avoid
         // displacement bits conflicting with command bits in b2.
@@ -119,36 +121,40 @@ pub fn write_pes(segments: &[StitchSegment], output_path: &Path) -> Result<(), A
         output.push(0);
     }
 
-    // PEC header (simplified)
-    // Label (19 bytes, space-padded)
+    // PEC header — must be exactly 532 bytes so stitch data starts at pec_offset + 532
+    // Layout: label(20) + reserved(28) + color_count(1) + color_table(128) + reserved(355) = 532
+    // Color count is at PEC offset 48, color indices start at offset 49 (see pes.rs:114)
+    let pec_start = output.len();
+
+    // Label (19 bytes, space-padded) + CR
     let label = b"StichMan Export    ";
     output.extend_from_slice(&label[..19]);
-    output.push(0x0D); // CR
+    output.push(0x0D); // CR — total 20 bytes
 
-    // Color count
+    // Reserved bytes 20-47 (28 bytes zero-padded)
+    output.extend_from_slice(&[0u8; 28]);
+
+    // Color count at offset 48: PEC stores (num_colors - 1)
     let num_colors = segments.len().min(255) as u8;
-    output.push(num_colors.saturating_sub(1)); // PEC stores (num_colors - 1)
+    output.push(num_colors.saturating_sub(1));
 
-    // Color indices (1-based, PEC palette)
-    for i in 0..num_colors {
-        output.push((i % 64) + 1);
+    // Color indices at offset 49 (1-based, PEC palette) — 128 bytes
+    for i in 0..128u8 {
+        if i < num_colors {
+            output.push((i % 64) + 1);
+        } else {
+            output.push(0x20); // padding
+        }
     }
-    // Pad to fixed color table size (max 128 entries)
-    let color_table_size = 128;
-    while output.len() < pec_offset as usize + 20 + 1 + color_table_size {
-        output.push(0x20);
+
+    // Pad remaining bytes to reach exactly 532 from PEC start
+    // Currently at: 20 (label) + 28 (reserved) + 1 (color count) + 128 (color table) = 177 bytes
+    // Need: 532 - 177 = 355 bytes of reserved/thumbnail area
+    while output.len() < pec_start + 532 {
+        output.push(0x00);
     }
 
-    // Stitch data offset (2 bytes LE from start of PEC section)
-    let stitch_data_start = output.len() + 4; // 4 bytes for the offset fields
-    let pec_data_offset = (stitch_data_start - pec_offset as usize) as u16;
-
-    // Thumbnail dimensions (both width and height = 0, no thumbnail)
-    output.extend_from_slice(&pec_data_offset.to_le_bytes());
-    output.push(0); // thumb width
-    output.push(0); // thumb height
-
-    // PEC stitch data
+    // PEC stitch data (starts at pec_offset + 532)
     output.extend_from_slice(&pec_stitches);
 
     // End marker
@@ -165,9 +171,10 @@ fn encode_pec_stitches(segments: &[StitchSegment]) -> Vec<u8> {
 
     for (seg_idx, seg) in segments.iter().enumerate() {
         if seg_idx > 0 {
-            // Color change
+            // Color change: 3 bytes — 0xFE, 0xB0, color_index
             data.push(0xFE);
             data.push(0xB0);
+            data.push((seg_idx % 256) as u8);
         }
 
         for &(x, y) in &seg.points {

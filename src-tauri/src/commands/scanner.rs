@@ -554,6 +554,10 @@ pub fn mass_import(
 
 #[tauri::command]
 pub fn parse_embroidery_file(filepath: String) -> Result<ParsedFileInfo, AppError> {
+    // Reject path traversal attempts
+    if filepath.contains("..") {
+        return Err(AppError::Validation("Path traversal not allowed".to_string()));
+    }
     let path = std::path::Path::new(&filepath);
     let ext = path
         .extension()
