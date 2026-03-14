@@ -35,6 +35,7 @@ export class MetadataPanel extends Component {
   private currentTags: Tag[] = [];
   private allTags: Tag[] = [];
   private customFields: CustomFieldDef[] = [];
+  private customFieldValues: Record<number, string> = {};
   private snapshot: FormSnapshot | null = null;
   private dirty = false;
   private saving = false;
@@ -78,7 +79,7 @@ export class MetadataPanel extends Component {
     }
 
     try {
-      const [file, formats, colors, tags, allTags, customFields, attachments] = await Promise.all([
+      const [file, formats, colors, tags, allTags, customFields, attachments, customFieldValues] = await Promise.all([
         FileService.getFile(fileId),
         FileService.getFormats(fileId),
         FileService.getColors(fileId),
@@ -86,11 +87,13 @@ export class MetadataPanel extends Component {
         FileService.getAllTags(),
         SettingsService.getCustomFields(),
         FileService.getAttachments(fileId),
+        SettingsService.getCustomFieldValues(fileId),
       ]);
       this.currentFile = file;
       this.currentTags = tags;
       this.allTags = allTags;
       this.customFields = customFields;
+      this.customFieldValues = customFieldValues;
       this.snapshot = this.takeSnapshot(file, tags);
       this.dirty = false;
       this.renderFileInfo(file, formats, colors, tags, attachments);
@@ -116,13 +119,25 @@ export class MetadataPanel extends Component {
       return;
     }
     const current = this.getCurrentFormValues();
-    this.dirty =
+    let dirty =
       current.name !== this.snapshot.name ||
       current.theme !== this.snapshot.theme ||
       current.description !== this.snapshot.description ||
       current.license !== this.snapshot.license ||
       current.tags.join(",") !== this.snapshot.tags.join(",");
 
+    // Check custom fields for changes
+    if (!dirty) {
+      const customInputs = this.el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-custom-field]");
+      customInputs.forEach((el) => {
+        const fieldId = Number(el.dataset.customField);
+        if (!isNaN(fieldId) && el.value !== (this.customFieldValues[fieldId] || "")) {
+          dirty = true;
+        }
+      });
+    }
+
+    this.dirty = dirty;
     const saveBtn = this.el.querySelector<HTMLButtonElement>(".metadata-save-btn");
     if (saveBtn) {
       saveBtn.disabled = !this.dirty || this.saving;
@@ -715,6 +730,20 @@ export class MetadataPanel extends Component {
         this.currentTags = newTags;
       }
 
+      // Save custom field values
+      const customFieldInputs = this.el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-custom-field]");
+      if (customFieldInputs.length > 0) {
+        const cfValues: Record<number, string> = {};
+        customFieldInputs.forEach((el) => {
+          const fieldId = Number(el.dataset.customField);
+          if (!isNaN(fieldId)) {
+            cfValues[fieldId] = el.value;
+          }
+        });
+        await SettingsService.setCustomFieldValues(saveFileId, cfValues);
+        this.customFieldValues = cfValues;
+      }
+
       this.snapshot = this.takeSnapshot(this.currentFile, this.currentTags);
       this.dirty = false;
 
@@ -749,6 +778,8 @@ export class MetadataPanel extends Component {
     label.textContent = field.name;
     group.appendChild(label);
 
+    const existingValue = this.customFieldValues[field.id] || "";
+
     if (field.fieldType === "select" && field.options) {
       const select = document.createElement("select");
       select.className = "metadata-form-input";
@@ -766,12 +797,16 @@ export class MetadataPanel extends Component {
         select.appendChild(option);
       }
 
+      select.value = existingValue;
+      select.addEventListener("input", () => this.checkDirty());
       group.appendChild(select);
     } else {
       const input = document.createElement("input");
       input.type = field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text";
       input.className = "metadata-form-input";
       input.dataset.customField = String(field.id);
+      input.value = existingValue;
+      input.addEventListener("input", () => this.checkDirty());
       group.appendChild(input);
     }
 

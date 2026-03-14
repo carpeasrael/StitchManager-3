@@ -159,6 +159,52 @@ pub fn delete_custom_field(
 }
 
 #[tauri::command]
+pub fn get_custom_field_values(
+    db: State<'_, DbState>,
+    file_id: i64,
+) -> Result<HashMap<i64, String>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT field_id, value FROM custom_field_values WHERE file_id = ?1",
+    )?;
+    let rows = stmt
+        .query_map([file_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut map = HashMap::new();
+    for (field_id, value) in rows {
+        map.insert(field_id, value);
+    }
+    Ok(map)
+}
+
+#[tauri::command]
+pub fn set_custom_field_values(
+    db: State<'_, DbState>,
+    file_id: i64,
+    values: HashMap<i64, String>,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let tx = conn.unchecked_transaction()?;
+    for (field_id, value) in &values {
+        if value.is_empty() {
+            tx.execute(
+                "DELETE FROM custom_field_values WHERE file_id = ?1 AND field_id = ?2",
+                rusqlite::params![file_id, field_id],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT OR REPLACE INTO custom_field_values (file_id, field_id, value) VALUES (?1, ?2, ?3)",
+                rusqlite::params![file_id, field_id, value],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn copy_background_image(
     app: tauri::AppHandle,
     db: State<'_, DbState>,

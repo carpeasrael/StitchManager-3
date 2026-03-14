@@ -76,12 +76,6 @@ export class Toolbar extends Component {
             onClick: () => this.scanFolder(),
           },
           {
-            className: "menu-item-delete-folder",
-            icon: "\uD83D\uDDD1",
-            label: "Ordner l\u00F6schen",
-            onClick: () => EventBus.emit("toolbar:delete-folder"),
-          },
-          {
             className: "menu-item-mass-import",
             icon: "\uD83D\uDCE5",
             label: "Massenimport",
@@ -105,18 +99,6 @@ export class Toolbar extends Component {
             label: "Im Ordner anzeigen",
             shortcut: "Ctrl+Shift+R",
             onClick: () => EventBus.emit("toolbar:reveal-in-folder"),
-          },
-          {
-            className: "menu-item-edit-transform",
-            icon: "\u2702",
-            label: "Bearbeiten",
-            onClick: () => EventBus.emit("toolbar:edit-transform"),
-          },
-          {
-            className: "menu-item-convert",
-            icon: "\uD83D\uDD04",
-            label: "Konvertieren",
-            onClick: () => EventBus.emit("toolbar:convert"),
           },
           {
             className: "menu-item-pdf",
@@ -165,12 +147,6 @@ export class Toolbar extends Component {
             shortcut: "Ctrl+Shift+U",
             onClick: () => EventBus.emit("toolbar:batch-export"),
           },
-          {
-            className: "menu-item-transfer",
-            icon: "\uD83D\uDCE1",
-            label: "An Maschine senden",
-            onClick: () => EventBus.emit("toolbar:transfer"),
-          },
         ],
       },
       {
@@ -182,12 +158,6 @@ export class Toolbar extends Component {
             label: "Einstellungen",
             shortcut: "Ctrl+,",
             onClick: () => EventBus.emit("toolbar:settings"),
-          },
-          {
-            className: "menu-item-info",
-            icon: "\u2139",
-            label: "Info",
-            onClick: () => EventBus.emit("toolbar:info"),
           },
         ],
       },
@@ -257,22 +227,14 @@ export class Toolbar extends Component {
       }
     }
 
-    // Append to body so z-index operates in root stacking context
-    document.body.appendChild(this.panel);
-
-    // Position below the burger button
-    const btnRect = btn.getBoundingClientRect();
-    this.panel.style.top = `${btnRect.bottom + 2}px`;
-    this.panel.style.left = `${btnRect.left}px`;
-
+    this.el.appendChild(this.panel);
     this.updateItemStates();
 
     // Close on outside click (next tick to avoid immediate close)
     requestAnimationFrame(() => {
       if (!this.menuOpen) return;
       this.outsideClickHandler = (e: MouseEvent) => {
-        const target = e.target as Node;
-        if (this.panel && !this.panel.contains(target) && !this.el.contains(target)) {
+        if (this.panel && !this.el.contains(e.target as Node)) {
           this.closeMenu();
         }
       };
@@ -317,15 +279,11 @@ export class Toolbar extends Component {
     };
 
     setDisabled("menu-item-scan", !hasFolder);
-    setDisabled("menu-item-delete-folder", !hasFolder);
     setDisabled("menu-item-reveal", !hasFile || hasMulti);
     setDisabled("menu-item-ai", !hasFile || hasMulti);
 
-    setDisabled("menu-item-edit-transform", !hasFile || hasMulti);
-    setHidden("menu-item-convert", !hasAny);
     setHidden("menu-item-pdf", !hasAny);
     setHidden("menu-item-batch-export", !hasAny);
-    setHidden("menu-item-transfer", !hasAny);
     setHidden("menu-item-batch-rename", !hasMulti);
     setHidden("menu-item-batch-organize", !hasMulti);
     setHidden("menu-item-batch-ai", !hasMulti);
@@ -378,6 +336,10 @@ export class Toolbar extends Component {
 
       const files = await FileService.getFiles(folderId);
       appState.set("files", files);
+
+      // Refresh folder counts after scan/import
+      const updatedFolders = await FolderService.getAll();
+      appState.set("folders", updatedFolders);
     } catch (e) {
       console.warn("Failed to scan folder:", e);
     }

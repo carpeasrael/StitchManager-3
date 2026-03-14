@@ -33,6 +33,14 @@ export async function deleteCustomField(fieldId: number): Promise<void> {
   return invoke<void>("delete_custom_field", { fieldId });
 }
 
+export async function getCustomFieldValues(fileId: number): Promise<Record<number, string>> {
+  return invoke<Record<number, string>>("get_custom_field_values", { fileId });
+}
+
+export async function setCustomFieldValues(fileId: number, values: Record<number, string>): Promise<void> {
+  return invoke<void>("set_custom_field_values", { fileId, values });
+}
+
 export async function copyBackgroundImage(sourcePath: string): Promise<string> {
   return invoke<string>("copy_background_image", { sourcePath });
 }

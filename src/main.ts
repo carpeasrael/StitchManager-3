@@ -287,7 +287,7 @@ async function deleteSelectedFiles(): Promise<void> {
 
   appState.set("selectedFileIds", []);
   appState.set("selectedFileId", null);
-  await reloadFiles();
+  await reloadFilesAndCounts();
 
   if (deleted === fileIds.length) {
     ToastContainer.show("success", deleted === 1 ? "Datei geloescht" : `${deleted} Dateien geloescht`);
@@ -339,11 +339,17 @@ function initEventHandlers(): () => void {
 
       BatchDialog.open("Batch Umbenennen", fileIds.length);
       try {
-        await BatchService.rename(fileIds, pattern);
+        const result = await BatchService.rename(fileIds, pattern);
+        if (result.failed > 0) {
+          ToastContainer.show("error", `${result.success} umbenannt, ${result.failed} fehlgeschlagen`);
+        } else {
+          ToastContainer.show("success", `${result.success} Dateien umbenannt`);
+        }
       } catch (e) {
         console.warn("Batch rename failed:", e);
+        ToastContainer.show("error", "Batch-Umbenennung fehlgeschlagen");
       }
-      await reloadFiles();
+      await reloadFilesAndCounts();
     }),
 
     EventBus.on("toolbar:batch-organize", async () => {
@@ -355,11 +361,17 @@ function initEventHandlers(): () => void {
 
       BatchDialog.open("Batch Organisieren", fileIds.length);
       try {
-        await BatchService.organize(fileIds, pattern);
+        const result = await BatchService.organize(fileIds, pattern);
+        if (result.failed > 0) {
+          ToastContainer.show("error", `${result.success} organisiert, ${result.failed} fehlgeschlagen`);
+        } else {
+          ToastContainer.show("success", `${result.success} Dateien organisiert`);
+        }
       } catch (e) {
         console.warn("Batch organize failed:", e);
+        ToastContainer.show("error", "Batch-Organisation fehlgeschlagen");
       }
-      await reloadFiles();
+      await reloadFilesAndCounts();
     }),
 
     EventBus.on("toolbar:batch-export", async () => {
@@ -510,9 +522,13 @@ function initEventHandlers(): () => void {
 
       BatchDialog.open("Batch KI-Analyse", fileIds.length);
       try {
-        await AiService.analyzeBatch(fileIds);
+        const results = await AiService.analyzeBatch(fileIds);
+        if (results && results.length > 0) {
+          ToastContainer.show("success", `${results.length} Dateien analysiert`);
+        }
       } catch (e) {
         console.warn("Batch AI analysis failed:", e);
+        ToastContainer.show("error", "Batch-KI-Analyse fehlgeschlagen");
       }
       await reloadFiles();
     }),
@@ -702,7 +718,7 @@ function initEventHandlers(): () => void {
         const imported = await invoke<number>("watcher_auto_import", { filePaths: data.paths });
         if (imported > 0) {
           ToastContainer.show("info", `${imported} neue Datei(en) importiert`);
-          await reloadFiles();
+          await reloadFilesAndCounts();
         }
       } catch (e) {
         console.warn("Watcher auto-import failed:", e);
@@ -715,7 +731,7 @@ function initEventHandlers(): () => void {
         const removed = await invoke<number>("watcher_remove_by_paths", { filePaths: data.paths });
         if (removed > 0) {
           ToastContainer.show("info", `${removed} Datei(en) entfernt`);
-          await reloadFiles();
+          await reloadFilesAndCounts();
         }
       } catch (e) {
         console.warn("Watcher remove failed:", e);
@@ -773,13 +789,27 @@ function initEventHandlers(): () => void {
   return () => unsubs.forEach((fn) => fn());
 }
 
+let reloadGeneration = 0;
+
 async function reloadFiles(): Promise<void> {
+  const gen = ++reloadGeneration;
   const folderId = appState.get("selectedFolderId");
   const search = appState.get("searchQuery");
   const formatFilter = appState.get("formatFilter");
   const searchParams = appState.get("searchParams");
   const updatedFiles = await FileService.getFiles(folderId, search, formatFilter, searchParams);
+  if (gen !== reloadGeneration) return; // Discard stale results
   appState.set("files", updatedFiles);
+}
+
+async function reloadFilesAndCounts(): Promise<void> {
+  await reloadFiles();
+  try {
+    const folders = await FolderService.getAll();
+    appState.set("folders", folders);
+  } catch {
+    // Non-critical: sidebar counts may be stale
+  }
 }
 
 function navigateFile(direction: number): void {
