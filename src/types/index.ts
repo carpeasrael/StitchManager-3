@@ -196,6 +196,12 @@ export interface LibraryStats {
   formatCounts: Record<string, number>;
 }
 
+export type Transform =
+  | { type: "resize"; scaleX: number; scaleY: number }
+  | { type: "rotate"; degrees: number }
+  | { type: "mirrorHorizontal" }
+  | { type: "mirrorVertical" };
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface BatchResult {

@@ -16,6 +16,7 @@ import { BatchDialog } from "./components/BatchDialog";
 import { ToastContainer } from "./components/Toast";
 import { Splitter } from "./components/Splitter";
 import { Dashboard } from "./components/Dashboard";
+import { EditDialog } from "./components/EditDialog";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -384,6 +385,15 @@ function initEventHandlers(): () => void {
         console.warn("Batch AI analysis failed:", e);
       }
       await reloadFiles();
+    }),
+
+    EventBus.on("toolbar:edit-transform", async () => {
+      const fileId = appState.get("selectedFileId");
+      if (fileId === null) return;
+      const files = appState.get("files");
+      const file = files.find((f) => f.id === fileId);
+      if (!file) return;
+      await EditDialog.open(fileId, file.name || file.filename);
     }),
 
     EventBus.on("toolbar:convert", async () => {

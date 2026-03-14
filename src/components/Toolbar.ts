@@ -107,6 +107,12 @@ export class Toolbar extends Component {
             onClick: () => EventBus.emit("toolbar:reveal-in-folder"),
           },
           {
+            className: "menu-item-edit-transform",
+            icon: "\u2702",
+            label: "Bearbeiten",
+            onClick: () => EventBus.emit("toolbar:edit-transform"),
+          },
+          {
             className: "menu-item-convert",
             icon: "\uD83D\uDD04",
             label: "Konvertieren",
@@ -303,6 +309,7 @@ export class Toolbar extends Component {
     setDisabled("menu-item-reveal", !hasFile || hasMulti);
     setDisabled("menu-item-ai", !hasFile || hasMulti);
 
+    setDisabled("menu-item-edit-transform", !hasFile || hasMulti);
     setHidden("menu-item-convert", !hasAny);
     setHidden("menu-item-pdf", !hasAny);
     setHidden("menu-item-batch-export", !hasAny);

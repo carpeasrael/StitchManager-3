@@ -1,9 +1,11 @@
 pub mod ai;
 pub mod batch;
 pub mod convert;
+pub mod edit;
 pub mod files;
 pub mod folders;
 pub mod migration;
 pub mod scanner;
 pub mod settings;
+pub mod templates;
 pub mod thread_colors;

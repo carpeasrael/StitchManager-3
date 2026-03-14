@@ -105,6 +105,69 @@
   padding: var(--spacing-4);
 }
 
+/* Edit Dialog */
+.dialog-edit {
+  width: 400px;
+  padding: var(--spacing-4);
+}
+
+.dialog-edit-title {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  margin: 0 0 var(--spacing-3);
+}
+
+.edit-transform-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.edit-section-label {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--color-muted);
+  margin-top: var(--spacing-1);
+}
+
+.edit-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+}
+
+.edit-btn {
+  padding: var(--spacing-1) var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.edit-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.edit-close-btn {
+  margin-top: var(--spacing-3);
+  width: 100%;
+  padding: var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+}
+
+.edit-close-btn:hover {
+  background: var(--color-accent-10);
+}
+
 /* Sidebar */
 .sidebar-header {
   display: flex;

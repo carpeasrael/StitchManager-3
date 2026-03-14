@@ -9,6 +9,7 @@ import type {
   StitchSegment,
   SearchParams,
   LibraryStats,
+  Transform,
 } from "../types/index";
 
 export interface PaginatedFiles {
@@ -180,6 +181,27 @@ export async function convertFilesBatch(
   outputDir: string
 ): Promise<{ total: number; success: number; failed: number; errors: string[] }> {
   return invoke("convert_files_batch", { fileIds, targetFormat, outputDir });
+}
+
+export async function previewTransform(
+  fileId: number,
+  transforms: Transform[]
+): Promise<StitchSegment[]> {
+  return invoke<StitchSegment[]>("preview_transform", { fileId, transforms });
+}
+
+export async function saveTransformed(
+  fileId: number,
+  transforms: Transform[],
+  outputPath: string
+): Promise<string> {
+  return invoke<string>("save_transformed", { fileId, transforms, outputPath });
+}
+
+export async function getStitchDimensions(
+  fileId: number
+): Promise<[number, number]> {
+  return invoke<[number, number]>("get_stitch_dimensions", { fileId });
 }
 
 export async function generatePdfReport(
