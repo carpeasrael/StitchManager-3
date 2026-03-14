@@ -23,6 +23,7 @@
   --color-success: #28a745;
   --color-success-bg: #dcfce7;
   --color-warning: #e6a700;
+  --color-warning-text: #996d00;
   --color-warning-bg: #fff8e1;
   --color-on-status: #ffffff;
   --color-on-warning: #333333;
@@ -88,6 +89,7 @@
   --color-success: #51cf66;
   --color-success-bg: rgba(81, 207, 102, 0.12);
   --color-warning: #ffc107;
+  --color-warning-text: #ffc107;
   --color-warning-bg: rgba(255, 193, 7, 0.15);
   --color-on-status: #ffffff;
   --color-on-warning: #1f1f23;

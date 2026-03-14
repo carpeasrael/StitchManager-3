@@ -182,6 +182,7 @@ function showTextPopup(title: string, text: string): void {
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.remove();
   });
+  overlay.addEventListener("dialog-dismiss", () => overlay.remove());
 
   const dialog = document.createElement("div");
   dialog.className = "dialog dialog-text-popup";
@@ -216,6 +217,7 @@ function showInfoDialog(): void {
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.remove();
   });
+  overlay.addEventListener("dialog-dismiss", () => overlay.remove());
 
   const dialog = document.createElement("div");
   dialog.className = "dialog dialog-info";

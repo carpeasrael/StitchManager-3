@@ -346,6 +346,7 @@ export class Toolbar extends Component {
       appState.set("folders", folders);
     } catch (e) {
       console.warn("Failed to add folder:", e);
+      ToastContainer.show("error", "Ordner konnte nicht hinzugefuegt werden");
     }
   }
 
