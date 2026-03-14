@@ -105,6 +105,72 @@
   padding: var(--spacing-4);
 }
 
+/* Status version badge */
+.status-version {
+  font-size: 0.65rem;
+  color: var(--color-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Info Dialog */
+.dialog-info {
+  width: 360px;
+  padding: var(--spacing-4);
+  text-align: center;
+}
+
+.info-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 var(--spacing-1);
+}
+
+.info-version {
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  margin-bottom: var(--spacing-3);
+}
+
+.info-section {
+  text-align: left;
+  margin-bottom: var(--spacing-3);
+}
+
+.info-row {
+  padding: var(--spacing-1) 0;
+  font-size: var(--font-size-caption);
+}
+
+.info-label {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.info-row a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.info-row a:hover {
+  text-decoration: underline;
+}
+
+.info-close-btn {
+  width: 100%;
+  padding: var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+}
+
+.info-close-btn:hover {
+  background: var(--color-accent-10);
+}
+
 /* Edit Dialog */
 .dialog-edit {
   width: 400px;

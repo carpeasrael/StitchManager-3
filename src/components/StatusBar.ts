@@ -137,5 +137,10 @@ export class StatusBar extends Component {
     right.className = "status-right";
     right.textContent = this.lastAction;
     this.el.appendChild(right);
+
+    const version = document.createElement("span");
+    version.className = "status-version";
+    version.textContent = "v26.03-a2";
+    this.el.appendChild(version);
   }
 }

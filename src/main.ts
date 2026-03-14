@@ -172,6 +172,36 @@ async function revealSelectedFile(): Promise<void> {
   }
 }
 
+function showInfoDialog(): void {
+  const overlay = document.createElement("div");
+  overlay.className = "dialog-overlay";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  const dialog = document.createElement("div");
+  dialog.className = "dialog dialog-info";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-label", "Info");
+
+  dialog.innerHTML = `
+    <h3 class="info-title">StichMan</h3>
+    <div class="info-version">Version 26.03-a2</div>
+    <div class="info-section">
+      <div class="info-row"><span class="info-label">Autor:</span> carpeasrael</div>
+      <div class="info-row"><span class="info-label">E-Mail:</span> <a href="mailto:carpeasrael@chaostribunal.de">carpeasrael@chaostribunal.de</a></div>
+      <div class="info-row"><span class="info-label">GitHub:</span> <a href="https://github.com/carpeasrael/StitchManager-3" target="_blank">carpeasrael/StitchManager-3</a></div>
+    </div>
+    <button class="info-close-btn">Schliessen</button>
+  `;
+
+  dialog.querySelector(".info-close-btn")?.addEventListener("click", () => overlay.remove());
+
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+}
+
 function initEventHandlers(): () => void {
   const unsubs = [
     EventBus.on("toolbar:ai-analyze", async () => {
@@ -190,6 +220,10 @@ function initEventHandlers(): () => void {
 
     EventBus.on("toolbar:settings", () => {
       SettingsDialog.open();
+    }),
+
+    EventBus.on("toolbar:info", () => {
+      showInfoDialog();
     }),
 
     EventBus.on("toolbar:save", () => {

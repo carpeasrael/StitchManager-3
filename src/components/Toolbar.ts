@@ -183,6 +183,12 @@ export class Toolbar extends Component {
             shortcut: "Ctrl+,",
             onClick: () => EventBus.emit("toolbar:settings"),
           },
+          {
+            className: "menu-item-info",
+            icon: "\u2139",
+            label: "Info",
+            onClick: () => EventBus.emit("toolbar:info"),
+          },
         ],
       },
     ];
