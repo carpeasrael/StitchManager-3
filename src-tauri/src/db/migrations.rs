@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 6;
+const CURRENT_VERSION: i32 = 7;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -67,6 +67,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 6 {
         apply_v6(conn)?;
+    }
+
+    if current < 7 {
+        apply_v7(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -304,6 +308,23 @@ fn apply_v5(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v7(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE embroidery_files ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;
+        CREATE INDEX IF NOT EXISTS idx_files_favorite ON embroidery_files(is_favorite);
+        CREATE INDEX IF NOT EXISTS idx_files_updated_at ON embroidery_files(updated_at);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (7, 'Add is_favorite column and dashboard indexes');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 fn apply_v6(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
         "BEGIN TRANSACTION;
@@ -471,7 +492,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6, "Schema version must be 6");
+        assert_eq!(version, 7, "Schema version must be 7");
     }
 
     #[test]
@@ -494,22 +515,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_six() {
+    fn test_schema_version_is_seven() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 6",
+                "SELECT description FROM schema_version WHERE version = 7",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add composite indexes, FTS5 full-text search");
+        assert_eq!(desc, "Add is_favorite column and dashboard indexes");
     }
 
     #[test]

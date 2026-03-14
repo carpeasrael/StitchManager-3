@@ -33,6 +33,7 @@ export interface EmbroideryFile {
   keywords: string | null;
   comments: string | null;
   uniqueId: string | null;
+  isFavorite: boolean;
   aiAnalyzed: boolean;
   aiConfirmed: boolean;
   createdAt: string;
@@ -186,6 +187,13 @@ export interface BrandColor {
   code: string;
   name: string;
   hex: string;
+}
+
+export interface LibraryStats {
+  totalFiles: number;
+  totalFolders: number;
+  totalStitches: number;
+  formatCounts: Record<string, number>;
 }
 
 export type ThemeMode = "hell" | "dunkel";

@@ -357,6 +357,88 @@ pub fn get_thumbnails_batch(
     Ok(result)
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStats {
+    pub total_files: i64,
+    pub total_folders: i64,
+    pub total_stitches: i64,
+    pub format_counts: std::collections::HashMap<String, i64>,
+}
+
+#[tauri::command]
+pub fn get_recent_files(
+    db: State<'_, DbState>,
+    limit: Option<i64>,
+) -> Result<Vec<EmbroideryFile>, AppError> {
+    let conn = lock_db(&db)?;
+    let lim = limit.unwrap_or(20);
+    let sql = format!("{FILE_SELECT} ORDER BY updated_at DESC LIMIT ?1");
+    let mut stmt = conn.prepare(&sql)?;
+    let files = stmt
+        .query_map([lim], |row| row_to_file(row))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(files)
+}
+
+#[tauri::command]
+pub fn get_favorite_files(
+    db: State<'_, DbState>,
+) -> Result<Vec<EmbroideryFile>, AppError> {
+    let conn = lock_db(&db)?;
+    let sql = format!("{FILE_SELECT} WHERE is_favorite = 1 ORDER BY updated_at DESC");
+    let mut stmt = conn.prepare(&sql)?;
+    let files = stmt
+        .query_map([], |row| row_to_file(row))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(files)
+}
+
+#[tauri::command]
+pub fn toggle_favorite(
+    db: State<'_, DbState>,
+    file_id: i64,
+) -> Result<bool, AppError> {
+    let conn = lock_db(&db)?;
+    let current: bool = conn.query_row(
+        "SELECT is_favorite FROM embroidery_files WHERE id = ?1",
+        [file_id],
+        |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Datei {file_id} nicht gefunden")),
+        other => AppError::Database(other),
+    })?;
+    let new_val = !current;
+    conn.execute(
+        "UPDATE embroidery_files SET is_favorite = ?2 WHERE id = ?1",
+        rusqlite::params![file_id, new_val],
+    )?;
+    Ok(new_val)
+}
+
+#[tauri::command]
+pub fn get_library_stats(
+    db: State<'_, DbState>,
+) -> Result<LibraryStats, AppError> {
+    let conn = lock_db(&db)?;
+
+    let total_files: i64 = conn.query_row("SELECT COUNT(*) FROM embroidery_files", [], |r| r.get(0))?;
+    let total_folders: i64 = conn.query_row("SELECT COUNT(*) FROM folders", [], |r| r.get(0))?;
+    let total_stitches: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(stitch_count), 0) FROM embroidery_files", [], |r| r.get(0)
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT ff.format, COUNT(*) FROM file_formats ff GROUP BY ff.format ORDER BY COUNT(*) DESC"
+    )?;
+    let format_counts: std::collections::HashMap<String, i64> = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(LibraryStats { total_files, total_folders, total_stitches, format_counts })
+}
+
 #[tauri::command]
 pub fn get_file(
     db: State<'_, DbState>,

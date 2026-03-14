@@ -52,6 +52,7 @@ pub struct EmbroideryFile {
     pub keywords: Option<String>,
     pub comments: Option<String>,
     pub unique_id: Option<String>,
+    pub is_favorite: bool,
     pub ai_analyzed: bool,
     pub ai_confirmed: bool,
     pub created_at: String,

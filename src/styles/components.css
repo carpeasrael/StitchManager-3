@@ -1,3 +1,110 @@
+/* Dashboard */
+.dashboard {
+  padding: var(--spacing-4);
+  overflow-y: auto;
+}
+
+.dashboard-section {
+  margin-bottom: var(--spacing-4);
+}
+
+.dashboard-section-title {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 var(--spacing-3);
+}
+
+.dashboard-stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.dashboard-stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-card);
+  padding: var(--spacing-3);
+  min-width: 100px;
+  text-align: center;
+}
+
+.dashboard-stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.dashboard-stat-label {
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  margin-top: var(--spacing-1);
+}
+
+.dashboard-file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--spacing-2);
+}
+
+.dashboard-file-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-card);
+  padding: var(--spacing-2);
+  cursor: pointer;
+  transition: border-color 0.15s;
+  overflow: hidden;
+}
+
+.dashboard-file-card:hover {
+  border-color: var(--color-accent);
+}
+
+.dashboard-file-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--color-bg);
+  border-radius: var(--radius-button);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-caption);
+  color: var(--color-muted);
+  overflow: hidden;
+  margin-bottom: var(--spacing-1);
+}
+
+.dashboard-file-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dashboard-file-name {
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-file-meta {
+  font-size: 0.65rem;
+  color: var(--color-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-empty {
+  color: var(--color-muted);
+  text-align: center;
+  padding: var(--spacing-4);
+}
+
 /* Sidebar */
 .sidebar-header {
   display: flex;

@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod batch;
+pub mod convert;
 pub mod files;
 pub mod folders;
 pub mod migration;

@@ -8,6 +8,7 @@ import type {
   Tag,
   StitchSegment,
   SearchParams,
+  LibraryStats,
 } from "../types/index";
 
 export interface PaginatedFiles {
@@ -143,6 +144,42 @@ export async function getAttachmentCounts(
   fileIds: number[]
 ): Promise<Record<number, number>> {
   return invoke<Record<number, number>>("get_attachment_counts", { fileIds });
+}
+
+export async function getRecentFiles(limit?: number): Promise<EmbroideryFile[]> {
+  return invoke<EmbroideryFile[]>("get_recent_files", { limit: limit ?? 20 });
+}
+
+export async function getFavoriteFiles(): Promise<EmbroideryFile[]> {
+  return invoke<EmbroideryFile[]>("get_favorite_files");
+}
+
+export async function toggleFavorite(fileId: number): Promise<boolean> {
+  return invoke<boolean>("toggle_favorite", { fileId });
+}
+
+export async function getLibraryStats(): Promise<LibraryStats> {
+  return invoke<LibraryStats>("get_library_stats");
+}
+
+export async function getSupportedFormats(): Promise<string[]> {
+  return invoke<string[]>("get_supported_formats");
+}
+
+export async function convertFile(
+  fileId: number,
+  targetFormat: string,
+  outputDir: string
+): Promise<string> {
+  return invoke<string>("convert_file", { fileId, targetFormat, outputDir });
+}
+
+export async function convertFilesBatch(
+  fileIds: number[],
+  targetFormat: string,
+  outputDir: string
+): Promise<{ total: number; success: number; failed: number; errors: string[] }> {
+  return invoke("convert_files_batch", { fileIds, targetFormat, outputDir });
 }
 
 export async function generatePdfReport(

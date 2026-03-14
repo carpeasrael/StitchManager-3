@@ -15,6 +15,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { BatchDialog } from "./components/BatchDialog";
 import { ToastContainer } from "./components/Toast";
 import { Splitter } from "./components/Splitter";
+import { Dashboard } from "./components/Dashboard";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -385,6 +386,61 @@ function initEventHandlers(): () => void {
       await reloadFiles();
     }),
 
+    EventBus.on("toolbar:convert", async () => {
+      let fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) {
+        const singleId = appState.get("selectedFileId");
+        if (singleId === null) return;
+        fileIds = [singleId];
+      }
+
+      // Get supported formats
+      let formats: string[];
+      try {
+        formats = await FileService.getSupportedFormats();
+      } catch {
+        ToastContainer.show("error", "Formate konnten nicht geladen werden");
+        return;
+      }
+
+      const format = prompt(`Zielformat waehlen (${formats.join(", ")}):`);
+      if (!format) return;
+      const upper = format.trim().toUpperCase();
+      if (!formats.includes(upper)) {
+        ToastContainer.show("error", `Unbekanntes Format: ${format}`);
+        return;
+      }
+
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Zielordner fuer Konvertierung waehlen",
+      });
+      if (!selected) return;
+      const outputDir = typeof selected === "string" ? selected : String(selected);
+
+      if (fileIds.length === 1) {
+        try {
+          const path = await FileService.convertFile(fileIds[0], upper, outputDir);
+          ToastContainer.show("success", `Konvertiert: ${path.split(/[\\/]/).pop()}`);
+        } catch (e) {
+          console.warn("Convert failed:", e);
+          ToastContainer.show("error", "Konvertierung fehlgeschlagen");
+        }
+      } else {
+        try {
+          const result = await FileService.convertFilesBatch(fileIds, upper, outputDir);
+          ToastContainer.show(
+            result.failed > 0 ? "error" : "success",
+            `${result.success} von ${result.total} Dateien konvertiert`
+          );
+        } catch (e) {
+          console.warn("Batch convert failed:", e);
+          ToastContainer.show("error", "Batch-Konvertierung fehlgeschlagen");
+        }
+      }
+    }),
+
     EventBus.on("toolbar:pdf-export", async () => {
       const multiIds = appState.get("selectedFileIds");
       const singleId = appState.get("selectedFileId");
@@ -624,7 +680,13 @@ function initComponents(): AppInstances {
 
   const centerEl = document.querySelector<HTMLElement>(".app-center");
   if (centerEl) {
-    components.push(new FileList(centerEl));
+    // Dashboard and FileList are siblings in the center panel
+    const dashboardEl = document.createElement("div");
+    const fileListEl = document.createElement("div");
+    centerEl.appendChild(dashboardEl);
+    centerEl.appendChild(fileListEl);
+    components.push(new Dashboard(dashboardEl));
+    components.push(new FileList(fileListEl));
   }
 
   const rightEl = document.querySelector<HTMLElement>(".app-right");

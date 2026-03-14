@@ -2,6 +2,7 @@ pub mod dst;
 pub mod jef;
 pub mod pes;
 pub mod vp3;
+pub mod writers;
 
 use serde::Serialize;
 
