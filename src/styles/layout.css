@@ -13,6 +13,7 @@
   color: var(--color-text);
   font-family: var(--font-family);
   font-size: var(--font-size-body);
+  border-radius: var(--radius-panel);
 }
 
 .app-layout::before {
@@ -65,6 +66,7 @@
   background: var(--color-surface);
   border-right: 1px solid var(--color-border-light);
   padding: var(--spacing-3);
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 
 .app-center {
@@ -80,6 +82,7 @@
   overflow-y: auto;
   background: var(--color-surface);
   padding: var(--spacing-4);
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
 }
 
 .app-splitter-l {

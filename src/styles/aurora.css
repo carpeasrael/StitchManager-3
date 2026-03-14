@@ -50,6 +50,7 @@
   /* Border Radius */
   --radius-input: 6px;
   --radius-card: 8px;
+  --radius-panel: 8px;
   --radius-dialog: 12px;
   --radius-button: 8px;
   --radius-pill: 999px;

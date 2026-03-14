@@ -506,6 +506,11 @@ pub async fn batch_export_usb(
         std::fs::create_dir_all(target_dir)?;
     }
 
+    // Canonicalize the target directory to resolve symlinks and normalize the path
+    let canonical_target = target_dir.canonicalize().map_err(|e| {
+        AppError::Validation(format!("Zielverzeichnis kann nicht aufgeloest werden: {e}"))
+    })?;
+
     // Phase 1: Load all file paths in a single DB lock
     let files: Vec<(i64, Option<(String, String)>)> = {
         let conn = lock_db(&db)?;
@@ -550,8 +555,29 @@ pub async fn batch_export_usb(
                 )));
             }
 
-            let desired = target_dir.join(filename);
+            // Sanitize filename to prevent path traversal via crafted DB entries
+            let safe_filename = filename
+                .replace('/', "_")
+                .replace('\\', "_")
+                .replace("..", "");
+            let desired = canonical_target.join(&safe_filename);
             let dest = dedup_path(&desired, &mut claimed);
+
+            // Verify the resolved destination stays within the target directory.
+            // The dest file doesn't exist yet, so canonicalize the parent and append the filename.
+            let canonical_dest = dest.parent()
+                .ok_or_else(|| AppError::Validation("Zieldatei hat kein uebergeordnetes Verzeichnis".into()))?
+                .canonicalize()
+                .map(|cp| cp.join(dest.file_name().unwrap_or_default()))
+                .map_err(|e| AppError::Validation(format!(
+                    "Zielverzeichnis kann nicht aufgeloest werden: {e}"
+                )))?;
+            if !canonical_dest.starts_with(&canonical_target) {
+                return Err(AppError::Validation(
+                    "Zieldatei liegt ausserhalb des Zielverzeichnisses".into(),
+                ));
+            }
+
             std::fs::copy(source, &dest)?;
 
             Ok(filename.clone())

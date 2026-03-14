@@ -144,7 +144,13 @@ fn parse_pes_colors(data: &[u8], name_len: usize, pec_offset: usize) -> Result<V
     }
 
     let num_colors = read_u16(data, color_count_offset)? as usize;
-    if num_colors == 0 || num_colors > 256 {
+    if num_colors == 0 {
+        return Ok(Vec::new());
+    }
+    if num_colors > 256 {
+        log::warn!(
+            "PES: color count {num_colors} exceeds maximum 256, falling back to PEC palette"
+        );
         return Ok(Vec::new());
     }
 

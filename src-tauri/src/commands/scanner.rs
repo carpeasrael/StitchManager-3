@@ -264,27 +264,43 @@ pub fn import_files(
     drop(conn);
 
     // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
+    let mut thumb_failures: u32 = 0;
     for (id, filepath, ext) in &imported_ids {
-        if let Ok(data) = std::fs::read(std::path::Path::new(filepath)) {
-            match thumb_state.0.generate(*id, &data, ext) {
-                Ok(thumb_path) => {
-                    match lock_db(&db) {
-                        Ok(c) => {
-                            let _ = c.execute(
-                                "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                                rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                            );
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
+        match std::fs::read(std::path::Path::new(filepath)) {
+            Ok(data) => {
+                match thumb_state.0.generate(*id, &data, ext) {
+                    Ok(thumb_path) => {
+                        match lock_db(&db) {
+                            Ok(c) => {
+                                let _ = c.execute(
+                                    "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                                    rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
+                                );
+                            }
+                            Err(e) => {
+                                thumb_failures += 1;
+                                log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                    Err(e) => {
+                        thumb_failures += 1;
+                        log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                    }
                 }
             }
+            Err(e) => {
+                thumb_failures += 1;
+                log::warn!("Failed to read file for thumbnail generation {filepath}: {e}");
+            }
         }
+    }
+    if thumb_failures > 0 {
+        let thumb_ok = (imported_ids.len() as u32).saturating_sub(thumb_failures);
+        log::warn!(
+            "Thumbnail generation: {thumb_ok}/{} succeeded, {thumb_failures} failed",
+            imported_ids.len()
+        );
     }
 
     // Fetch final state of imported files (with thumbnail_path set)
@@ -518,22 +534,37 @@ pub fn mass_import(
     drop(conn);
 
     // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
+    let mut thumb_failures: u32 = 0;
     for (id, filepath, ext) in &thumb_pending {
-        if let Ok(data) = std::fs::read(std::path::Path::new(filepath)) {
-            match thumb_state.0.generate(*id, &data, ext) {
-                Ok(thumb_path) => {
-                    if let Ok(c) = lock_db(&db) {
-                        let _ = c.execute(
-                            "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                            rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                        );
+        match std::fs::read(std::path::Path::new(filepath)) {
+            Ok(data) => {
+                match thumb_state.0.generate(*id, &data, ext) {
+                    Ok(thumb_path) => {
+                        if let Ok(c) = lock_db(&db) {
+                            let _ = c.execute(
+                                "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                                rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        thumb_failures += 1;
+                        log::warn!("Failed to generate thumbnail for {filepath}: {e}");
                     }
                 }
-                Err(e) => {
-                    log::warn!("Failed to generate thumbnail for {filepath}: {e}");
-                }
+            }
+            Err(e) => {
+                thumb_failures += 1;
+                log::warn!("Failed to read file for thumbnail generation {filepath}: {e}");
             }
         }
+    }
+    if thumb_failures > 0 {
+        let thumb_ok = (thumb_pending.len() as u32).saturating_sub(thumb_failures);
+        log::warn!(
+            "Thumbnail generation: {thumb_ok}/{} succeeded, {thumb_failures} failed",
+            thumb_pending.len()
+        );
     }
 
     let total_elapsed_ms = start.elapsed().as_millis() as u64;
@@ -680,27 +711,43 @@ pub fn watcher_auto_import(
     } // DB lock dropped here before thumbnail generation
 
     // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
+    let mut thumb_failures: u32 = 0;
     for (id, filepath, ext) in &thumb_pending {
-        if let Ok(data) = std::fs::read(std::path::Path::new(filepath)) {
-            match thumb_state.0.generate(*id, &data, ext) {
-                Ok(thumb_path) => {
-                    match lock_db(&db) {
-                        Ok(c) => {
-                            let _ = c.execute(
-                                "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                                rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                            );
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
+        match std::fs::read(std::path::Path::new(filepath)) {
+            Ok(data) => {
+                match thumb_state.0.generate(*id, &data, ext) {
+                    Ok(thumb_path) => {
+                        match lock_db(&db) {
+                            Ok(c) => {
+                                let _ = c.execute(
+                                    "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                                    rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
+                                );
+                            }
+                            Err(e) => {
+                                thumb_failures += 1;
+                                log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                    Err(e) => {
+                        thumb_failures += 1;
+                        log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                    }
                 }
             }
+            Err(e) => {
+                thumb_failures += 1;
+                log::warn!("Failed to read file for thumbnail generation {filepath}: {e}");
+            }
         }
+    }
+    if thumb_failures > 0 {
+        let thumb_ok = (thumb_pending.len() as u32).saturating_sub(thumb_failures);
+        log::warn!(
+            "Thumbnail generation: {thumb_ok}/{} succeeded, {thumb_failures} failed",
+            thumb_pending.len()
+        );
     }
 
     Ok(imported_count)

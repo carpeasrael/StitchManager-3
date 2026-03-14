@@ -234,13 +234,15 @@ fn parse_vp3_design(data: &[u8], start: usize) -> Result<(Vp3DesignInfo, usize),
     }
 
     // Scan for color sections with a budget to prevent DoS on large files
-    let scan_limit = data.len().min(pos + 10_000_000); // Max 10MB scan
+    let scan_limit = data.len().min(pos + 1_000_000); // Max 1MB scan
+    let mut consecutive_misses: u32 = 0;
     while pos + 10 <= scan_limit {
         // Look for potential color section marker
         // Color sections typically have recognizable patterns
 
         // Try reading an RGB triplet and thread info
         if let Some((color, stitch_data_start, section_end)) = try_parse_color_section(data, pos) {
+            consecutive_misses = 0;
             colors.push(color);
 
             // Count stitches and jumps in this section
@@ -266,6 +268,11 @@ fn parse_vp3_design(data: &[u8], start: usize) -> Result<(Vp3DesignInfo, usize),
 
             pos = section_end;
         } else {
+            consecutive_misses += 1;
+            if consecutive_misses > 10_000 {
+                log::warn!("VP3: color scan aborted after {consecutive_misses} consecutive misses at offset {pos}");
+                break;
+            }
             pos += 1;
         }
     }
@@ -468,7 +475,8 @@ fn compute_vp3_stitch_bounds(
 fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
     let mut colors = Vec::new();
     let mut pos = 0;
-    let scan_limit = data.len().min(10_000_000);
+    let scan_limit = data.len().min(1_000_000);
+    let mut consecutive_misses: u32 = 0;
 
     while pos + 10 < scan_limit {
         if pos + 5 >= data.len() {
@@ -476,6 +484,11 @@ fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
         }
         let name_len = ((data[pos + 3] as u16) << 8) | data[pos + 4] as u16;
         if name_len < 3 || name_len >= 100 || pos + 5 + name_len as usize > data.len() {
+            consecutive_misses += 1;
+            if consecutive_misses > 10_000 {
+                log::warn!("VP3: structure scan aborted after {consecutive_misses} consecutive misses at offset {pos}");
+                break;
+            }
             pos += 1;
             continue;
         }
@@ -487,6 +500,8 @@ fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
         let name_valid = name.chars().any(|c| c.is_ascii_alphabetic())
             && name.chars().all(|c| c.is_ascii_graphic() || c == ' ');
         if !name_valid {
+            consecutive_misses += 1;
+            if consecutive_misses > 10_000 { break; }
             pos += 1;
             continue;
         }
@@ -497,6 +512,8 @@ fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
 
         // Reject all-identical RGB (likely garbage), except black (0,0,0) and white (255,255,255)
         if r == g && g == b && r != 0 && r != 255 {
+            consecutive_misses += 1;
+            if consecutive_misses > 10_000 { break; }
             pos += 1;
             continue;
         }
@@ -504,11 +521,15 @@ fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
         // Require a valid brand name string immediately after the thread name
         let brand_start = pos + 5 + name_len as usize;
         if brand_start + 2 > data.len() {
+            consecutive_misses += 1;
+            if consecutive_misses > 10_000 { break; }
             pos += 1;
             continue;
         }
         let brand_len = ((data[brand_start] as u16) << 8) | data[brand_start + 1] as u16;
         if brand_len == 0 || brand_len >= 100 || brand_start + 2 + brand_len as usize > data.len() {
+            consecutive_misses += 1;
+            if consecutive_misses > 10_000 { break; }
             pos += 1;
             continue;
         }
@@ -517,10 +538,13 @@ fn scan_vp3_structure(data: &[u8]) -> Option<Vp3DesignInfo> {
         let brand_valid = brand.chars().any(|c| c.is_ascii_alphabetic())
             && brand.chars().all(|c| c.is_ascii_graphic() || c == ' ');
         if !brand_valid {
+            consecutive_misses += 1;
+            if consecutive_misses > 10_000 { break; }
             pos += 1;
             continue;
         }
 
+        consecutive_misses = 0;
         colors.push(ParsedColor {
             hex: format!("#{r:02X}{g:02X}{b:02X}"),
             name: Some(name.to_string()),
@@ -583,8 +607,11 @@ fn decode_vp3_stitch_segments(data: &[u8]) -> Vec<StitchSegment> {
     }
 
     let mut color_index: usize = 0;
-    while pos + 10 <= data.len() {
+    let stitch_scan_limit = data.len().min(pos + 1_000_000);
+    let mut stitch_consecutive_misses: u32 = 0;
+    while pos + 10 <= stitch_scan_limit {
         if let Some((color, stitch_start, section_end)) = try_parse_color_section(data, pos) {
+            stitch_consecutive_misses = 0;
             let color_hex = color.hex;
             let mut points = Vec::new();
             points.push((x, y));
@@ -624,6 +651,11 @@ fn decode_vp3_stitch_segments(data: &[u8]) -> Vec<StitchSegment> {
             color_index += 1;
             pos = section_end;
         } else {
+            stitch_consecutive_misses += 1;
+            if stitch_consecutive_misses > 10_000 {
+                log::warn!("VP3: stitch segment scan aborted after {stitch_consecutive_misses} consecutive misses at offset {pos}");
+                break;
+            }
             pos += 1;
         }
     }
