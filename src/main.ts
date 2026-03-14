@@ -185,21 +185,106 @@ function showInfoDialog(): void {
   dialog.setAttribute("aria-modal", "true");
   dialog.setAttribute("aria-label", "Info");
 
-  dialog.innerHTML = `
+  // Header
+  const header = document.createElement("div");
+  header.className = "info-header";
+  header.innerHTML = `
     <h3 class="info-title">StichMan</h3>
     <div class="info-version">Version 26.03-a2</div>
-    <div class="info-section">
-      <div class="info-row"><span class="info-label">Autor:</span> carpeasrael</div>
-      <div class="info-row"><span class="info-label">E-Mail:</span> <a href="mailto:carpeasrael@chaostribunal.de">carpeasrael@chaostribunal.de</a></div>
-      <div class="info-row"><span class="info-label">GitHub:</span> <a href="https://github.com/carpeasrael/StitchManager-3" target="_blank">carpeasrael/StitchManager-3</a></div>
+    <div class="info-meta">
+      <span><strong>Autor:</strong> carpeasrael</span>
+      <span><strong>E-Mail:</strong> <a href="mailto:carpeasrael@chaostribunal.de">carpeasrael@chaostribunal.de</a></span>
+      <span><strong>GitHub:</strong> <a href="https://github.com/carpeasrael/StitchManager-3" target="_blank">carpeasrael/StitchManager-3</a></span>
     </div>
-    <button class="info-close-btn">Schliessen</button>
+  `;
+  dialog.appendChild(header);
+
+  // Tabs
+  const tabBar = document.createElement("div");
+  tabBar.className = "info-tab-bar";
+
+  const tabs = [
+    { id: "about", label: "Info" },
+    { id: "license", label: "Lizenz" },
+  ];
+
+  const contentArea = document.createElement("div");
+  contentArea.className = "info-tab-content";
+
+  const aboutContent = `
+    <h4>StichMan \u2014 Stickdateien-Verwaltung</h4>
+    <p>Plattformuebergreifende Desktop-Anwendung zur Verwaltung von Stickdateien.
+    Unterstuetzt PES, DST, JEF und VP3 Formate mit nativer Analyse,
+    KI-gestuetzter Metadaten-Extraktion und Batch-Operationen.</p>
+    <h4>Funktionen</h4>
+    <ul>
+      <li>Format-Parsing: PES, DST, JEF, VP3 mit Stichzaehlung, Abmessungen, Farbpaletten</li>
+      <li>Datei-Konvertierung zwischen unterstuetzten Formaten</li>
+      <li>KI-Analyse: Ollama/OpenAI fuer Metadaten-Extraktion</li>
+      <li>Batch-Umbenennung, Organisation und USB-Export</li>
+      <li>Stich-Transformationen: Groessenanpassung, Drehung, Spiegelung</li>
+      <li>Garnfarben-Datenbank mit Hersteller-Zuordnung</li>
+      <li>PDF-Berichte mit Stickmuster-Vorschau</li>
+      <li>Dashboard mit Statistiken, letzten Dateien und Favoriten</li>
+      <li>Versionshistorie fuer Stickdateien</li>
+      <li>Maschinen-Transfer mit automatischer Format-Konvertierung</li>
+    </ul>
+    <h4>Technologie</h4>
+    <p>Tauri v2 + Rust + TypeScript + Vite + SQLite</p>
   `;
 
-  dialog.querySelector(".info-close-btn")?.addEventListener("click", () => overlay.remove());
+  const licenseContent = `
+    <h4>GNU General Public License v3.0</h4>
+    <p>Copyright \u00A9 2024-2026 carpeasrael</p>
+    <p>This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.</p>
+    <p>This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+    GNU General Public License for more details.</p>
+    <p>You should have received a copy of the GNU General Public License
+    along with this program. If not, see
+    <a href="https://www.gnu.org/licenses/" target="_blank">https://www.gnu.org/licenses/</a>.</p>
+    <h4>Abhaengigkeiten</h4>
+    <p>Diese Software verwendet Open-Source-Bibliotheken unter ihren jeweiligen Lizenzen,
+    darunter Tauri (MIT/Apache-2.0), rusqlite (MIT), image (MIT), printpdf (MIT),
+    und weitere. Vollstaendige Lizenzinformationen finden Sie im GitHub-Repository.</p>
+  `;
+
+  const contents: Record<string, string> = { about: aboutContent, license: licenseContent };
+
+  function showTab(id: string) {
+    contentArea.innerHTML = contents[id] || "";
+    tabBar.querySelectorAll(".info-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === id);
+    });
+  }
+
+  for (const tab of tabs) {
+    const btn = document.createElement("button");
+    btn.className = "info-tab";
+    btn.setAttribute("data-tab", tab.id);
+    btn.textContent = tab.label;
+    btn.addEventListener("click", () => showTab(tab.id));
+    tabBar.appendChild(btn);
+  }
+
+  dialog.appendChild(tabBar);
+  dialog.appendChild(contentArea);
+
+  // Close button
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "info-close-btn";
+  closeBtn.textContent = "Schliessen";
+  closeBtn.addEventListener("click", () => overlay.remove());
+  dialog.appendChild(closeBtn);
 
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
+
+  showTab("about");
 }
 
 function initEventHandlers(): () => void {
