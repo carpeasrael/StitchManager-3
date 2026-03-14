@@ -1,5 +1,6 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import * as FolderService from "../services/FolderService";
 
@@ -9,7 +10,7 @@ export class Sidebar extends Component {
   constructor(container: HTMLElement) {
     super(container);
     this.subscribe(
-      appState.on("folders", () => this.render())
+      appState.on("folders", () => this.loadCounts())
     );
     this.subscribe(
       appState.on("selectedFolderId", () => this.render())
@@ -115,8 +116,19 @@ export class Sidebar extends Component {
       countSpan.className = "folder-count";
       countSpan.textContent = String(this.folderCounts.get(folder.id) ?? 0);
 
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "folder-delete-btn";
+      deleteBtn.textContent = "\u00D7";
+      deleteBtn.title = "Ordner l\u00F6schen";
+      deleteBtn.setAttribute("aria-label", `Ordner ${folder.name} l\u00F6schen`);
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.deleteFolder(folder.id);
+      });
+
       li.appendChild(nameSpan);
       li.appendChild(countSpan);
+      li.appendChild(deleteBtn);
 
       li.addEventListener("click", () => {
         if (folder.id === appState.get("selectedFolderId")) {
@@ -135,6 +147,14 @@ export class Sidebar extends Component {
     }
 
     this.el.appendChild(list);
+  }
+
+  private deleteFolder(folderId: number): void {
+    // Select the folder first so the central handler knows which one to delete
+    appState.set("selectedFileIds", []);
+    appState.set("selectedFileId", null);
+    appState.set("selectedFolderId", folderId);
+    EventBus.emit("toolbar:delete-folder");
   }
 
   private async createFolder(): Promise<void> {

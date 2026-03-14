@@ -268,6 +268,46 @@ function initEventHandlers(): () => void {
       }
     }),
 
+    EventBus.on("toolbar:delete-folder", async () => {
+      const folderId = appState.get("selectedFolderId");
+      if (folderId === null) return;
+
+      const folders = appState.get("folders");
+      const folder = folders.find((f) => f.id === folderId);
+      if (!folder) return;
+
+      // Get file count for confirmation message
+      let fileCount = 0;
+      try {
+        fileCount = await FolderService.getFileCount(folderId);
+      } catch {
+        // Fall back to zero if count query fails
+      }
+
+      // Check for subfolders
+      const hasSubfolders = folders.some((f) => f.parentId === folderId);
+
+      let msg = `Ordner "${folder.name}"`;
+      if (hasSubfolders) msg += " und Unterordner";
+      if (fileCount > 0) msg += ` mit ${fileCount} Datei(en)`;
+      msg += " wirklich l\u00F6schen?";
+      if (!confirm(msg)) return;
+
+      try {
+        await FolderService.remove(folderId);
+        appState.set("selectedFileIds", []);
+        appState.set("selectedFileId", null);
+        appState.set("selectedFolderId", null);
+        const updatedFolders = await FolderService.getAll();
+        appState.set("folders", updatedFolders);
+        appState.set("files", []);
+        ToastContainer.show("success", `Ordner "${folder.name}" gel\u00F6scht`);
+      } catch (e) {
+        console.warn("Failed to delete folder:", e);
+        ToastContainer.show("error", "Ordner konnte nicht gel\u00F6scht werden");
+      }
+    }),
+
     EventBus.on("toolbar:mass-import", async () => {
       const selected = await open({
         directory: true,

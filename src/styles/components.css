@@ -89,6 +89,33 @@
   color: var(--color-accent-strong);
 }
 
+.folder-delete-btn {
+  opacity: 0;
+  pointer-events: none;
+  background: none;
+  border: none;
+  color: var(--color-muted);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: var(--spacing-1);
+  transition: opacity 0.15s;
+}
+
+.folder-item:hover .folder-delete-btn,
+.folder-item.selected .folder-delete-btn,
+.folder-delete-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.folder-delete-btn:hover,
+.folder-delete-btn:focus-visible {
+  color: var(--color-error);
+}
+
 /* Toolbar sections */
 .toolbar-search {
   flex: 1;

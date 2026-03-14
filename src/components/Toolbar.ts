@@ -76,6 +76,12 @@ export class Toolbar extends Component {
             onClick: () => this.scanFolder(),
           },
           {
+            className: "menu-item-delete-folder",
+            icon: "\uD83D\uDDD1",
+            label: "Ordner l\u00F6schen",
+            onClick: () => EventBus.emit("toolbar:delete-folder"),
+          },
+          {
             className: "menu-item-mass-import",
             icon: "\uD83D\uDCE5",
             label: "Massenimport",
@@ -287,6 +293,7 @@ export class Toolbar extends Component {
     };
 
     setDisabled("menu-item-scan", !hasFolder);
+    setDisabled("menu-item-delete-folder", !hasFolder);
     setDisabled("menu-item-reveal", !hasFile || hasMulti);
     setDisabled("menu-item-ai", !hasFile || hasMulti);
 
