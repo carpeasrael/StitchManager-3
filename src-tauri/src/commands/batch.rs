@@ -252,12 +252,31 @@ pub async fn batch_rename(
 
         if let Err(e) = tx_result {
             // Rollback all filesystem renames on transaction failure
+            let mut rollback_failures: Vec<String> = Vec::new();
             for op in &pending_updates {
                 if op.did_rename {
-                    let _ = std::fs::rename(&op.new_path, &op.old_path);
+                    if let Err(rb_err) = std::fs::rename(&op.new_path, &op.old_path) {
+                        log::error!(
+                            "Rollback failed for file {}: {} -> {}: {}",
+                            op.file_id,
+                            op.new_path.display(),
+                            op.old_path.display(),
+                            rb_err
+                        );
+                        rollback_failures.push(format!(
+                            "{}: {}", op.new_path.display(), rb_err
+                        ));
+                    }
                 }
             }
-            return Err(AppError::Database(e));
+            if rollback_failures.is_empty() {
+                return Err(AppError::Database(e));
+            } else {
+                return Err(AppError::Internal(format!(
+                    "DB-Transaktion fehlgeschlagen: {}. Rollback fehlgeschlagen fuer {} Dateien: {}",
+                    e, rollback_failures.len(), rollback_failures.join("; ")
+                )));
+            }
         }
     }
 
@@ -440,12 +459,31 @@ pub async fn batch_organize(
         })();
 
         if let Err(e) = tx_result {
+            let mut rollback_failures: Vec<String> = Vec::new();
             for op in &pending_updates {
                 if op.did_rename {
-                    let _ = std::fs::rename(&op.new_path, &op.old_path);
+                    if let Err(rb_err) = std::fs::rename(&op.new_path, &op.old_path) {
+                        log::error!(
+                            "Rollback failed for file {}: {} -> {}: {}",
+                            op.file_id,
+                            op.new_path.display(),
+                            op.old_path.display(),
+                            rb_err
+                        );
+                        rollback_failures.push(format!(
+                            "{}: {}", op.new_path.display(), rb_err
+                        ));
+                    }
                 }
             }
-            return Err(AppError::Database(e));
+            if rollback_failures.is_empty() {
+                return Err(AppError::Database(e));
+            } else {
+                return Err(AppError::Internal(format!(
+                    "DB-Transaktion fehlgeschlagen: {}. Rollback fehlgeschlagen fuer {} Dateien: {}",
+                    e, rollback_failures.len(), rollback_failures.join("; ")
+                )));
+            }
         }
     }
 

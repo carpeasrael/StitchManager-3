@@ -259,6 +259,45 @@ function showInfoDialog(): void {
   document.body.appendChild(overlay);
 }
 
+async function deleteSelectedFiles(): Promise<void> {
+  const multiIds = appState.get("selectedFileIds");
+  const singleId = appState.get("selectedFileId");
+  const fileIds = multiIds.length > 1 ? multiIds : singleId !== null ? [singleId] : [];
+  if (fileIds.length === 0) return;
+
+  const files = appState.get("files");
+
+  if (fileIds.length === 1) {
+    const file = files.find((f) => f.id === fileIds[0]);
+    const label = file ? (file.name || file.filename) : `ID ${fileIds[0]}`;
+    if (!confirm(`Datei "${label}" wirklich loeschen?`)) return;
+  } else {
+    if (!confirm(`${fileIds.length} Dateien wirklich loeschen?`)) return;
+  }
+
+  let deleted = 0;
+  for (const id of fileIds) {
+    try {
+      await FileService.deleteFile(id);
+      deleted++;
+    } catch (e) {
+      console.warn(`Failed to delete file ${id}:`, e);
+    }
+  }
+
+  appState.set("selectedFileIds", []);
+  appState.set("selectedFileId", null);
+  await reloadFiles();
+
+  if (deleted === fileIds.length) {
+    ToastContainer.show("success", deleted === 1 ? "Datei geloescht" : `${deleted} Dateien geloescht`);
+  } else if (deleted > 0) {
+    ToastContainer.show("info", `${deleted} von ${fileIds.length} Dateien geloescht`);
+  } else {
+    ToastContainer.show("error", "Dateien konnten nicht geloescht werden");
+  }
+}
+
 function initEventHandlers(): () => void {
   const unsubs = [
     EventBus.on("toolbar:ai-analyze", async () => {
@@ -697,25 +736,8 @@ function initEventHandlers(): () => void {
       SettingsDialog.open();
     }),
 
-    EventBus.on("shortcut:delete", async () => {
-      const fileId = appState.get("selectedFileId");
-      if (fileId === null) return;
-
-      const files = appState.get("files");
-      const file = files.find((f) => f.id === fileId);
-      if (!file) return;
-
-      if (!confirm(`Datei "${file.name || file.filename}" wirklich loeschen?`)) return;
-
-      try {
-        await invoke("delete_file", { fileId });
-        ToastContainer.show("success", "Datei geloescht");
-        await reloadFiles();
-      } catch (e) {
-        console.warn("Failed to delete file:", e);
-        ToastContainer.show("error", "Datei konnte nicht geloescht werden");
-      }
-    }),
+    EventBus.on("shortcut:delete", () => deleteSelectedFiles()),
+    EventBus.on("toolbar:delete-file", () => deleteSelectedFiles()),
 
     EventBus.on("shortcut:prev-file", () => {
       navigateFile(-1);

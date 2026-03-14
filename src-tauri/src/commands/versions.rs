@@ -129,12 +129,15 @@ pub fn restore_version(
         other => AppError::Database(other),
     })?;
 
-    // Save current state before restoring (only if no recent restore snapshot exists)
+    // Save current state before restoring (skip only if the most recent version is already a restore)
     let recent_restore: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM file_versions WHERE file_id = ?1 AND operation = 'restore' \
+        "SELECT operation FROM file_versions WHERE file_id = ?1 \
          ORDER BY version_number DESC LIMIT 1",
         [file_id],
-        |row| row.get(0),
+        |row| {
+            let op: String = row.get(0)?;
+            Ok(op == "restore")
+        },
     ).unwrap_or(false);
     if !recent_restore {
         let _ = create_version_snapshot(&conn, file_id, "restore", Some("Vor Wiederherstellung"));

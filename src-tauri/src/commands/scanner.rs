@@ -260,16 +260,25 @@ pub fn import_files(
         tx.commit()?;
     }
 
-    // Generate thumbnails outside the transaction to avoid holding the DB lock during I/O.
-    // Re-reads each file to avoid retaining all raw data in memory during batch imports.
+    // Drop DB lock before thumbnail generation to avoid blocking other commands
+    drop(conn);
+
+    // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
     for (id, filepath, ext) in &imported_ids {
         if let Ok(data) = std::fs::read(std::path::Path::new(filepath)) {
             match thumb_state.0.generate(*id, &data, ext) {
                 Ok(thumb_path) => {
-                    let _ = conn.execute(
-                        "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                        rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                    );
+                    match lock_db(&db) {
+                        Ok(c) => {
+                            let _ = c.execute(
+                                "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                                rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
+                        }
+                    }
                 }
                 Err(e) => {
                     log::warn!("Failed to generate thumbnail for {filepath}: {e}");
@@ -279,14 +288,17 @@ pub fn import_files(
     }
 
     // Fetch final state of imported files (with thumbnail_path set)
-    for (id, _, _) in &imported_ids {
-        match conn.query_row(
-            &format!("{FILE_SELECT} WHERE id = ?1"),
-            [id],
-            |row| row_to_file(row),
-        ) {
-            Ok(file) => imported.push(file),
-            Err(e) => log::warn!("Failed to read imported file {id}: {e}"),
+    {
+        let conn = lock_db(&db)?;
+        for (id, _, _) in &imported_ids {
+            match conn.query_row(
+                &format!("{FILE_SELECT} WHERE id = ?1"),
+                [id],
+                |row| row_to_file(row),
+            ) {
+                Ok(file) => imported.push(file),
+                Err(e) => log::warn!("Failed to read imported file {id}: {e}"),
+            }
         }
     }
 
@@ -601,75 +613,84 @@ pub fn watcher_auto_import(
         .map(|filepath| pre_parse_file(filepath))
         .collect();
 
-    let conn = lock_db(&db)?;
-
-    // Load all folders to match file paths against
-    let mut stmt = conn.prepare("SELECT id, path FROM folders WHERE path IS NOT NULL")?;
-    let folders: Vec<(i64, String)> = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
-
     let mut imported_count: u32 = 0;
     let mut thumb_pending: Vec<(i64, String, String)> = Vec::new(); // (id, filepath, ext)
 
-    // Transaction for DB inserts only — no file I/O inside
     {
-        let tx = conn.unchecked_transaction()?;
+        let conn = lock_db(&db)?;
 
-        for info in &file_infos {
-            // Find best matching folder (path-component-aware ancestry check)
-            let best_folder = folders
-                .iter()
-                .filter(|(_, folder_path)| {
-                    let fp = std::path::Path::new(&info.filepath);
-                    let dp = std::path::Path::new(folder_path);
-                    fp.starts_with(dp)
-                })
-                .max_by_key(|(_, folder_path)| folder_path.len());
+        // Load all folders to match file paths against
+        let folders: Vec<(i64, String)> = {
+            let mut stmt = conn.prepare("SELECT id, path FROM folders WHERE path IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
 
-            let folder_id = match best_folder {
-                Some((id, _)) => *id,
-                None => continue, // No matching folder, skip
-            };
+        // Transaction for DB inserts only — no file I/O inside
+        {
+            let tx = conn.unchecked_transaction()?;
 
-            let uid = generate_unique_id();
-            let result = tx.execute(
-                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
-            );
+            for info in &file_infos {
+                // Find best matching folder (path-component-aware ancestry check)
+                let best_folder = folders
+                    .iter()
+                    .filter(|(_, folder_path)| {
+                        let fp = std::path::Path::new(&info.filepath);
+                        let dp = std::path::Path::new(folder_path);
+                        fp.starts_with(dp)
+                    })
+                    .max_by_key(|(_, folder_path)| folder_path.len());
 
-            if let Ok(changes) = result {
-                if changes > 0 {
-                    let id = tx.last_insert_rowid();
-                    if let Some(pinfo) = &info.parsed {
-                        persist_parsed_metadata(&tx, id, pinfo, &info.filepath, info.file_size);
+                let folder_id = match best_folder {
+                    Some((id, _)) => *id,
+                    None => continue, // No matching folder, skip
+                };
+
+                let uid = generate_unique_id();
+                let result = tx.execute(
+                    "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
+                );
+
+                if let Ok(changes) = result {
+                    if changes > 0 {
+                        let id = tx.last_insert_rowid();
+                        if let Some(pinfo) = &info.parsed {
+                            persist_parsed_metadata(&tx, id, pinfo, &info.filepath, info.file_size);
+                        }
+
+                        if let Some(ext) = &info.ext {
+                            thumb_pending.push((id, info.filepath.clone(), ext.clone()));
+                        }
+
+                        imported_count += 1;
                     }
-
-                    if let Some(ext) = &info.ext {
-                        thumb_pending.push((id, info.filepath.clone(), ext.clone()));
-                    }
-
-                    imported_count += 1;
                 }
             }
+
+            tx.commit()?;
         }
+    } // DB lock dropped here before thumbnail generation
 
-        tx.commit()?;
-    }
-
-    // Generate thumbnails outside the transaction to avoid holding the DB lock during I/O
+    // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
     for (id, filepath, ext) in &thumb_pending {
         if let Ok(data) = std::fs::read(std::path::Path::new(filepath)) {
             match thumb_state.0.generate(*id, &data, ext) {
                 Ok(thumb_path) => {
-                    let _ = conn.execute(
-                        "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                        rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                    );
+                    match lock_db(&db) {
+                        Ok(c) => {
+                            let _ = c.execute(
+                                "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                                rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
+                        }
+                    }
                 }
                 Err(e) => {
                     log::warn!("Failed to generate thumbnail for {filepath}: {e}");
