@@ -132,6 +132,9 @@ async function initTauriBridge(): Promise<void> {
     listen("usb:disconnected", (e) =>
       EventBus.emit("usb:disconnected", e.payload)
     ),
+    listen("ai:start", (e) => EventBus.emit("ai:start", e.payload)),
+    listen("ai:complete", (e) => EventBus.emit("ai:complete", e.payload)),
+    listen("ai:error", (e) => EventBus.emit("ai:error", e.payload)),
   ]);
 }
 
@@ -531,6 +534,29 @@ function initEventHandlers(): () => void {
         ToastContainer.show("error", "Batch-KI-Analyse fehlgeschlagen");
       }
       await reloadFiles();
+    }),
+
+    EventBus.on("toolbar:versions", async () => {
+      const fileId = appState.get("selectedFileId");
+      if (fileId === null) return;
+      const files = appState.get("files");
+      const file = files.find((f) => f.id === fileId);
+      if (!file) return;
+
+      try {
+        const versions = await FileService.getFileVersions(fileId);
+        if (versions.length === 0) {
+          ToastContainer.show("info", "Keine Versionen vorhanden");
+          return;
+        }
+        const lines = versions.map(
+          (v) => `v${v.versionNumber}: ${v.operation} — ${v.createdAt} (${(v.fileSize / 1024).toFixed(0)} KB)`
+        );
+        showTextPopup(`Versionshistorie — ${file.name || file.filename}`, lines.join("\n"));
+      } catch (e) {
+        console.warn("Failed to load versions:", e);
+        ToastContainer.show("error", "Versionshistorie konnte nicht geladen werden");
+      }
     }),
 
     EventBus.on("toolbar:edit-transform", async () => {

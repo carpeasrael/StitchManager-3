@@ -106,6 +106,30 @@ export class Toolbar extends Component {
             label: "PDF Export",
             onClick: () => EventBus.emit("toolbar:pdf-export"),
           },
+          {
+            className: "menu-item-convert",
+            icon: "\uD83D\uDD04",
+            label: "Format konvertieren",
+            onClick: () => EventBus.emit("toolbar:convert"),
+          },
+          {
+            className: "menu-item-transfer",
+            icon: "\uD83D\uDCE4",
+            label: "An Maschine senden",
+            onClick: () => EventBus.emit("toolbar:transfer"),
+          },
+          {
+            className: "menu-item-edit-transform",
+            icon: "\u2702",
+            label: "Bearbeiten/Transformieren",
+            onClick: () => EventBus.emit("toolbar:edit-transform"),
+          },
+          {
+            className: "menu-item-versions",
+            icon: "\uD83D\uDCCB",
+            label: "Versionshistorie",
+            onClick: () => EventBus.emit("toolbar:versions"),
+          },
         ],
       },
       {
@@ -158,6 +182,12 @@ export class Toolbar extends Component {
             label: "Einstellungen",
             shortcut: "Ctrl+,",
             onClick: () => EventBus.emit("toolbar:settings"),
+          },
+          {
+            className: "menu-item-info",
+            icon: "\u2139",
+            label: "Info",
+            onClick: () => EventBus.emit("toolbar:info"),
           },
         ],
       },
@@ -281,6 +311,10 @@ export class Toolbar extends Component {
     setDisabled("menu-item-scan", !hasFolder);
     setDisabled("menu-item-reveal", !hasFile || hasMulti);
     setDisabled("menu-item-ai", !hasFile || hasMulti);
+    setDisabled("menu-item-edit-transform", !hasFile || hasMulti);
+    setDisabled("menu-item-versions", !hasFile || hasMulti);
+    setDisabled("menu-item-convert", !hasAny);
+    setDisabled("menu-item-transfer", !hasAny);
 
     setHidden("menu-item-pdf", !hasAny);
     setHidden("menu-item-batch-export", !hasAny);

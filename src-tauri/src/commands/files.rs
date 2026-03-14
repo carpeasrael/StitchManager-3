@@ -911,8 +911,7 @@ pub fn attach_file(
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or("");
-        let mut counter = 1u32;
-        loop {
+        for counter in 1..=100_000u32 {
             let new_name = if ext.is_empty() {
                 format!("{stem}_{counter}")
             } else {
@@ -922,7 +921,11 @@ pub fn attach_file(
             if !dest.exists() {
                 break;
             }
-            counter += 1;
+            if counter == 100_000 {
+                return Err(AppError::Internal(
+                    "Dateiname-Deduplizierung: Alle Suffixe erschoepft".into(),
+                ));
+            }
         }
     }
     std::fs::copy(src, &dest)?;

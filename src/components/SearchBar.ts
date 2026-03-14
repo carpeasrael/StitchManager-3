@@ -1,5 +1,6 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import { TagInput } from "./TagInput";
 import * as FileService from "../services/FileService";
@@ -37,6 +38,11 @@ export class SearchBar extends Component {
     this.render();
     this.subscribe(
       appState.on("searchParams", () => this.updateBadge())
+    );
+    this.subscribe(
+      EventBus.on("search:close-panel", () => {
+        if (this.panelOpen) this.closePanel();
+      })
     );
   }
 
@@ -133,6 +139,8 @@ export class SearchBar extends Component {
   private async togglePanel(): Promise<void> {
     this.panelOpen = !this.panelOpen;
     if (this.panelOpen) {
+      // Close burger menu if open
+      EventBus.emit("burger:close");
       // Load all tags for autocomplete
       try {
         this.allTags = await FileService.getAllTags();
@@ -167,6 +175,11 @@ export class SearchBar extends Component {
     if (this._panelTagInput) {
       this._panelTagInput.destroy();
       this._panelTagInput = null;
+    }
+    // Remove previous outsideClickHandler before re-rendering to prevent leaks
+    if (this.outsideClickHandler) {
+      document.removeEventListener("click", this.outsideClickHandler);
+      this.outsideClickHandler = null;
     }
     if (this.panelEl) {
       this.panelEl.remove();

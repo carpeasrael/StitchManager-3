@@ -104,7 +104,10 @@ export class ImagePreviewDialog {
 
     // Escape key handler
     const onKeydown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") this.close();
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        this.close();
+      }
     };
     document.addEventListener("keydown", onKeydown);
 

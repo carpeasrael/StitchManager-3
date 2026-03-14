@@ -116,6 +116,7 @@ export class TagInput extends Component {
     }
 
     if (e.key === "Escape") {
+      e.stopPropagation();
       this.hideSuggestions();
       return;
     }
