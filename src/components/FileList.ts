@@ -85,6 +85,8 @@ export class FileList extends Component {
     // Scroll container for virtual scrolling
     this.scrollContainer = document.createElement("div");
     this.scrollContainer.className = "file-list";
+    this.scrollContainer.setAttribute("role", "list");
+    this.scrollContainer.setAttribute("aria-label", "Dateien");
     this.scrollContainer.addEventListener("scroll", () => this.onScroll());
 
     // Spacer sets total height for scrollbar accuracy
@@ -235,6 +237,8 @@ export class FileList extends Component {
   ): HTMLElement {
     const card = document.createElement("div");
     card.className = "file-card";
+    card.setAttribute("role", "listitem");
+    card.setAttribute("aria-label", file.name || file.filename);
     card.dataset.fileId = String(file.id);
     card.style.position = "absolute";
     card.style.top = `${index * CARD_HEIGHT}px`;

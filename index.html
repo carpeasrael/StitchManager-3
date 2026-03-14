@@ -7,13 +7,13 @@
   </head>
   <body>
     <div id="app" class="app-layout">
-      <div class="app-menu"><span class="app-title">StichMan</span></div>
-      <div class="app-sidebar"></div>
-      <div class="app-splitter-l"></div>
-      <div class="app-center"></div>
-      <div class="app-splitter-r"></div>
-      <div class="app-right"></div>
-      <div class="app-status"></div>
+      <div class="app-menu" role="banner"><span class="app-title">StichMan</span></div>
+      <div class="app-sidebar" role="navigation" aria-label="Ordner"></div>
+      <div class="app-splitter-l" aria-hidden="true"></div>
+      <div class="app-center" role="main"></div>
+      <div class="app-splitter-r" aria-hidden="true"></div>
+      <div class="app-right" role="complementary" aria-label="Dateidetails"></div>
+      <div class="app-status" role="status"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

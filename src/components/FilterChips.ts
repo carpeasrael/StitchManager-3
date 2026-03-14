@@ -18,10 +18,13 @@ export class FilterChips extends Component {
 
     const wrapper = document.createElement("div");
     wrapper.className = "filter-chips";
+    wrapper.setAttribute("role", "toolbar");
+    wrapper.setAttribute("aria-label", "Formatfilter");
 
     // "Alle" chip
     const allChip = document.createElement("button");
     allChip.className = "filter-chip";
+    allChip.setAttribute("aria-pressed", String(!current));
     if (!current) {
       allChip.classList.add("active");
     }
@@ -34,6 +37,7 @@ export class FilterChips extends Component {
     for (const fmt of FORMATS) {
       const chip = document.createElement("button");
       chip.className = "filter-chip";
+      chip.setAttribute("aria-pressed", String(current === fmt));
       if (current === fmt) {
         chip.classList.add("active");
       }
