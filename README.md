@@ -1,8 +1,7 @@
 # StitchManager
 
-A cross-platform desktop application for managing embroidery files. Built with Tauri v2, Rust, and TypeScript.
-
-StitchManager helps embroidery enthusiasts and professionals organize, browse, and enrich their stitch file collections with format-aware parsing, AI-powered metadata analysis, and batch operations.
+StitchManager is a cross-platform desktop application for managing embroidery files, built with Tauri v2, Rust, and TypeScript.
+Developed with Anthropic Claude Code Opus 4.6 (high effort), it helps embroidery enthusiasts and professionals organize, browse, and enrich their stitch file collections through format-aware parsing, AI-powered metadata analysis, and batch operations.
 
 ## Features
 
