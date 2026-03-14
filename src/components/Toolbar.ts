@@ -1,6 +1,7 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
+import { ToastContainer } from "./Toast";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as FolderService from "../services/FolderService";
 import * as ScannerService from "../services/ScannerService";
@@ -376,6 +377,7 @@ export class Toolbar extends Component {
       appState.set("folders", updatedFolders);
     } catch (e) {
       console.warn("Failed to scan folder:", e);
+      ToastContainer.show("error", "Ordner konnte nicht gescannt werden");
     }
   }
 

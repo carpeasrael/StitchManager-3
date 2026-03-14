@@ -169,7 +169,7 @@ export class Sidebar extends Component {
       await this.loadFolders();
     } catch (e) {
       console.warn("Failed to create folder:", e);
-      alert(`Fehler: ${e}`);
+      ToastContainer.show("error", `Ordner konnte nicht erstellt werden: ${e}`);
     }
   }
 }

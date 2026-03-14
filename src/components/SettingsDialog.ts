@@ -873,9 +873,13 @@ export class SettingsDialog {
       document.documentElement.style.setProperty("--bg-image", this.originalBgImage);
       document.documentElement.style.setProperty("--bg-opacity", this.originalBgOpacity);
       document.documentElement.style.setProperty("--bg-blur", this.originalBgBlur + "px");
-      // Undo any background image DB changes from copyBackgroundImage
+      // Undo any background image changes from copyBackgroundImage
       if (this.bgPathModified) {
-        SettingsService.setSetting("bg_image_path", this.originalBgImagePath).catch(() => {});
+        // Remove the orphaned copied file, then restore the original DB path
+        SettingsService.removeBackgroundImage().catch(() => {});
+        if (this.originalBgImagePath) {
+          SettingsService.setSetting("bg_image_path", this.originalBgImagePath).catch(() => {});
+        }
       }
     }
     if (this.resizeObserver) {

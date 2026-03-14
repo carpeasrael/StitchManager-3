@@ -124,7 +124,7 @@ export class MetadataPanel extends Component {
       current.theme !== this.snapshot.theme ||
       current.description !== this.snapshot.description ||
       current.license !== this.snapshot.license ||
-      current.tags.join(",") !== this.snapshot.tags.join(",");
+      JSON.stringify(current.tags) !== JSON.stringify(this.snapshot.tags);
 
     // Check custom fields for changes
     if (!dirty) {
@@ -697,7 +697,7 @@ export class MetadataPanel extends Component {
 
       const tagsChanged =
         this.snapshot &&
-        values.tags.join(",") !== this.snapshot.tags.join(",");
+        JSON.stringify(values.tags) !== JSON.stringify(this.snapshot.tags);
 
       if (hasUpdates) {
         const updatedFile = await FileService.updateFile(saveFileId, updates);
