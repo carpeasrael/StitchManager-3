@@ -598,7 +598,7 @@ pub async fn generate_pdf_report(
         }
     } // DB lock dropped here
 
-    // Generate QR codes outside the DB lock (CPU-bound)
+    // Generate QR codes and load thumbnails outside the DB lock (CPU/IO-bound)
     let mut report_data = Vec::new();
     for (file, colors) in db_data {
         let qr_png = if let Some(ref uid) = file.unique_id {
@@ -609,7 +609,11 @@ pub async fn generate_pdf_report(
         } else {
             None
         };
-        report_data.push((file, colors, qr_png));
+        let thumb_png = file
+            .thumbnail_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok());
+        report_data.push((file, colors, qr_png, thumb_png));
     }
 
     let pdf_bytes = crate::services::pdf_report::generate_report(&report_data)?;
