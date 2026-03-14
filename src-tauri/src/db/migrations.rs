@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 5;
+const CURRENT_VERSION: i32 = 6;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -64,6 +64,13 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
     if current < 5 {
         apply_v5(conn)?;
     }
+
+    if current < 6 {
+        apply_v6(conn)?;
+    }
+
+    // Keep query planner statistics up to date
+    let _ = conn.execute_batch("ANALYZE;");
 
     Ok(())
 }
@@ -297,6 +304,79 @@ fn apply_v5(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v6(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Composite indexes for common query patterns
+        CREATE INDEX IF NOT EXISTS idx_files_folder_filename ON embroidery_files(folder_id, filename);
+        CREATE INDEX IF NOT EXISTS idx_files_search_name ON embroidery_files(name, filename);
+
+        -- FTS5 virtual table for full-text search
+        CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
+            name, filename, theme, description, design_name,
+            category, author, keywords, comments, license, unique_id,
+            content=embroidery_files, content_rowid=id
+        );
+
+        -- Populate FTS index from existing data
+        INSERT OR IGNORE INTO files_fts(rowid, name, filename, theme, description, design_name,
+            category, author, keywords, comments, license, unique_id)
+        SELECT id, COALESCE(name,''), filename, COALESCE(theme,''), COALESCE(description,''),
+            COALESCE(design_name,''), COALESCE(category,''), COALESCE(author,''),
+            COALESCE(keywords,''), COALESCE(comments,''), COALESCE(license,''),
+            COALESCE(unique_id,'')
+        FROM embroidery_files;
+
+        -- Triggers to keep FTS index in sync
+        CREATE TRIGGER IF NOT EXISTS files_fts_insert AFTER INSERT ON embroidery_files BEGIN
+            INSERT INTO files_fts(rowid, name, filename, theme, description, design_name,
+                category, author, keywords, comments, license, unique_id)
+            VALUES (new.id, COALESCE(new.name,''), new.filename, COALESCE(new.theme,''),
+                COALESCE(new.description,''), COALESCE(new.design_name,''),
+                COALESCE(new.category,''), COALESCE(new.author,''),
+                COALESCE(new.keywords,''), COALESCE(new.comments,''),
+                COALESCE(new.license,''), COALESCE(new.unique_id,''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS files_fts_delete AFTER DELETE ON embroidery_files BEGIN
+            INSERT INTO files_fts(files_fts, rowid, name, filename, theme, description,
+                design_name, category, author, keywords, comments, license, unique_id)
+            VALUES ('delete', old.id, COALESCE(old.name,''), old.filename,
+                COALESCE(old.theme,''), COALESCE(old.description,''),
+                COALESCE(old.design_name,''), COALESCE(old.category,''),
+                COALESCE(old.author,''), COALESCE(old.keywords,''),
+                COALESCE(old.comments,''), COALESCE(old.license,''),
+                COALESCE(old.unique_id,''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS files_fts_update AFTER UPDATE ON embroidery_files BEGIN
+            INSERT INTO files_fts(files_fts, rowid, name, filename, theme, description,
+                design_name, category, author, keywords, comments, license, unique_id)
+            VALUES ('delete', old.id, COALESCE(old.name,''), old.filename,
+                COALESCE(old.theme,''), COALESCE(old.description,''),
+                COALESCE(old.design_name,''), COALESCE(old.category,''),
+                COALESCE(old.author,''), COALESCE(old.keywords,''),
+                COALESCE(old.comments,''), COALESCE(old.license,''),
+                COALESCE(old.unique_id,''));
+            INSERT INTO files_fts(rowid, name, filename, theme, description, design_name,
+                category, author, keywords, comments, license, unique_id)
+            VALUES (new.id, COALESCE(new.name,''), new.filename, COALESCE(new.theme,''),
+                COALESCE(new.description,''), COALESCE(new.design_name,''),
+                COALESCE(new.category,''), COALESCE(new.author,''),
+                COALESCE(new.keywords,''), COALESCE(new.comments,''),
+                COALESCE(new.license,''), COALESCE(new.unique_id,''));
+        END;
+
+        INSERT INTO schema_version (version, description)
+        VALUES (6, 'Add composite indexes, FTS5 full-text search');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 /// Generate unique IDs for all existing records that don't have one.
 fn backfill_unique_ids(conn: &Connection) -> Result<(), AppError> {
     let mut stmt = conn.prepare("SELECT id FROM embroidery_files WHERE unique_id IS NULL")?;
@@ -366,13 +446,18 @@ mod tests {
             "file_formats",
             "file_tags",
             "file_thread_colors",
+            "files_fts",
+            "files_fts_config",
+            "files_fts_data",
+            "files_fts_docsize",
+            "files_fts_idx",
             "folders",
             "schema_version",
             "settings",
             "tags",
         ];
 
-        assert_eq!(tables, expected, "All 12 tables must exist");
+        assert_eq!(tables, expected, "All tables must exist (including FTS5)");
     }
 
     #[test]
@@ -386,7 +471,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 5, "Schema version must be 5");
+        assert_eq!(version, 6, "Schema version must be 6");
     }
 
     #[test]
@@ -409,22 +494,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_five() {
+    fn test_schema_version_is_six() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 5",
+                "SELECT description FROM schema_version WHERE version = 6",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add unique_id column and file_attachments table");
+        assert_eq!(desc, "Add composite indexes, FTS5 full-text search");
     }
 
     #[test]

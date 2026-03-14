@@ -54,9 +54,9 @@ export class FileList extends Component {
     const searchParams = appState.get("searchParams");
 
     try {
-      const files = await FileService.getFiles(folderId, search, formatFilter, searchParams);
+      const result = await FileService.getFilesPaginated(folderId, search, formatFilter, searchParams, 0, 5000);
       if (gen !== this.generation) return;
-      appState.set("files", files);
+      appState.set("files", result.files);
     } catch (e) {
       console.warn("Failed to load files:", e);
       ToastContainer.show("error", "Dateien konnten nicht geladen werden");
@@ -64,7 +64,7 @@ export class FileList extends Component {
   }
 
   render(): void {
-    const files = appState.get("files");
+    const files = appState.getRef("files");
     this.lastClickedIndex = null;
     this.thumbCache.clear();
     this.renderedCards.clear();
@@ -117,7 +117,7 @@ export class FileList extends Component {
 
   private calculateVisibleRange(): void {
     if (!this.scrollContainer) return;
-    const files = appState.get("files");
+    const files = appState.getRef("files");
     const scrollTop = this.scrollContainer.scrollTop;
     const containerHeight = this.scrollContainer.clientHeight;
 
@@ -130,9 +130,9 @@ export class FileList extends Component {
 
   private renderVisible(): void {
     if (!this.listEl) return;
-    const files = appState.get("files");
-    const selectedId = appState.get("selectedFileId");
-    const selectedIds = appState.get("selectedFileIds");
+    const files = appState.getRef("files");
+    const selectedId = appState.getRef("selectedFileId");
+    const selectedIds = appState.getRef("selectedFileIds");
 
     // Update spacer height in case file count changed
     this.listEl.style.height = `${files.length * CARD_HEIGHT}px`;
@@ -158,23 +158,62 @@ export class FileList extends Component {
       newFileIds.push(file.id);
     }
 
+    // Batch-load thumbnails for newly rendered cards
+    const uncachedIds = newFileIds.filter((id) => !this.thumbCache.has(id));
+    if (uncachedIds.length > 0) {
+      FileService.getThumbnailsBatch(uncachedIds).then((thumbs) => {
+        // Build file-ID-to-card map for O(1) lookups
+        const cardsByFileId = new Map<number, HTMLElement>();
+        for (const [, card] of this.renderedCards) {
+          const fid = this.getCardFileId(card);
+          if (fid !== null) cardsByFileId.set(fid, card);
+        }
+
+        for (const [fileIdStr, dataUri] of Object.entries(thumbs)) {
+          if (!dataUri) continue;
+          const fileId = Number(fileIdStr);
+          this.thumbCache.set(fileId, dataUri);
+          if (this.thumbCache.size > THUMB_CACHE_MAX) {
+            const firstKey = this.thumbCache.keys().next().value;
+            if (firstKey !== undefined) this.thumbCache.delete(firstKey);
+          }
+          const card = cardsByFileId.get(fileId);
+          if (card) {
+            const thumb = card.querySelector(".file-card-thumb");
+            if (thumb && thumb.isConnected && !thumb.querySelector("img")) {
+              const img = document.createElement("img");
+              img.src = dataUri;
+              img.className = "file-card-thumb-img";
+              thumb.textContent = "";
+              thumb.appendChild(img);
+            }
+          }
+        }
+      }).catch(() => { /* ignore */ });
+    }
+
     // Batch-load attachment counts for newly rendered cards
     if (newFileIds.length > 0) {
       FileService.getAttachmentCounts(newFileIds).then((counts) => {
+        // Build file-ID-to-card map for O(1) lookups
+        const cardMap = new Map<number, HTMLElement>();
+        for (const [, card] of this.renderedCards) {
+          const fid = this.getCardFileId(card);
+          if (fid !== null) cardMap.set(fid, card);
+        }
+
         for (const [fileIdStr, count] of Object.entries(counts)) {
           if (count > 0) {
             const fileId = Number(fileIdStr);
-            for (const [, card] of this.renderedCards) {
+            const card = cardMap.get(fileId);
+            if (card) {
               const nameEl = card.querySelector(".file-card-name");
               if (nameEl && card.isConnected && !card.querySelector(".file-card-attachment")) {
-                const cardFileId = this.getCardFileId(card);
-                if (cardFileId === fileId) {
-                  const clip = document.createElement("span");
-                  clip.className = "file-card-attachment";
-                  clip.textContent = "\uD83D\uDCCE";
-                  clip.title = `${count} Anhang/Anh\u00E4nge`;
-                  nameEl.appendChild(clip);
-                }
+                const clip = document.createElement("span");
+                clip.className = "file-card-attachment";
+                clip.textContent = "\uD83D\uDCCE";
+                clip.title = `${count} Anhang/Anh\u00E4nge`;
+                nameEl.appendChild(clip);
               }
             }
           }
@@ -184,24 +223,19 @@ export class FileList extends Component {
   }
 
   private getCardFileId(card: HTMLElement): number | null {
-    const files = appState.get("files");
-    for (const [index, c] of this.renderedCards) {
-      if (c === card) {
-        const file = files[index];
-        return file ? file.id : null;
-      }
-    }
-    return null;
+    const id = card.dataset.fileId;
+    return id ? Number(id) : null;
   }
 
   private createCard(
     file: { id: number; name: string | null; filename: string; fileSizeBytes: number | null; aiAnalyzed: boolean; aiConfirmed: boolean },
     index: number,
     selectedId: number | null,
-    selectedIds: number[],
+    selectedIds: readonly number[],
   ): HTMLElement {
     const card = document.createElement("div");
     card.className = "file-card";
+    card.dataset.fileId = String(file.id);
     card.style.position = "absolute";
     card.style.top = `${index * CARD_HEIGHT}px`;
     card.style.left = "0";
@@ -226,25 +260,8 @@ export class FileList extends Component {
       img.className = "file-card-thumb-img";
       thumb.textContent = "";
       thumb.appendChild(img);
-    } else {
-      FileService.getThumbnail(file.id).then((dataUri) => {
-        if (dataUri) {
-          this.thumbCache.set(file.id, dataUri);
-          if (this.thumbCache.size > THUMB_CACHE_MAX) {
-            const firstKey = this.thumbCache.keys().next().value;
-            if (firstKey !== undefined) this.thumbCache.delete(firstKey);
-          }
-          if (thumb.isConnected) {
-            const img = document.createElement("img");
-            img.src = dataUri;
-            img.alt = file.name || file.filename;
-            img.className = "file-card-thumb-img";
-            thumb.textContent = "";
-            thumb.appendChild(img);
-          }
-        }
-      }).catch(() => { /* keep format label fallback */ });
     }
+    // Thumbnails for uncached cards are loaded in batch by renderVisible()
     card.appendChild(thumb);
 
     const info = document.createElement("div");
@@ -292,9 +309,9 @@ export class FileList extends Component {
   }
 
   private updateSelection(): void {
-    const files = appState.get("files");
-    const selectedId = appState.get("selectedFileId");
-    const selectedIds = appState.get("selectedFileIds");
+    const files = appState.getRef("files");
+    const selectedId = appState.getRef("selectedFileId");
+    const selectedIds = appState.getRef("selectedFileIds");
 
     for (const [index, card] of this.renderedCards) {
       const file = files[index];
@@ -307,7 +324,7 @@ export class FileList extends Component {
   }
 
   private handleClick(fileId: number, index: number, e: MouseEvent): void {
-    const files = appState.get("files");
+    const files = appState.getRef("files");
 
     if (e.shiftKey && this.lastClickedIndex !== null) {
       // Shift+click: range select

@@ -10,6 +10,13 @@ import type {
   SearchParams,
 } from "../types/index";
 
+export interface PaginatedFiles {
+  files: EmbroideryFile[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
 export async function getFiles(
   folderId?: number | null,
   search?: string | null,
@@ -21,6 +28,24 @@ export async function getFiles(
     search: search ?? null,
     formatFilter: formatFilter ?? null,
     searchParams: searchParams ?? null,
+  });
+}
+
+export async function getFilesPaginated(
+  folderId?: number | null,
+  search?: string | null,
+  formatFilter?: string | null,
+  searchParams?: SearchParams | null,
+  page?: number,
+  pageSize?: number
+): Promise<PaginatedFiles> {
+  return invoke<PaginatedFiles>("get_files_paginated", {
+    folderId: folderId ?? null,
+    search: search ?? null,
+    formatFilter: formatFilter ?? null,
+    searchParams: searchParams ?? null,
+    page: page ?? 0,
+    pageSize: pageSize ?? 200,
   });
 }
 
@@ -64,6 +89,12 @@ export async function getAllTags(): Promise<Tag[]> {
 
 export async function getThumbnail(fileId: number): Promise<string> {
   return invoke<string>("get_thumbnail", { fileId });
+}
+
+export async function getThumbnailsBatch(
+  fileIds: number[]
+): Promise<Record<number, string>> {
+  return invoke<Record<number, string>>("get_thumbnails_batch", { fileIds });
 }
 
 export async function getStitchSegments(

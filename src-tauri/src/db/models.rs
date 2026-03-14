@@ -165,6 +165,15 @@ pub struct FileUpdate {
     pub license: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginatedFiles {
+    pub files: Vec<EmbroideryFile>,
+    pub total_count: i64,
+    pub page: i64,
+    pub page_size: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchParams {

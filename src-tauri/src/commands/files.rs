@@ -1,13 +1,184 @@
 use tauri::State;
 
 use crate::{DbState, ThumbnailState};
-use crate::db::models::{EmbroideryFile, FileAttachment, FileFormat, FileThreadColor, FileUpdate, SearchParams, Tag};
+use crate::db::models::{EmbroideryFile, FileAttachment, FileFormat, FileThreadColor, FileUpdate, PaginatedFiles, SearchParams, Tag};
 use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, row_to_file};
 use crate::error::{lock_db, AppError};
 
 /// Escape SQL LIKE wildcard characters in user input.
 fn escape_like(input: &str) -> String {
     input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+/// Build WHERE clause conditions from query parameters.
+/// Shared by both `query_files_impl` and `get_files_paginated`.
+fn build_query_conditions(
+    conn: &rusqlite::Connection,
+    folder_id: Option<i64>,
+    search: Option<String>,
+    format_filter: Option<String>,
+    search_params: Option<SearchParams>,
+    conditions: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    param_idx: &mut usize,
+) {
+    if let Some(fid) = folder_id {
+        conditions.push(format!("e.folder_id = ?{}", *param_idx));
+        params.push(Box::new(fid));
+        *param_idx += 1;
+    }
+
+    // Determine the text query: prefer search_params.text, fall back to legacy `search`
+    let text_query = search_params
+        .as_ref()
+        .and_then(|sp| sp.text.clone())
+        .or(search);
+
+    if let Some(ref q) = text_query {
+        let trimmed = q.trim();
+        if !trimmed.is_empty() {
+            // Try FTS5 first; fall back to LIKE if FTS table doesn't exist
+            let fts_exists: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='files_fts'",
+                [],
+                |row| row.get(0),
+            ).unwrap_or(false);
+
+            if fts_exists {
+                // Strip all FTS5 special characters to prevent query injection
+                let sanitized: String = trimmed.chars()
+                    .filter(|c| !matches!(c, '"' | '*' | '+' | '-' | '^' | '(' | ')' | '{' | '}' | ':'))
+                    .collect();
+                if !sanitized.is_empty() {
+                    let fts_query = format!("\"{sanitized}\"*");
+                    conditions.push(format!(
+                        "e.id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?{})", *param_idx
+                    ));
+                    params.push(Box::new(fts_query));
+                    *param_idx += 1;
+                }
+                // If sanitized is empty (all special chars), skip — no condition added
+            } else {
+                let escaped = escape_like(trimmed);
+                let like_val = format!("%{escaped}%");
+                let text_fields = [
+                    "e.name", "e.filename", "e.theme", "e.description",
+                    "e.design_name", "e.category", "e.author", "e.keywords",
+                    "e.comments", "e.license", "e.unique_id",
+                ];
+                let clauses: Vec<String> = text_fields
+                    .iter()
+                    .map(|f| format!("{f} LIKE ?{} ESCAPE '\\\\'", *param_idx))
+                    .collect();
+                conditions.push(format!("({})", clauses.join(" OR ")));
+                params.push(Box::new(like_val));
+                *param_idx += 1;
+            }
+        }
+    }
+
+    if let Some(ref fmt) = format_filter {
+        let trimmed = fmt.trim();
+        if !trimmed.is_empty() {
+            conditions.push(format!(
+                "EXISTS (SELECT 1 FROM file_formats ff WHERE ff.file_id = e.id AND ff.format = ?{})", *param_idx
+            ));
+            params.push(Box::new(trimmed.to_uppercase()));
+            *param_idx += 1;
+        }
+    }
+
+    // Advanced search params
+    if let Some(ref sp) = search_params {
+        if let Some(ref tags) = sp.tags {
+            for tag_name in tags {
+                let trimmed = tag_name.trim();
+                if !trimmed.is_empty() {
+                    conditions.push(format!(
+                        "EXISTS (SELECT 1 FROM file_tags ft JOIN tags t ON t.id = ft.tag_id \
+                         WHERE ft.file_id = e.id AND t.name = ?{})", *param_idx
+                    ));
+                    params.push(Box::new(trimmed.to_string()));
+                    *param_idx += 1;
+                }
+            }
+        }
+
+        if let Some(v) = sp.stitch_count_min {
+            conditions.push(format!("e.stitch_count >= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.stitch_count_max {
+            conditions.push(format!("e.stitch_count <= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.color_count_min {
+            conditions.push(format!("e.color_count >= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.color_count_max {
+            conditions.push(format!("e.color_count <= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.width_mm_min {
+            conditions.push(format!("e.width_mm >= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.width_mm_max {
+            conditions.push(format!("e.width_mm <= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.height_mm_min {
+            conditions.push(format!("e.height_mm >= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.height_mm_max {
+            conditions.push(format!("e.height_mm <= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.file_size_min {
+            conditions.push(format!("e.file_size_bytes >= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.file_size_max {
+            conditions.push(format!("e.file_size_bytes <= ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.ai_analyzed {
+            conditions.push(format!("e.ai_analyzed = ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(v) = sp.ai_confirmed {
+            conditions.push(format!("e.ai_confirmed = ?{}", *param_idx));
+            params.push(Box::new(v));
+            *param_idx += 1;
+        }
+        if let Some(ref cs) = sp.color_search {
+            let trimmed = cs.trim();
+            if !trimmed.is_empty() {
+                let escaped = escape_like(trimmed);
+                let like_val = format!("%{escaped}%");
+                conditions.push(format!(
+                    "EXISTS (SELECT 1 FROM file_thread_colors ftc WHERE ftc.file_id = e.id \
+                     AND (ftc.color_name LIKE ?{pi} ESCAPE '\\' OR ftc.brand LIKE ?{pi} ESCAPE '\\'))",
+                    pi = *param_idx
+                ));
+                params.push(Box::new(like_val));
+                *param_idx += 1;
+            }
+        }
+    }
 }
 
 /// Core query-building logic shared by the Tauri command and tests.
@@ -23,156 +194,10 @@ pub(crate) fn query_files_impl(
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut param_idx: usize = 1;
 
-    if let Some(fid) = folder_id {
-        conditions.push(format!("e.folder_id = ?{param_idx}"));
-        params.push(Box::new(fid));
-        param_idx += 1;
-    }
-
-    // Determine the text query: prefer search_params.text, fall back to legacy `search`
-    let text_query = search_params
-        .as_ref()
-        .and_then(|sp| sp.text.clone())
-        .or(search);
-
-    if let Some(ref q) = text_query {
-        let trimmed = q.trim();
-        if !trimmed.is_empty() {
-            let escaped = escape_like(trimmed);
-            let like_val = format!("%{escaped}%");
-            let text_fields = [
-                "e.name", "e.filename", "e.theme", "e.description",
-                "e.design_name", "e.category", "e.author", "e.keywords",
-                "e.comments", "e.license", "e.unique_id",
-            ];
-            let clauses: Vec<String> = text_fields
-                .iter()
-                .map(|f| format!("{f} LIKE ?{param_idx} ESCAPE '\\'"))
-                .collect();
-            conditions.push(format!("({})", clauses.join(" OR ")));
-            params.push(Box::new(like_val));
-            param_idx += 1;
-        }
-    }
-
-    if let Some(ref fmt) = format_filter {
-        let trimmed = fmt.trim();
-        if !trimmed.is_empty() {
-            conditions.push(format!(
-                "EXISTS (SELECT 1 FROM file_formats ff WHERE ff.file_id = e.id AND ff.format = ?{param_idx})"
-            ));
-            params.push(Box::new(trimmed.to_uppercase()));
-            param_idx += 1;
-        }
-    }
-
-    // Advanced search params
-    if let Some(ref sp) = search_params {
-        // Tag filter (AND logic: file must have ALL listed tags)
-        if let Some(ref tags) = sp.tags {
-            for tag_name in tags {
-                let trimmed = tag_name.trim();
-                if !trimmed.is_empty() {
-                    conditions.push(format!(
-                        "EXISTS (SELECT 1 FROM file_tags ft JOIN tags t ON t.id = ft.tag_id \
-                         WHERE ft.file_id = e.id AND t.name = ?{param_idx})"
-                    ));
-                    params.push(Box::new(trimmed.to_string()));
-                    param_idx += 1;
-                }
-            }
-        }
-
-        // Numeric range: stitch_count
-        if let Some(v) = sp.stitch_count_min {
-            conditions.push(format!("e.stitch_count >= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-        if let Some(v) = sp.stitch_count_max {
-            conditions.push(format!("e.stitch_count <= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-
-        // Numeric range: color_count
-        if let Some(v) = sp.color_count_min {
-            conditions.push(format!("e.color_count >= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-        if let Some(v) = sp.color_count_max {
-            conditions.push(format!("e.color_count <= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-
-        // Numeric range: width_mm
-        if let Some(v) = sp.width_mm_min {
-            conditions.push(format!("e.width_mm >= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-        if let Some(v) = sp.width_mm_max {
-            conditions.push(format!("e.width_mm <= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-
-        // Numeric range: height_mm
-        if let Some(v) = sp.height_mm_min {
-            conditions.push(format!("e.height_mm >= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-        if let Some(v) = sp.height_mm_max {
-            conditions.push(format!("e.height_mm <= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-
-        // Numeric range: file_size
-        if let Some(v) = sp.file_size_min {
-            conditions.push(format!("e.file_size_bytes >= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-        if let Some(v) = sp.file_size_max {
-            conditions.push(format!("e.file_size_bytes <= ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-
-        // Boolean: ai_analyzed
-        if let Some(v) = sp.ai_analyzed {
-            conditions.push(format!("e.ai_analyzed = ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-
-        // Boolean: ai_confirmed
-        if let Some(v) = sp.ai_confirmed {
-            conditions.push(format!("e.ai_confirmed = ?{param_idx}"));
-            params.push(Box::new(v));
-            param_idx += 1;
-        }
-
-        // Color/brand search
-        if let Some(ref cs) = sp.color_search {
-            let trimmed = cs.trim();
-            if !trimmed.is_empty() {
-                let escaped = escape_like(trimmed);
-                let like_val = format!("%{escaped}%");
-                conditions.push(format!(
-                    "EXISTS (SELECT 1 FROM file_thread_colors ftc WHERE ftc.file_id = e.id \
-                     AND (ftc.color_name LIKE ?{param_idx} ESCAPE '\\' OR ftc.brand LIKE ?{param_idx} ESCAPE '\\'))"
-                ));
-                params.push(Box::new(like_val));
-                #[allow(unused_assignments)]
-                { param_idx += 1; }
-            }
-        }
-    }
+    build_query_conditions(
+        conn, folder_id, search, format_filter, search_params,
+        &mut conditions, &mut params, &mut param_idx,
+    );
 
     let where_clause = if conditions.is_empty() {
         String::new()
@@ -203,6 +228,133 @@ pub fn get_files(
 ) -> Result<Vec<EmbroideryFile>, AppError> {
     let conn = lock_db(&db)?;
     query_files_impl(&conn, folder_id, search, format_filter, search_params)
+}
+
+#[tauri::command]
+pub fn get_files_paginated(
+    db: State<'_, DbState>,
+    folder_id: Option<i64>,
+    search: Option<String>,
+    format_filter: Option<String>,
+    search_params: Option<SearchParams>,
+    page: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<PaginatedFiles, AppError> {
+    let conn = lock_db(&db)?;
+    let pg = page.unwrap_or(0);
+    let ps = page_size.unwrap_or(200).max(1);
+
+    // Build WHERE clause (reuse query_files_impl's condition logic)
+    let mut conditions = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut param_idx: usize = 1;
+
+    build_query_conditions(
+        &conn, folder_id, search, format_filter, search_params,
+        &mut conditions, &mut params, &mut param_idx,
+    );
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+    // COUNT query
+    let count_sql = format!("SELECT COUNT(*) FROM embroidery_files e{where_clause}");
+    let total_count: i64 = conn.query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))?;
+
+    // Paginated data query with LIMIT/OFFSET
+    let data_sql = format!(
+        "{FILE_SELECT_ALIASED}{where_clause} ORDER BY e.filename LIMIT ?{param_idx} OFFSET ?{}",
+        param_idx + 1
+    );
+    let mut data_params = params;
+    data_params.push(Box::new(ps));
+    data_params.push(Box::new(pg * ps));
+    let data_refs: Vec<&dyn rusqlite::types::ToSql> = data_params.iter().map(|p| p.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&data_sql)?;
+    let files = stmt
+        .query_map(data_refs.as_slice(), |row| row_to_file(row))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(PaginatedFiles { files, total_count, page: pg, page_size: ps })
+}
+
+#[tauri::command]
+pub fn get_thumbnails_batch(
+    db: State<'_, DbState>,
+    thumb_state: State<'_, ThumbnailState>,
+    file_ids: Vec<i64>,
+) -> Result<std::collections::HashMap<i64, String>, AppError> {
+    use base64::Engine;
+
+    // Batch-load thumbnail paths from DB in one query
+    if file_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let paths: Vec<(i64, Option<String>, String)> = {
+        let conn = lock_db(&db)?;
+        let placeholders: Vec<String> = file_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "SELECT id, thumbnail_path, filepath FROM embroidery_files WHERE id IN ({})",
+            placeholders.join(",")
+        );
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = file_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows: Vec<_> = stmt.query_map(param_refs.as_slice(), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?))
+        })?.collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+
+    let mut result = std::collections::HashMap::new();
+    let mut generated_paths: Vec<(i64, String)> = Vec::new();
+
+    for (file_id, thumbnail_path, filepath) in paths {
+        // Try cached thumbnail first
+        if let Some(ref path) = thumbnail_path {
+            if !path.is_empty() && std::path::Path::new(path).exists() {
+                if let Ok(data) = std::fs::read(path) {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                    result.insert(file_id, format!("data:image/png;base64,{b64}"));
+                    continue;
+                }
+            }
+        }
+
+        // On-demand generation
+        let src_path = std::path::Path::new(&filepath);
+        let ext = src_path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+        if ext.is_empty() { continue; }
+
+        if let Ok(raw_data) = std::fs::read(src_path) {
+            if let Ok(thumb_path) = thumb_state.0.generate(file_id, &raw_data, &ext) {
+                generated_paths.push((file_id, thumb_path.to_string_lossy().to_string()));
+                if let Ok(data) = std::fs::read(&thumb_path) {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                    result.insert(file_id, format!("data:image/png;base64,{b64}"));
+                }
+            }
+        }
+    }
+
+    // Batch-persist generated thumbnail paths in a single lock acquisition
+    if !generated_paths.is_empty() {
+        if let Ok(conn) = lock_db(&db) {
+            for (file_id, path) in &generated_paths {
+                let _ = conn.execute(
+                    "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+                    rusqlite::params![file_id, path],
+                );
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]

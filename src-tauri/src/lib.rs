@@ -125,6 +125,8 @@ pub fn run() {
             commands::scanner::scan_directory,
             commands::scanner::import_files,
             commands::files::get_files,
+            commands::files::get_files_paginated,
+            commands::files::get_thumbnails_batch,
             commands::files::get_file,
             commands::files::get_file_formats,
             commands::files::get_file_colors,
