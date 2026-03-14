@@ -10,6 +10,9 @@ import type {
   SearchParams,
   LibraryStats,
   Transform,
+  FileVersion,
+  MachineProfile,
+  TransferResult,
 } from "../types/index";
 
 export interface PaginatedFiles {
@@ -202,6 +205,46 @@ export async function getStitchDimensions(
   fileId: number
 ): Promise<[number, number]> {
   return invoke<[number, number]>("get_stitch_dimensions", { fileId });
+}
+
+// Version history
+export async function getFileVersions(fileId: number): Promise<FileVersion[]> {
+  return invoke<FileVersion[]>("get_file_versions", { fileId });
+}
+
+export async function restoreVersion(fileId: number, versionId: number): Promise<void> {
+  return invoke<void>("restore_version", { fileId, versionId });
+}
+
+export async function deleteVersion(versionId: number): Promise<void> {
+  return invoke<void>("delete_version", { versionId });
+}
+
+export async function exportVersion(versionId: number, path: string): Promise<void> {
+  return invoke<void>("export_version", { versionId, path });
+}
+
+// Machine transfer
+export async function listMachines(): Promise<MachineProfile[]> {
+  return invoke<MachineProfile[]>("list_machines");
+}
+
+export async function addMachine(
+  name: string, machineType: string, transferPath: string, targetFormat?: string
+): Promise<MachineProfile> {
+  return invoke<MachineProfile>("add_machine", { name, machineType, transferPath, targetFormat: targetFormat ?? null });
+}
+
+export async function deleteMachine(machineId: number): Promise<void> {
+  return invoke<void>("delete_machine", { machineId });
+}
+
+export async function testMachineConnection(machineId: number): Promise<boolean> {
+  return invoke<boolean>("test_machine_connection", { machineId });
+}
+
+export async function transferFiles(machineId: number, fileIds: number[]): Promise<TransferResult> {
+  return invoke<TransferResult>("transfer_files", { machineId, fileIds });
 }
 
 export async function generatePdfReport(

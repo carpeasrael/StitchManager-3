@@ -165,6 +165,12 @@ export class Toolbar extends Component {
             shortcut: "Ctrl+Shift+U",
             onClick: () => EventBus.emit("toolbar:batch-export"),
           },
+          {
+            className: "menu-item-transfer",
+            icon: "\uD83D\uDCE1",
+            label: "An Maschine senden",
+            onClick: () => EventBus.emit("toolbar:transfer"),
+          },
         ],
       },
       {
@@ -313,6 +319,7 @@ export class Toolbar extends Component {
     setHidden("menu-item-convert", !hasAny);
     setHidden("menu-item-pdf", !hasAny);
     setHidden("menu-item-batch-export", !hasAny);
+    setHidden("menu-item-transfer", !hasAny);
     setHidden("menu-item-batch-rename", !hasMulti);
     setHidden("menu-item-batch-organize", !hasMulti);
     setHidden("menu-item-batch-ai", !hasMulti);

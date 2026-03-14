@@ -9,3 +9,5 @@ pub mod scanner;
 pub mod settings;
 pub mod templates;
 pub mod thread_colors;
+pub mod transfer;
+pub mod versions;

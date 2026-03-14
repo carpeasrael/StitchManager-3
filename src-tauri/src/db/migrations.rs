@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 7;
+const CURRENT_VERSION: i32 = 8;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -71,6 +71,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 7 {
         apply_v7(conn)?;
+    }
+
+    if current < 8 {
+        apply_v8(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -308,6 +312,41 @@ fn apply_v5(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v8(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS file_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            file_data BLOB NOT NULL,
+            file_size INTEGER NOT NULL,
+            operation TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_versions_file_id ON file_versions(file_id);
+
+        CREATE TABLE IF NOT EXISTS machine_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            machine_type TEXT NOT NULL DEFAULT 'generic',
+            transfer_path TEXT NOT NULL,
+            target_format TEXT,
+            last_used TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO schema_version (version, description)
+        VALUES (8, 'Add file_versions and machine_profiles tables');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 fn apply_v7(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
         "BEGIN TRANSACTION;
@@ -467,12 +506,14 @@ mod tests {
             "file_formats",
             "file_tags",
             "file_thread_colors",
+            "file_versions",
             "files_fts",
             "files_fts_config",
             "files_fts_data",
             "files_fts_docsize",
             "files_fts_idx",
             "folders",
+            "machine_profiles",
             "schema_version",
             "settings",
             "tags",
@@ -492,7 +533,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7, "Schema version must be 7");
+        assert_eq!(version, 8, "Schema version must be 8");
     }
 
     #[test]
@@ -515,22 +556,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_seven() {
+    fn test_schema_version_is_eight() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 7",
+                "SELECT description FROM schema_version WHERE version = 8",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add is_favorite column and dashboard indexes");
+        assert_eq!(desc, "Add file_versions and machine_profiles tables");
     }
 
     #[test]

@@ -451,6 +451,50 @@ function initEventHandlers(): () => void {
       }
     }),
 
+    EventBus.on("toolbar:transfer", async () => {
+      let fileIds = appState.get("selectedFileIds");
+      if (fileIds.length === 0) {
+        const singleId = appState.get("selectedFileId");
+        if (singleId === null) return;
+        fileIds = [singleId];
+      }
+
+      // Get configured machines
+      let machines: { id: number; name: string }[];
+      try {
+        machines = await FileService.listMachines();
+      } catch {
+        ToastContainer.show("error", "Maschinen konnten nicht geladen werden");
+        return;
+      }
+
+      if (machines.length === 0) {
+        ToastContainer.show("info", "Keine Maschinen konfiguriert. Bitte in den Einstellungen hinzufuegen.");
+        return;
+      }
+
+      const machineNames = machines.map((m, i) => `${i + 1}. ${m.name}`).join("\n");
+      const choice = prompt(`Maschine waehlen:\n${machineNames}\n\nNummer eingeben:`);
+      if (!choice) return;
+
+      const idx = parseInt(choice, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= machines.length) {
+        ToastContainer.show("error", "Ungueltige Auswahl");
+        return;
+      }
+
+      try {
+        const result = await FileService.transferFiles(machines[idx].id, fileIds);
+        ToastContainer.show(
+          result.failed > 0 ? "error" : "success",
+          `${result.success} von ${result.total} Dateien uebertragen`
+        );
+      } catch (e) {
+        console.warn("Transfer failed:", e);
+        ToastContainer.show("error", "Uebertragung fehlgeschlagen");
+      }
+    }),
+
     EventBus.on("toolbar:pdf-export", async () => {
       const multiIds = appState.get("selectedFileIds");
       const singleId = appState.get("selectedFileId");

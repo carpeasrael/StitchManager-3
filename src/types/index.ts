@@ -202,6 +202,33 @@ export type Transform =
   | { type: "mirrorHorizontal" }
   | { type: "mirrorVertical" };
 
+export interface FileVersion {
+  id: number;
+  fileId: number;
+  versionNumber: number;
+  fileSize: number;
+  operation: string;
+  description: string | null;
+  createdAt: string;
+}
+
+export interface MachineProfile {
+  id: number;
+  name: string;
+  machineType: string;
+  transferPath: string;
+  targetFormat: string | null;
+  lastUsed: string | null;
+  createdAt: string;
+}
+
+export interface TransferResult {
+  total: number;
+  success: number;
+  failed: number;
+  errors: string[];
+}
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface BatchResult {

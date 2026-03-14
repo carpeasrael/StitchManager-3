@@ -65,6 +65,13 @@ fn convert_file_inner(
     target_format: &str,
     output_dir: &str,
 ) -> Result<String, AppError> {
+    // Auto-version before conversion
+    {
+        let conn = lock_db(db)?;
+        let desc = format!("Konvertierung nach {target_format}");
+        let _ = super::versions::create_version_snapshot(&conn, file_id, "convert", Some(&desc));
+    }
+
     let filepath: String = {
         let conn = lock_db(db)?;
         conn.query_row(

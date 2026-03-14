@@ -88,6 +88,18 @@ pub fn save_transformed(
     transforms: Vec<Transform>,
     output_path: String,
 ) -> Result<String, AppError> {
+    // Auto-version before transform
+    {
+        let conn = lock_db(&db)?;
+        let desc = transforms.iter().map(|t| match t {
+            Transform::Resize { scale_x, scale_y } => format!("Resize {scale_x}x{scale_y}"),
+            Transform::Rotate { degrees } => format!("Rotate {degrees}°"),
+            Transform::MirrorHorizontal => "Mirror H".to_string(),
+            Transform::MirrorVertical => "Mirror V".to_string(),
+        }).collect::<Vec<_>>().join(", ");
+        let _ = super::versions::create_version_snapshot(&conn, file_id, "transform", Some(&desc));
+    }
+
     let (mut segments, filepath) = load_segments(&db, file_id)?;
     apply_transforms(&mut segments, &transforms);
 
