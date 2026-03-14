@@ -116,6 +116,7 @@
 /* Info Dialog */
 .dialog-info {
   width: 400px;
+  max-width: 90vw;
   padding: var(--spacing-4);
   text-align: center;
 }
@@ -216,6 +217,7 @@
 /* Text Popup (License / README) */
 .dialog-text-popup {
   width: 700px;
+  max-width: 90vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -267,6 +269,7 @@
 /* Edit Dialog */
 .dialog-edit {
   width: 400px;
+  max-width: 90vw;
   padding: var(--spacing-4);
 }
 
@@ -549,7 +552,7 @@
   height: 16px;
   border-radius: 8px;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-status);
   font-size: 10px;
   font-weight: 600;
   display: flex;
@@ -822,7 +825,7 @@
 .filter-chip.active {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-status);
 }
 
 /* FileList */
@@ -1263,13 +1266,13 @@
 }
 
 .metadata-ai-pending {
-  background: #ffc107;
-  color: #333;
+  background: var(--color-warning);
+  color: var(--color-on-warning);
 }
 
 .metadata-ai-confirmed {
-  background: #28a745;
-  color: #fff;
+  background: var(--color-success);
+  color: var(--color-on-status);
 }
 
 /* MetadataPanel Form */
@@ -1324,7 +1327,7 @@
   border-radius: var(--radius-button);
   border: none;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-status);
   font-size: var(--font-size-body);
   font-weight: 500;
   cursor: pointer;
@@ -1565,7 +1568,7 @@
 
 .status-watcher-inactive {
   font-size: var(--font-size-caption);
-  color: var(--color-warning, #e07c00);
+  color: var(--color-warning);
   flex-shrink: 0;
   padding: 0 var(--spacing-2);
 }
@@ -1617,12 +1620,17 @@
 
 .dialog-ai-preview {
   width: 800px;
+  max-width: 90vw;
   height: 600px;
+  max-height: 85vh;
+  overflow: auto;
 }
 
 .dialog-ai-result {
   width: 640px;
-  max-height: 500px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow: auto;
 }
 
 .dialog-settings {
@@ -1828,7 +1836,7 @@
 .dialog-btn-primary {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-status);
 }
 
 .dialog-btn-primary:not(:disabled):hover {
@@ -1847,17 +1855,17 @@
 
 .dialog-btn-danger {
   background: var(--color-surface);
-  border-color: #dc3545;
-  color: #dc3545;
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .dialog-btn-danger:not(:disabled):hover {
-  background: #dc3545;
-  color: #fff;
+  background: var(--color-error);
+  color: var(--color-on-status);
 }
 
 .dialog-error {
-  color: #dc3545;
+  color: var(--color-error);
   font-size: var(--font-size-caption);
   margin-right: auto;
 }
@@ -2039,11 +2047,11 @@
 }
 
 .settings-test-ok {
-  color: #28a745;
+  color: var(--color-success);
 }
 
 .settings-test-fail {
-  color: #dc3545;
+  color: var(--color-error);
 }
 
 .settings-bg-group {
@@ -2089,19 +2097,21 @@
 }
 
 .ai-badge--pending {
-  background: #ffc107;
-  color: #333;
+  background: var(--color-warning);
+  color: var(--color-on-warning);
 }
 
 .ai-badge--confirmed {
-  background: #28a745;
-  color: #fff;
+  background: var(--color-success);
+  color: var(--color-on-status);
 }
 
 /* Batch Dialog */
 .dialog-batch {
   width: 480px;
-  max-height: 400px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow: auto;
 }
 
 .batch-step-label {
@@ -2181,11 +2191,11 @@
 }
 
 .batch-log-success .batch-log-icon {
-  color: #28a745;
+  color: var(--color-success);
 }
 
 .batch-log-error .batch-log-icon {
-  color: #dc3545;
+  color: var(--color-error);
 }
 
 .batch-log-text {
@@ -2238,19 +2248,19 @@
 }
 
 .toast-success {
-  border-left: 3px solid #28a745;
+  border-left: 3px solid var(--color-success);
 }
 
 .toast-success .toast-icon {
-  color: #28a745;
+  color: var(--color-success);
 }
 
 .toast-error {
-  border-left: 3px solid #dc3545;
+  border-left: 3px solid var(--color-error);
 }
 
 .toast-error .toast-icon {
-  color: #dc3545;
+  color: var(--color-error);
 }
 
 .toast-info {
@@ -2522,7 +2532,7 @@
 }
 
 .metadata-attachment-delete:hover {
-  color: var(--color-danger, #e53935);
+  color: var(--color-error);
 }
 
 /* File card attachment clip icon */
@@ -2530,4 +2540,32 @@
   margin-left: 4px;
   font-size: 11px;
   opacity: 0.7;
+}
+
+/* Global keyboard focus indicator (WCAG AA) */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+.filter-chip:focus-visible,
+.burger-btn:focus-visible,
+.sidebar-add-btn:focus-visible,
+.menu-item:focus-visible,
+.dialog-btn:focus-visible,
+.dialog-btn-primary:focus-visible,
+.tag-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Suppress outline on mouse click (keep for keyboard only) */
+button:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+[role="button"]:focus:not(:focus-visible) {
+  outline: none;
 }

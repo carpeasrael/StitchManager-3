@@ -6,8 +6,8 @@
   --color-elevated: #ffffff;
   --color-text: #111111;
   --color-text-secondary: #44474f;
-  --color-muted: #7b7c80;
-  --color-muted-light: #b4b7bd;
+  --color-muted: #6e7075;
+  --color-muted-light: #767a82;
   --color-accent: #0a84ff;
   --color-accent-strong: #086dd6;
   --color-accent-10: #e8f2ff;
@@ -18,6 +18,14 @@
   --color-status-green-bg: #dcfce7;
   --color-status-green-text: #2f9e44;
   --color-status-red: #ff6b6b;
+  --color-error: #dc3545;
+  --color-error-bg: #fce4e4;
+  --color-success: #28a745;
+  --color-success-bg: #dcfce7;
+  --color-warning: #e6a700;
+  --color-warning-bg: #fff8e1;
+  --color-on-status: #ffffff;
+  --color-on-warning: #333333;
 
   /* Typography */
   --font-family: "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
@@ -63,8 +71,8 @@
   --color-elevated: #242428;
   --color-text: #f5f5f7;
   --color-text-secondary: #a0a3ab;
-  --color-muted: #5c5e63;
-  --color-muted-light: #45474c;
+  --color-muted: #8a8c91;
+  --color-muted-light: #6e7075;
   --color-accent: #2d7ff9;
   --color-accent-strong: #4a94ff;
   --color-accent-10: rgba(45, 127, 249, 0.12);
@@ -75,6 +83,14 @@
   --color-status-green-bg: rgba(81, 207, 102, 0.12);
   --color-status-green-text: #69db7c;
   --color-status-red: #ff6b6b;
+  --color-error: #ff6b6b;
+  --color-error-bg: rgba(255, 107, 107, 0.15);
+  --color-success: #51cf66;
+  --color-success-bg: rgba(81, 207, 102, 0.12);
+  --color-warning: #ffc107;
+  --color-warning-bg: rgba(255, 193, 7, 0.15);
+  --color-on-status: #ffffff;
+  --color-on-warning: #1f1f23;
 
   --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.20);
   --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.30);
