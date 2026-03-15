@@ -201,6 +201,16 @@ pub fn run() {
             commands::thread_colors::get_thread_matches,
             commands::thread_colors::get_available_brands,
             commands::thread_colors::get_brand_colors,
+            commands::viewer::read_file_bytes,
+            commands::viewer::toggle_bookmark,
+            commands::viewer::get_bookmarks,
+            commands::viewer::update_bookmark_label,
+            commands::viewer::add_note,
+            commands::viewer::update_note,
+            commands::viewer::delete_note,
+            commands::viewer::get_notes,
+            commands::viewer::set_last_viewed_page,
+            commands::viewer::get_last_viewed_page,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

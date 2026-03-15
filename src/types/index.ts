@@ -253,6 +253,29 @@ export interface TransferResult {
   errors: string[];
 }
 
+export interface InstructionBookmark {
+  id: number;
+  fileId: number;
+  pageNumber: number;
+  label: string | null;
+  createdAt: string;
+}
+
+export interface InstructionNote {
+  id: number;
+  fileId: number;
+  pageNumber: number;
+  noteText: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ViewerOpenEvent {
+  filePath: string;
+  fileId: number;
+  fileName: string;
+}
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface BatchResult {

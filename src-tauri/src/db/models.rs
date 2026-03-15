@@ -194,6 +194,27 @@ pub struct PaginatedFiles {
     pub page_size: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionBookmark {
+    pub id: i64,
+    pub file_id: i64,
+    pub page_number: i32,
+    pub label: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionNote {
+    pub id: i64,
+    pub file_id: i64,
+    pub page_number: i32,
+    pub note_text: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchParams {

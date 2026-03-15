@@ -282,6 +282,25 @@ export class MetadataPanel extends Component {
       }).catch(() => { /* keep empty canvas */ });
     }
 
+    // "View document" button for PDFs and viewable files
+    const fileExt = file.filepath?.split(".").pop()?.toLowerCase() || "";
+    if (["pdf", "png", "jpg", "jpeg", "svg", "bmp", "gif", "webp"].includes(fileExt)) {
+      const viewBar = document.createElement("div");
+      viewBar.className = "metadata-view-bar";
+      const viewBtn = document.createElement("button");
+      viewBtn.className = "metadata-view-btn";
+      viewBtn.textContent = fileExt === "pdf" ? "Dokument anzeigen" : "Bild anzeigen";
+      viewBtn.addEventListener("click", () => {
+        EventBus.emit("viewer:open", {
+          filePath: file.filepath,
+          fileId: file.id,
+          fileName: file.name || file.filename,
+        });
+      });
+      viewBar.appendChild(viewBtn);
+      wrapper.appendChild(viewBar);
+    }
+
     // AI analyze button (always visible for analysis)
     const aiBar = document.createElement("div");
     aiBar.className = "metadata-ai-bar";
@@ -662,6 +681,25 @@ export class MetadataPanel extends Component {
       typeEl.className = "metadata-attachment-type";
       typeEl.textContent = typeLabels[att.attachmentType] || att.attachmentType;
       item.appendChild(typeEl);
+
+      // "View in app" button for viewable file types
+      const viewableExts = ["pdf", "png", "jpg", "jpeg", "svg", "gif", "webp", "bmp"];
+      const attExt = att.filename.split(".").pop()?.toLowerCase() || "";
+      if (viewableExts.includes(attExt)) {
+        const viewBtn = document.createElement("button");
+        viewBtn.className = "metadata-attachment-view";
+        viewBtn.textContent = "Anzeigen";
+        viewBtn.title = "Im App anzeigen";
+        viewBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          EventBus.emit("viewer:open", {
+            filePath: att.filePath,
+            fileId: this.currentFile!.id,
+            fileName: att.displayName || att.filename,
+          });
+        });
+        item.appendChild(viewBtn);
+      }
 
       const delBtn = document.createElement("button");
       delBtn.className = "metadata-attachment-delete";

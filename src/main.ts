@@ -17,6 +17,8 @@ import { ToastContainer } from "./components/Toast";
 import { Splitter } from "./components/Splitter";
 import { Dashboard } from "./components/Dashboard";
 import { EditDialog } from "./components/EditDialog";
+import { DocumentViewer } from "./components/DocumentViewer";
+import { ImageViewerDialog } from "./components/ImageViewerDialog";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -330,6 +332,16 @@ function initEventHandlers(): () => void {
 
     EventBus.on("toolbar:save", () => {
       EventBus.emit("metadata:save");
+    }),
+
+    EventBus.on("viewer:open", (data) => {
+      const { filePath, fileId, fileName } = data as { filePath: string; fileId: number; fileName: string };
+      const ext = filePath.split(".").pop()?.toLowerCase() || "";
+      if (ext === "pdf") {
+        DocumentViewer.open(filePath, fileId, fileName);
+      } else if (["png", "jpg", "jpeg", "svg", "gif", "webp", "bmp"].includes(ext)) {
+        ImageViewerDialog.open([{ filePath, displayName: fileName }]);
+      }
     }),
 
     EventBus.on("toolbar:reveal-in-folder", () => revealSelectedFile()),

@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 10;
+const CURRENT_VERSION: i32 = 11;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -83,6 +83,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 10 {
         apply_v10(conn)?;
+    }
+
+    if current < 11 {
+        apply_v11(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -615,6 +619,39 @@ fn apply_v10(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v11(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS instruction_bookmarks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id     INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            page_number INTEGER NOT NULL,
+            label       TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(file_id, page_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bookmarks_file_id ON instruction_bookmarks(file_id);
+
+        CREATE TABLE IF NOT EXISTS instruction_notes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id     INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            page_number INTEGER NOT NULL,
+            note_text   TEXT NOT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_notes_file_id ON instruction_notes(file_id);
+        CREATE INDEX IF NOT EXISTS idx_notes_file_page ON instruction_notes(file_id, page_number);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (11, 'Add instruction_bookmarks and instruction_notes tables');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,6 +684,8 @@ mod tests {
             "files_fts_docsize",
             "files_fts_idx",
             "folders",
+            "instruction_bookmarks",
+            "instruction_notes",
             "machine_profiles",
             "schema_version",
             "settings",
@@ -667,7 +706,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 10, "Schema version must be 10");
+        assert_eq!(version, 11, "Schema version must be 11");
     }
 
     #[test]
@@ -690,22 +729,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_ten() {
+    fn test_schema_version_is_eleven() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 10",
+                "SELECT description FROM schema_version WHERE version = 11",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add page_count, paper_size columns and enhanced file_attachments");
+        assert_eq!(desc, "Add instruction_bookmarks and instruction_notes tables");
     }
 
     #[test]
