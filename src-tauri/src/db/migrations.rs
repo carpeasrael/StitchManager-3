@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 9;
+const CURRENT_VERSION: i32 = 10;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -79,6 +79,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 9 {
         apply_v9(conn)?;
+    }
+
+    if current < 10 {
+        apply_v10(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -590,6 +594,27 @@ fn apply_v9(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v10(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- S2-01: PDF metadata columns
+        ALTER TABLE embroidery_files ADD COLUMN page_count INTEGER;
+        ALTER TABLE embroidery_files ADD COLUMN paper_size TEXT;
+
+        -- S2-03: Enhanced file attachments
+        ALTER TABLE file_attachments ADD COLUMN display_name TEXT;
+        ALTER TABLE file_attachments ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+        INSERT INTO schema_version (version, description)
+        VALUES (10, 'Add page_count, paper_size columns and enhanced file_attachments');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -642,7 +667,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 9, "Schema version must be 9");
+        assert_eq!(version, 10, "Schema version must be 10");
     }
 
     #[test]
@@ -665,22 +690,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_nine() {
+    fn test_schema_version_is_ten() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 9",
+                "SELECT description FROM schema_version WHERE version = 10",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add file_type, sewing pattern metadata, status tracking, rebuild FTS5");
+        assert_eq!(desc, "Add page_count, paper_size columns and enhanced file_attachments");
     }
 
     #[test]

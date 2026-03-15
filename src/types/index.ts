@@ -42,6 +42,8 @@ export interface EmbroideryFile {
   fileSource: string | null;
   purchaseLink: string | null;
   status: string;
+  pageCount: number | null;
+  paperSize: string | null;
   aiAnalyzed: boolean;
   aiConfirmed: boolean;
   createdAt: string;
@@ -118,6 +120,8 @@ export interface FileAttachment {
   mimeType: string | null;
   filePath: string;
   attachmentType: string;
+  displayName: string | null;
+  sortOrder: number;
   createdAt: string;
 }
 

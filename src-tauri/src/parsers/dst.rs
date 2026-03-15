@@ -261,6 +261,8 @@ impl EmbroideryParser for DstParser {
             author: None,
             keywords: None,
             comments: None,
+            page_count: None,
+            paper_size: None,
         })
     }
 

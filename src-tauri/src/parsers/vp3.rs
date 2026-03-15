@@ -154,6 +154,8 @@ impl EmbroideryParser for Vp3Parser {
             author: None,
             keywords: None,
             comments: None,
+            page_count: None,
+            paper_size: None,
         })
     }
 

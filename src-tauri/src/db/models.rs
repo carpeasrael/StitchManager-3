@@ -61,6 +61,8 @@ pub struct EmbroideryFile {
     pub file_source: Option<String>,
     pub purchase_link: Option<String>,
     pub status: String,
+    pub page_count: Option<i32>,
+    pub paper_size: Option<String>,
     pub ai_analyzed: bool,
     pub ai_confirmed: bool,
     pub created_at: String,
@@ -162,6 +164,8 @@ pub struct FileAttachment {
     pub mime_type: Option<String>,
     pub file_path: String,
     pub attachment_type: String,
+    pub display_name: Option<String>,
+    pub sort_order: i32,
     pub created_at: String,
 }
 

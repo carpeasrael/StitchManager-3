@@ -2578,3 +2578,34 @@ a:focus:not(:focus-visible),
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Drop zone overlay */
+.drop-zone-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(var(--color-accent-rgb, 10, 132, 255), 0.12);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border: 3px dashed var(--color-accent);
+  border-radius: var(--radius-dialog);
+  margin: var(--spacing-2);
+}
+
+.drop-zone-content {
+  text-align: center;
+  color: var(--color-accent);
+}
+
+.drop-zone-icon {
+  font-size: 48px;
+  margin-bottom: var(--spacing-2);
+}
+
+.drop-zone-text {
+  font-size: var(--font-size-heading);
+  font-weight: 600;
+}

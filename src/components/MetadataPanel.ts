@@ -502,6 +502,14 @@ export class MetadataPanel extends Component {
       );
     }
 
+    if (file.pageCount !== null) {
+      this.addInfoRow(infoGrid, "Seiten", String(file.pageCount));
+    }
+
+    if (file.paperSize) {
+      this.addInfoRow(infoGrid, "Papierformat", file.paperSize);
+    }
+
     if (file.fileSizeBytes !== null) {
       this.addInfoRow(
         infoGrid,
@@ -635,8 +643,8 @@ export class MetadataPanel extends Component {
 
       const nameEl = document.createElement("span");
       nameEl.className = "metadata-attachment-name";
-      nameEl.textContent = att.filename;
-      nameEl.title = "Klicken zum \u00D6ffnen";
+      nameEl.textContent = att.displayName || att.filename;
+      nameEl.title = att.filename;
       nameEl.addEventListener("click", () => {
         FileService.openAttachment(att.id).catch((e) => {
           console.warn("Failed to open attachment:", e);
@@ -645,9 +653,14 @@ export class MetadataPanel extends Component {
       });
       item.appendChild(nameEl);
 
+      const typeLabels: Record<string, string> = {
+        pattern: "Schnittmuster", instruction: "Anleitung", cover_image: "Titelbild",
+        measurement_chart: "Ma\u00DFtabelle", fabric_requirements: "Stoffbedarf",
+        notes: "Notizen", license: "Lizenz", other: "Sonstiges",
+      };
       const typeEl = document.createElement("span");
       typeEl.className = "metadata-attachment-type";
-      typeEl.textContent = att.attachmentType;
+      typeEl.textContent = typeLabels[att.attachmentType] || att.attachmentType;
       item.appendChild(typeEl);
 
       const delBtn = document.createElement("button");
@@ -781,7 +794,7 @@ export class MetadataPanel extends Component {
 
     const row = document.createElement("div");
     row.style.display = "flex";
-    row.style.gap = "var(--space-xs)";
+    row.style.gap = "var(--spacing-1)";
     row.style.alignItems = "center";
 
     const input = document.createElement("input");
@@ -801,7 +814,7 @@ export class MetadataPanel extends Component {
       linkBtn.style.alignItems = "center";
       linkBtn.style.justifyContent = "center";
       linkBtn.style.width = "auto";
-      linkBtn.style.padding = "var(--space-xs) var(--space-sm)";
+      linkBtn.style.padding = "var(--spacing-1) var(--spacing-2)";
       linkBtn.style.textDecoration = "none";
       linkBtn.style.cursor = "pointer";
       linkBtn.href = value;
@@ -1313,6 +1326,10 @@ export class MetadataPanel extends Component {
     if (!this.currentFile) return;
     const fileId = this.currentFile.id;
 
+    // Show type selector first
+    const attachmentType = await this.showAttachmentTypeSelector();
+    if (!attachmentType) return;
+
     try {
       const selected = await open({
         multiple: false,
@@ -1323,7 +1340,7 @@ export class MetadataPanel extends Component {
       const path = typeof selected === "string" ? selected : String(selected);
       if (!path) return;
 
-      await FileService.attachFile(fileId, path, "other");
+      await FileService.attachFile(fileId, path, attachmentType);
       ToastContainer.show("success", "Anhang hinzugef\u00FCgt");
 
       // Refresh the panel to show the new attachment
@@ -1332,6 +1349,72 @@ export class MetadataPanel extends Component {
       console.warn("Failed to attach file:", e);
       ToastContainer.show("error", "Anhang konnte nicht hinzugef\u00FCgt werden");
     }
+  }
+
+  private showAttachmentTypeSelector(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "dialog-overlay";
+      overlay.style.display = "flex";
+
+      const dialog = document.createElement("div");
+      dialog.className = "dialog-content";
+      dialog.style.maxWidth = "320px";
+      dialog.style.padding = "var(--spacing-4)";
+
+      const title = document.createElement("h3");
+      title.style.margin = "0 0 var(--spacing-3) 0";
+      title.textContent = "Anhangstyp w\u00E4hlen";
+      dialog.appendChild(title);
+
+      const types: { value: string; label: string }[] = [
+        { value: "pattern", label: "Schnittmuster" },
+        { value: "instruction", label: "Anleitung" },
+        { value: "cover_image", label: "Titelbild" },
+        { value: "measurement_chart", label: "Ma\u00DFtabelle" },
+        { value: "fabric_requirements", label: "Stoffbedarf" },
+        { value: "notes", label: "Notizen" },
+        { value: "license", label: "Lizenz" },
+        { value: "other", label: "Sonstiges" },
+      ];
+
+      for (const t of types) {
+        const btn = document.createElement("button");
+        btn.className = "metadata-action-btn";
+        btn.style.display = "block";
+        btn.style.width = "100%";
+        btn.style.marginBottom = "var(--spacing-1)";
+        btn.style.textAlign = "left";
+        btn.textContent = t.label;
+        btn.addEventListener("click", () => {
+          overlay.remove();
+          resolve(t.value);
+        });
+        dialog.appendChild(btn);
+      }
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "metadata-action-btn";
+      cancelBtn.style.display = "block";
+      cancelBtn.style.width = "100%";
+      cancelBtn.style.marginTop = "var(--spacing-2)";
+      cancelBtn.style.opacity = "0.7";
+      cancelBtn.textContent = "Abbrechen";
+      cancelBtn.addEventListener("click", () => {
+        overlay.remove();
+        resolve(null);
+      });
+      dialog.appendChild(cancelBtn);
+
+      overlay.appendChild(dialog);
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) {
+          overlay.remove();
+          resolve(null);
+        }
+      });
+      document.body.appendChild(overlay);
+    });
   }
 
   private addClickableInfoRow(grid: HTMLElement, label: string, filepath: string): void {

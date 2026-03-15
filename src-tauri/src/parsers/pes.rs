@@ -671,6 +671,8 @@ impl EmbroideryParser for PesParser {
             author: ext.author,
             keywords: ext.keywords,
             comments: ext.comments,
+            page_count: None,
+            paper_size: None,
         })
     }
 

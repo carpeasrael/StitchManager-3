@@ -124,12 +124,14 @@ export async function getAttachments(
 export async function attachFile(
   fileId: number,
   sourcePath: string,
-  attachmentType: string
+  attachmentType: string,
+  displayName?: string
 ): Promise<FileAttachment> {
   return invoke<FileAttachment>("attach_file", {
     fileId,
     sourcePath,
     attachmentType,
+    displayName: displayName ?? null,
   });
 }
 

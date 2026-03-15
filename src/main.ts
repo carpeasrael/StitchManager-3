@@ -22,6 +22,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import * as FileService from "./services/FileService";
 import * as BatchService from "./services/BatchService";
 import * as AiService from "./services/AiService";
@@ -940,6 +941,65 @@ function initComponents(): AppInstances {
   return { components, splitters, toast };
 }
 
+// --- Drag-and-drop file import ---
+function setupDragDrop(): () => void {
+  let overlay: HTMLElement | null = null;
+
+  function showOverlay() {
+    if (overlay) return;
+    overlay = document.createElement("div");
+    overlay.className = "drop-zone-overlay";
+    overlay.innerHTML = '<div class="drop-zone-content"><div class="drop-zone-icon">\uD83D\uDCC1</div><div class="drop-zone-text">Dateien hier ablegen zum Importieren</div></div>';
+    document.body.appendChild(overlay);
+  }
+
+  function hideOverlay() {
+    if (overlay) {
+      overlay.remove();
+      overlay = null;
+    }
+  }
+
+  async function handleDrop(paths: string[]) {
+    hideOverlay();
+    if (paths.length === 0) return;
+
+    const folderId = appState.get("selectedFolderId");
+    if (!folderId) {
+      ToastContainer.show("error", "Bitte zuerst einen Ordner auswählen");
+      return;
+    }
+
+    try {
+      const result = await ScannerService.importFiles(paths, folderId);
+      ToastContainer.show("success", `${result.length} Datei(en) importiert`);
+      await reloadFilesAndCounts();
+    } catch (e) {
+      console.warn("Drop import failed:", e);
+      ToastContainer.show("error", "Import fehlgeschlagen");
+    }
+  }
+
+  let unlisten: (() => void) | null = null;
+
+  getCurrentWebviewWindow()
+    .onDragDropEvent((event) => {
+      if (event.payload.type === "over") {
+        showOverlay();
+      } else if (event.payload.type === "drop") {
+        handleDrop(event.payload.paths);
+      } else {
+        hideOverlay();
+      }
+    })
+    .then((fn) => { unlisten = fn; });
+
+  return () => {
+    hideOverlay();
+    if (unlisten) unlisten();
+  };
+}
+
 let hmrCleanup: (() => void)[] = [];
 let initGeneration = 0;
 
@@ -967,6 +1027,7 @@ async function init(): Promise<void> {
   const destroyThemeToggle = setupThemeToggle();
   const destroyShortcuts = initShortcuts();
   const destroyEventHandlers = initEventHandlers();
+  const destroyDragDrop = setupDragDrop();
   const { components, splitters, toast } = initComponents();
 
   hmrCleanup = [
@@ -974,6 +1035,7 @@ async function init(): Promise<void> {
     destroyEventHandlers,
     destroyShortcuts,
     destroyThemeToggle,
+    destroyDragDrop,
     () => components.forEach((c) => c.destroy()),
     () => splitters.forEach((s) => s.destroy()),
     () => toast.destroy(),

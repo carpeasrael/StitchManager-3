@@ -1,5 +1,7 @@
 pub mod dst;
+pub mod image_parser;
 pub mod jef;
+pub mod pdf;
 pub mod pes;
 pub mod vp3;
 pub mod writers;
@@ -28,6 +30,8 @@ pub struct ParsedFileInfo {
     pub author: Option<String>,
     pub keywords: Option<String>,
     pub comments: Option<String>,
+    pub page_count: Option<i32>,
+    pub paper_size: Option<String>,
 }
 
 /// A single thread color extracted from the file.
@@ -64,12 +68,16 @@ pub fn get_parser(extension: &str) -> Option<&'static dyn EmbroideryParser> {
     static DST_PARSER: dst::DstParser = dst::DstParser;
     static JEF_PARSER: jef::JefParser = jef::JefParser;
     static VP3_PARSER: vp3::Vp3Parser = vp3::Vp3Parser;
+    static PDF_PARSER: pdf::PdfParser = pdf::PdfParser;
+    static IMAGE_PARSER: image_parser::ImageParser = image_parser::ImageParser;
 
     match extension.to_lowercase().as_str() {
         "pes" => Some(&PES_PARSER),
         "dst" => Some(&DST_PARSER),
         "jef" => Some(&JEF_PARSER),
         "vp3" => Some(&VP3_PARSER),
+        "pdf" => Some(&PDF_PARSER),
+        "png" | "jpg" | "jpeg" | "bmp" => Some(&IMAGE_PARSER),
         _ => None,
     }
 }
@@ -109,8 +117,22 @@ mod tests {
     }
 
     #[test]
+    fn test_get_parser_pdf() {
+        let parser = get_parser("pdf").unwrap();
+        assert!(parser.supported_extensions().contains(&"pdf"));
+    }
+
+    #[test]
+    fn test_get_parser_image() {
+        assert!(get_parser("png").is_some());
+        assert!(get_parser("jpg").is_some());
+        assert!(get_parser("jpeg").is_some());
+        assert!(get_parser("bmp").is_some());
+    }
+
+    #[test]
     fn test_get_parser_unknown() {
-        assert!(get_parser("png").is_none());
         assert!(get_parser("xxx").is_none());
+        assert!(get_parser("svg").is_none());
     }
 }

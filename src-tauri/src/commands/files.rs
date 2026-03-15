@@ -974,6 +974,7 @@ pub fn attach_file(
     file_id: i64,
     source_path: String,
     attachment_type: String,
+    display_name: Option<String>,
 ) -> Result<FileAttachment, AppError> {
     // Reject path traversal
     super::validate_no_traversal(&source_path)?;
@@ -1055,15 +1056,15 @@ pub fn attach_file(
         .to_string();
 
     conn.execute(
-        "INSERT INTO file_attachments (file_id, filename, mime_type, file_path, attachment_type) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![file_id, actual_filename, mime_type, dest_str, attachment_type],
+        "INSERT INTO file_attachments (file_id, filename, mime_type, file_path, attachment_type, display_name) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![file_id, actual_filename, mime_type, dest_str, attachment_type, display_name],
     )?;
 
     let id = conn.last_insert_rowid();
 
     conn.query_row(
-        "SELECT id, file_id, filename, mime_type, file_path, attachment_type, created_at \
+        "SELECT id, file_id, filename, mime_type, file_path, attachment_type, display_name, sort_order, created_at \
          FROM file_attachments WHERE id = ?1",
         [id],
         |row| Ok(FileAttachment {
@@ -1073,7 +1074,9 @@ pub fn attach_file(
             mime_type: row.get(3)?,
             file_path: row.get(4)?,
             attachment_type: row.get(5)?,
-            created_at: row.get(6)?,
+            display_name: row.get(6)?,
+            sort_order: row.get(7)?,
+            created_at: row.get(8)?,
         }),
     ).map_err(|e| AppError::Database(e))
 }
@@ -1087,8 +1090,8 @@ pub fn get_attachments(
     let conn = lock_db(&db)?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, file_id, filename, mime_type, file_path, attachment_type, created_at \
-         FROM file_attachments WHERE file_id = ?1 ORDER BY created_at",
+        "SELECT id, file_id, filename, mime_type, file_path, attachment_type, display_name, sort_order, created_at \
+         FROM file_attachments WHERE file_id = ?1 ORDER BY sort_order, created_at",
     )?;
     let attachments = stmt
         .query_map([file_id], |row| {
@@ -1099,7 +1102,9 @@ pub fn get_attachments(
                 mime_type: row.get(3)?,
                 file_path: row.get(4)?,
                 attachment_type: row.get(5)?,
-                created_at: row.get(6)?,
+                display_name: row.get(6)?,
+                sort_order: row.get(7)?,
+                created_at: row.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

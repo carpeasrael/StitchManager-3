@@ -6,10 +6,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3"];
+const SUPPORTED_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3", "pdf", "png", "jpg", "jpeg", "bmp"];
 const DEBOUNCE_MS: u64 = 500;
 
-fn is_embroidery_file(path: &Path) -> bool {
+fn is_supported_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| SUPPORTED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
@@ -57,7 +57,7 @@ pub fn start_watcher(
             match rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
                 Ok(Ok(event)) => {
                     for path in &event.paths {
-                        if !is_embroidery_file(path) {
+                        if !is_supported_file(path) {
                             continue;
                         }
                         let path_str = path.to_string_lossy().to_string();

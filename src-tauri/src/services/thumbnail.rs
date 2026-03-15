@@ -78,7 +78,18 @@ impl ThumbnailGenerator {
         } else {
             // No stitch segments; try embedded thumbnail
             match parser.extract_thumbnail(data).ok().flatten() {
-                Some(pixels) => scale_monochrome_thumbnail(&pixels, 48, 38),
+                Some(pixels) => {
+                    // Detect if the data is an encoded image (PNG/JPEG) vs raw monochrome pixels
+                    if pixels.len() > 8 && (pixels.starts_with(&[0x89, 0x50, 0x4E, 0x47]) || pixels.starts_with(&[0xFF, 0xD8])) {
+                        // Encoded image (PNG or JPEG) — decode and resize
+                        match image::load_from_memory(&pixels) {
+                            Ok(img) => img.thumbnail(TARGET_WIDTH, TARGET_HEIGHT).to_rgba8(),
+                            Err(_) => scale_monochrome_thumbnail(&pixels, 48, 38),
+                        }
+                    } else {
+                        scale_monochrome_thumbnail(&pixels, 48, 38)
+                    }
+                }
                 None => ImageBuffer::new(TARGET_WIDTH, TARGET_HEIGHT),
             }
         };

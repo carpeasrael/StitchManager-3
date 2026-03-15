@@ -10,7 +10,8 @@ use crate::db::queries::{FILE_SELECT, row_to_file};
 use crate::error::{lock_db, AppError};
 use crate::parsers::{self, ParsedFileInfo, StitchSegment};
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3"];
+const EMBROIDERY_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3"];
+const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg", "bmp"];
 
 /// Maximum file size accepted for import/parse (100 MB).
 const MAX_IMPORT_SIZE: u64 = 100 * 1024 * 1024;
@@ -73,7 +74,8 @@ pub fn persist_parsed_metadata(
          stitch_count = ?2, color_count = ?3, width_mm = ?4, height_mm = ?5, \
          design_name = ?6, jump_count = ?7, trim_count = ?8, \
          hoop_width_mm = ?9, hoop_height_mm = ?10, \
-         category = ?11, author = ?12, keywords = ?13, comments = ?14 \
+         category = ?11, author = ?12, keywords = ?13, comments = ?14, \
+         page_count = ?15, paper_size = ?16 \
          WHERE id = ?1",
         rusqlite::params![
             file_id,
@@ -90,6 +92,8 @@ pub fn persist_parsed_metadata(
             pinfo.author,
             pinfo.keywords,
             pinfo.comments,
+            pinfo.page_count,
+            pinfo.paper_size,
         ],
     ) {
         log::warn!("Failed to update metadata for {filepath}: {e}");
@@ -142,11 +146,19 @@ struct ScanProgress {
     file: String,
 }
 
-fn is_embroidery_file(path: &std::path::Path) -> bool {
+fn is_supported_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| SUPPORTED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .map(|ext| {
+            let lower = ext.to_lowercase();
+            EMBROIDERY_EXTENSIONS.contains(&lower.as_str())
+                || DOCUMENT_EXTENSIONS.contains(&lower.as_str())
+        })
         .unwrap_or(false)
+}
+
+fn is_document_extension(ext: &str) -> bool {
+    DOCUMENT_EXTENSIONS.contains(&ext.to_lowercase().as_str())
 }
 
 #[tauri::command]
@@ -174,7 +186,7 @@ pub fn scan_directory(
                 }
                 total_scanned += 1;
                 let file_path = e.path();
-                if is_embroidery_file(file_path) {
+                if is_supported_file(file_path) {
                     let filepath_str = file_path.to_string_lossy().to_string();
                     let _ = app_handle.emit("scan:file-found", &filepath_str);
                     found_files.push(filepath_str);
@@ -241,10 +253,15 @@ pub fn import_files(
 
         for info in &file_info {
             let uid = generate_unique_id();
+            let file_type = if info.ext.as_deref().map(is_document_extension).unwrap_or(false) {
+                "sewing_pattern"
+            } else {
+                "embroidery"
+            };
             let result = tx.execute(
-                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
+                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id, file_type) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid, file_type],
             );
 
             match result {
@@ -417,7 +434,7 @@ pub fn mass_import(
                     continue;
                 }
                 scanned_files += 1;
-                if is_embroidery_file(e.path()) {
+                if is_supported_file(e.path()) {
                     embroidery_paths.push(e.path().to_string_lossy().to_string());
                 }
                 if scanned_files % 50 == 0 {
@@ -484,10 +501,15 @@ pub fn mass_import(
             let status: String;
 
             let uid = generate_unique_id();
+            let file_type = if info.ext.as_deref().map(is_document_extension).unwrap_or(false) {
+                "sewing_pattern"
+            } else {
+                "embroidery"
+            };
             let result = tx.execute(
-                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
+                "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id, file_type) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid, file_type],
             );
 
             match result {
@@ -712,10 +734,15 @@ pub fn watcher_auto_import(
                 };
 
                 let uid = generate_unique_id();
+                let file_type = if info.ext.as_deref().map(is_document_extension).unwrap_or(false) {
+                    "sewing_pattern"
+                } else {
+                    "embroidery"
+                };
                 let result = tx.execute(
-                    "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid],
+                    "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, file_size_bytes, unique_id, file_type) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    rusqlite::params![folder_id, info.filename, info.filepath, info.file_size, uid, file_type],
                 );
 
                 if let Ok(changes) = result {
@@ -832,13 +859,18 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn test_is_embroidery_file() {
-        assert!(is_embroidery_file(std::path::Path::new("/tmp/test.pes")));
-        assert!(is_embroidery_file(std::path::Path::new("/tmp/test.DST")));
-        assert!(is_embroidery_file(std::path::Path::new("/tmp/test.jef")));
-        assert!(is_embroidery_file(std::path::Path::new("/tmp/test.vp3")));
-        assert!(!is_embroidery_file(std::path::Path::new("/tmp/test.png")));
-        assert!(!is_embroidery_file(std::path::Path::new("/tmp/test.txt")));
+    fn test_is_supported_file() {
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.pes")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.DST")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.jef")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.vp3")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.pdf")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.png")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.jpg")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.jpeg")));
+        assert!(is_supported_file(std::path::Path::new("/tmp/test.bmp")));
+        assert!(!is_supported_file(std::path::Path::new("/tmp/test.txt")));
+        assert!(!is_supported_file(std::path::Path::new("/tmp/test.svg")));
     }
 
     #[test]
@@ -855,7 +887,7 @@ mod tests {
         let mut found = Vec::new();
         for entry in WalkDir::new(base).follow_links(false) {
             if let Ok(e) = entry {
-                if e.file_type().is_file() && is_embroidery_file(e.path()) {
+                if e.file_type().is_file() && is_supported_file(e.path()) {
                     found.push(e.path().to_string_lossy().to_string());
                 }
             }

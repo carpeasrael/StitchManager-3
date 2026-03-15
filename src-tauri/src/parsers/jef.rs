@@ -275,6 +275,8 @@ impl EmbroideryParser for JefParser {
             author: None,
             keywords: None,
             comments: None,
+            page_count: None,
+            paper_size: None,
         })
     }
 
