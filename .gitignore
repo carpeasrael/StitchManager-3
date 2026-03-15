@@ -30,3 +30,10 @@ example files/
 
 # Temporary icon source
 app-icon.png
+
+# Flatpak generated offline sources (submitted to Flathub repo, not here)
+flatpak/generated-sources/
+flatpak/.flatpak-builder/
+flatpak/builddir/
+flatpak/repo/
+flatpak/_build/

@@ -20,9 +20,12 @@ jobs:
           - platform: macos-13
             target: x86_64-apple-darwin
             label: macOS-x64
-          - platform: ubuntu-22.04
+          - platform: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             label: Linux-x64
+          - platform: ubuntu-24.04
+            target: aarch64-unknown-linux-gnu
+            label: Linux-arm64
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             label: Windows-x64
@@ -47,8 +50,8 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Install Linux dependencies (x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -57,7 +60,35 @@ jobs:
             librsvg2-dev \
             patchelf \
             libgtk-3-dev \
-            libssl-dev
+            libssl-dev \
+            flatpak \
+            flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.gnome.Platform//46 org.gnome.Sdk//46
+
+      - name: Install Linux dependencies (aarch64 cross-compilation)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list.d/*.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            patchelf \
+            libwebkit2gtk-4.1-dev:arm64 \
+            libappindicator3-dev:arm64 \
+            librsvg2-dev:arm64 \
+            libgtk-3-dev:arm64 \
+            libssl-dev:arm64 \
+            flatpak \
+            flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.gnome.Platform//46 org.gnome.Sdk//46
+        env:
+          PKG_CONFIG_ALLOW_CROSS: 1
 
       - name: Install frontend dependencies
         run: npm ci
@@ -66,6 +97,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64-linux-gnu-gcc' || '' }}
+          PKG_CONFIG_PATH: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
+          PKG_CONFIG_SYSROOT_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/' || '' }}
+          PKG_CONFIG_ALLOW_CROSS: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'StichMan ${{ github.ref_name }}'
@@ -80,10 +115,12 @@ jobs:
             |----------|------|
             | macOS (Apple Silicon) | `.dmg` |
             | macOS (Intel) | `.dmg` |
-            | Linux | `.deb` / `.AppImage` |
+            | Linux x64 | `.AppImage` / `.flatpak` |
+            | Linux arm64 | `.AppImage` / `.flatpak` |
             | Windows | `.msi` / `.exe` |
 
             ### What's New
+            - Security & stability audit fixes (path traversal hardening, permission cleanup, size limits)
             - Full-color stitch-based thumbnails (replaces monochrome PEC bitmaps)
             - Interactive zoomable stitch pattern preview with pan/zoom
             - Standardized display scaling across all views
@@ -91,4 +128,30 @@ jobs:
             - Thread color persistence and display
           releaseDraft: false
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} ${{ contains(matrix.target, 'linux') && '--bundles appimage' || '' }}
+
+      - name: Build Flatpak bundle
+        if: contains(matrix.target, 'linux')
+        run: |
+          # Stage the built binary and metadata for flatpak-builder
+          mkdir -p flatpak/_build
+          cp src-tauri/target/${{ matrix.target }}/release/app flatpak/_build/stichman
+          cp flatpak/de.carpeasrael.stichman.desktop flatpak/_build/
+          cp flatpak/de.carpeasrael.stichman.metainfo.xml flatpak/_build/
+          cp src-tauri/icons/256x256.png flatpak/_build/de.carpeasrael.stichman.png
+
+          # Build Flatpak
+          cd flatpak
+          flatpak-builder --force-clean --repo=repo builddir ci-bundle.yml
+          flatpak build-bundle repo \
+            StichMan_${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'arm64' || 'amd64' }}.flatpak \
+            de.carpeasrael.stichman
+
+      - name: Upload Flatpak to release
+        if: contains(matrix.target, 'linux')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} \
+            flatpak/StichMan_${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'arm64' || 'amd64' }}.flatpak \
+            --clobber

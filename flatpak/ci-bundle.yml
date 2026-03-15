@@ -1,0 +1,29 @@
+# CI-only manifest: packages the pre-built Tauri binary as a Flatpak bundle.
+# NOT for Flathub submission — use de.carpeasrael.stichman.yml for that.
+app-id: de.carpeasrael.stichman
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+command: stichman
+
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --share=network
+  - --filesystem=home
+  - --filesystem=/media:ro
+  - --filesystem=/run/media:ro
+
+modules:
+  - name: stichman
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 stichman /app/bin/stichman
+      - install -Dm644 de.carpeasrael.stichman.desktop /app/share/applications/de.carpeasrael.stichman.desktop
+      - install -Dm644 de.carpeasrael.stichman.metainfo.xml /app/share/metainfo/de.carpeasrael.stichman.metainfo.xml
+      - install -Dm644 de.carpeasrael.stichman.png /app/share/icons/hicolor/256x256/apps/de.carpeasrael.stichman.png
+    sources:
+      - type: dir
+        path: _build

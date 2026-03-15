@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 carpeasrael -->
+<component type="desktop-application">
+  <id>de.carpeasrael.stichman</id>
+  <name>StichMan</name>
+  <summary>Manage, convert, and organize embroidery files</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+
+  <developer id="de.carpeasrael">
+    <name>carpeasrael</name>
+  </developer>
+
+  <description>
+    <p>
+      StichMan is a desktop application for managing embroidery machine files
+      (Stickdateien-Verwaltung). It natively parses PES, DST, JEF, and VP3
+      formats and provides a unified workspace for organizing, converting,
+      and analyzing your embroidery design library.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Native parsing of PES, DST, JEF, and VP3 embroidery formats</li>
+      <li>Format conversion between PES and DST</li>
+      <li>Full-color stitch-based thumbnail previews</li>
+      <li>Thread color database with 2000+ colors from 7 brands</li>
+      <li>Batch rename, organize, and USB export operations</li>
+      <li>AI-powered metadata analysis via Ollama or OpenAI</li>
+      <li>Version history with automatic snapshots</li>
+      <li>Advanced search across tags, dimensions, stitch counts, and more</li>
+      <li>Light and dark theme with WCAG AA compliance</li>
+    </ul>
+  </description>
+
+  <url type="homepage">https://github.com/carpeasrael/StitchManager-3</url>
+  <url type="bugtracker">https://github.com/carpeasrael/StitchManager-3/issues</url>
+  <url type="vcs-browser">https://github.com/carpeasrael/StitchManager-3</url>
+
+  <launchable type="desktop-id">de.carpeasrael.stichman.desktop</launchable>
+
+  <provides>
+    <binary>stichman</binary>
+  </provides>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#e8d5c4</color>
+    <color type="primary" scheme_preference="dark">#3d2b1f</color>
+  </branding>
+
+  <categories>
+    <category>Graphics</category>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>embroidery</keyword>
+    <keyword>stitch</keyword>
+    <keyword>PES</keyword>
+    <keyword>DST</keyword>
+    <keyword>JEF</keyword>
+    <keyword>VP3</keyword>
+    <keyword>Stickdatei</keyword>
+    <keyword>sewing</keyword>
+  </keywords>
+
+  <screenshots>
+    <!-- TODO: Add screenshots before Flathub submission.
+         Host PNG files (e.g. 1280x720) in the repository under screenshots/
+         and reference them via raw GitHub URLs from a tagged release:
+         https://raw.githubusercontent.com/carpeasrael/StitchManager-3/v26.3.3/screenshots/main.png
+    -->
+    <screenshot type="default">
+      <caption>Main workspace with file list, metadata panel, and folder tree</caption>
+      <image>https://raw.githubusercontent.com/carpeasrael/StitchManager-3/main/screenshots/main.png</image>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1" />
+
+  <requires>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <releases>
+    <release version="26.3.3" date="2026-03-15">
+      <description>
+        <p>Security and stability audit fixes:</p>
+        <ul>
+          <li>Hardened path traversal checks across all file operations</li>
+          <li>Removed unused SQL execute permission</li>
+          <li>Added file size limits to prevent memory exhaustion</li>
+          <li>Reduced version snapshot size threshold</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>
