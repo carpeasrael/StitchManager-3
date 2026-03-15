@@ -66,9 +66,7 @@ fn convert_file_inner(
     output_dir: &str,
 ) -> Result<String, AppError> {
     // Reject path traversal attempts
-    if output_dir.contains("..") {
-        return Err(AppError::Validation("Path traversal not allowed".to_string()));
-    }
+    super::validate_no_traversal(&output_dir)?;
     // Auto-version and fetch filepath in a single lock acquisition
     let filepath: String = {
         let conn = lock_db(db)?;

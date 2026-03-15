@@ -170,9 +170,7 @@ pub fn migrate_from_2stitch(
     // Resolve XML path (validate user-supplied path)
     let xml_file = match xml_path {
         Some(p) => {
-            if p.contains("..") {
-                return Err(AppError::Validation("Path traversal not allowed".to_string()));
-            }
+            super::validate_no_traversal(&p)?;
             PathBuf::from(p)
         }
         None => {

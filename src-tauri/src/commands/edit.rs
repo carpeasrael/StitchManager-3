@@ -89,9 +89,7 @@ pub fn save_transformed(
     output_path: String,
 ) -> Result<String, AppError> {
     // Reject path traversal attempts
-    if output_path.contains("..") {
-        return Err(AppError::Validation("Path traversal not allowed".to_string()));
-    }
+    super::validate_no_traversal(&output_path)?;
     // Auto-version before transform
     {
         let conn = lock_db(&db)?;

@@ -48,9 +48,10 @@ pub fn add_machine(
     target_format: Option<String>,
 ) -> Result<MachineProfile, AppError> {
     // Validate transfer path
-    if transfer_path.contains("..") || transfer_path.is_empty() {
+    if transfer_path.is_empty() {
         return Err(AppError::Validation("Ungueltiger Uebertragungspfad".into()));
     }
+    super::validate_no_traversal(&transfer_path)?;
 
     let conn = lock_db(&db)?;
     conn.execute(

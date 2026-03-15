@@ -857,9 +857,7 @@ pub fn attach_file(
     attachment_type: String,
 ) -> Result<FileAttachment, AppError> {
     // Reject path traversal
-    if source_path.contains("..") {
-        return Err(AppError::Validation("Path traversal not allowed".to_string()));
-    }
+    super::validate_no_traversal(&source_path)?;
 
     let src = std::path::Path::new(&source_path);
     if !src.exists() {
@@ -1045,6 +1043,16 @@ pub fn open_attachment(
         })?;
 
     drop(conn);
+
+    // SEC-001: Validate the path before passing to the OS opener
+    super::validate_no_traversal(&file_path)?;
+    let path = std::path::Path::new(&file_path);
+    if !path.exists() {
+        return Err(AppError::NotFound(format!("Anhang-Datei nicht gefunden: {file_path}")));
+    }
+    if !path.is_file() {
+        return Err(AppError::Validation(format!("Pfad ist keine regulaere Datei: {file_path}")));
+    }
 
     #[cfg(target_os = "macos")]
     {

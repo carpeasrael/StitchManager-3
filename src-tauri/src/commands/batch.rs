@@ -498,9 +498,7 @@ pub async fn batch_export_usb(
     target_path: String,
 ) -> Result<BatchResult, AppError> {
     // Reject path traversal attempts
-    if target_path.contains("..") {
-        return Err(AppError::Validation("Path traversal not allowed".to_string()));
-    }
+    super::validate_no_traversal(&target_path)?;
     let target_dir = std::path::Path::new(&target_path);
     if !target_dir.exists() {
         std::fs::create_dir_all(target_dir)?;

@@ -30,7 +30,8 @@ pub fn list_templates(app: AppHandle) -> Result<Vec<TemplateInfo>, AppError> {
             .filter(|t| {
                 // Prevent path traversal in manifest filenames
                 let name = &t.filename;
-                !name.contains("..") && !name.starts_with('/') && !name.starts_with('\\')
+                !super::has_traversal(name)
+                    && !name.starts_with('/') && !name.starts_with('\\')
                     && template_dir.join(name).exists()
             })
             .collect();

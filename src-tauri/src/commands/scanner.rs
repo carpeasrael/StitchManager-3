@@ -12,6 +12,9 @@ use crate::parsers::{self, ParsedFileInfo, StitchSegment};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["pes", "dst", "jef", "vp3"];
 
+/// Maximum file size accepted for import/parse (100 MB).
+const MAX_IMPORT_SIZE: u64 = 100 * 1024 * 1024;
+
 /// Pre-parsed file data collected outside the DB lock.
 /// Shared across import_files, mass_import, watcher_auto_import, and migrate_from_2stitch.
 pub struct PreParsedFile {
@@ -31,21 +34,28 @@ pub fn pre_parse_file(filepath: &str) -> PreParsedFile {
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
         .to_string();
-    let file_size: Option<i64> = std::fs::metadata(path)
-        .ok()
+    let meta = std::fs::metadata(path).ok();
+    let file_size: Option<i64> = meta.as_ref()
         .and_then(|m| i64::try_from(m.len()).ok());
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase());
-    let parsed = ext
-        .as_deref()
-        .and_then(|e| parsers::get_parser(e))
-        .and_then(|parser| {
-            std::fs::read(path)
-                .ok()
-                .and_then(|data| parser.parse(&data).ok())
-        });
+    // Skip parsing if the file exceeds the import size limit
+    let oversized = meta.as_ref().map_or(false, |m| m.len() > MAX_IMPORT_SIZE);
+    let parsed = if oversized {
+        log::warn!("Skipping parse for oversized file ({} bytes): {filepath}",
+            meta.as_ref().map_or(0, |m| m.len()));
+        None
+    } else {
+        ext.as_deref()
+            .and_then(|e| parsers::get_parser(e))
+            .and_then(|parser| {
+                std::fs::read(path)
+                    .ok()
+                    .and_then(|data| parser.parse(&data).ok())
+            })
+    };
     PreParsedFile { filepath: filepath.to_string(), filename, file_size, parsed, ext }
 }
 
@@ -586,10 +596,19 @@ pub fn mass_import(
 #[tauri::command]
 pub fn parse_embroidery_file(filepath: String) -> Result<ParsedFileInfo, AppError> {
     // Reject path traversal attempts
-    if filepath.contains("..") {
-        return Err(AppError::Validation("Path traversal not allowed".to_string()));
-    }
+    super::validate_no_traversal(&filepath)?;
     let path = std::path::Path::new(&filepath);
+
+    // Reject oversized files before reading into memory
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.len() > MAX_IMPORT_SIZE {
+            return Err(AppError::Validation(format!(
+                "Datei zu gross zum Parsen ({} bytes, max {} bytes)",
+                meta.len(), MAX_IMPORT_SIZE
+            )));
+        }
+    }
+
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -611,10 +630,19 @@ pub fn parse_embroidery_file(filepath: String) -> Result<ParsedFileInfo, AppErro
 #[tauri::command]
 pub fn get_stitch_segments(filepath: String) -> Result<Vec<StitchSegment>, AppError> {
     // Reject path traversal attempts
-    if filepath.contains("..") {
-        return Err(AppError::Validation("Path traversal not allowed".to_string()));
-    }
+    super::validate_no_traversal(&filepath)?;
     let path = std::path::Path::new(&filepath);
+
+    // Reject oversized files before reading into memory
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.len() > MAX_IMPORT_SIZE {
+            return Err(AppError::Validation(format!(
+                "Datei zu gross zum Parsen ({} bytes, max {} bytes)",
+                meta.len(), MAX_IMPORT_SIZE
+            )));
+        }
+    }
+
     let ext = path
         .extension()
         .and_then(|e| e.to_str())

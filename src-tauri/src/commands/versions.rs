@@ -38,8 +38,8 @@ pub fn create_version_snapshot(
         other => AppError::Database(other),
     })?;
 
-    // Skip versioning for very large files (>50MB) to avoid memory pressure
-    const MAX_VERSION_SIZE: u64 = 50 * 1024 * 1024;
+    // Skip versioning for very large files (>10MB) to avoid memory pressure
+    const MAX_VERSION_SIZE: u64 = 10 * 1024 * 1024;
     if let Ok(meta) = std::fs::metadata(&filepath) {
         if meta.len() > MAX_VERSION_SIZE {
             log::info!("Skipping version for large file ({} bytes): {filepath}", meta.len());
@@ -192,9 +192,7 @@ pub fn export_version(
         return Err(AppError::Validation(format!("Datei existiert bereits: {path}")));
     }
     // Block path traversal
-    if path.contains("..") {
-        return Err(AppError::Validation("Ungültiger Pfad".into()));
-    }
+    super::validate_no_traversal(&path)?;
     std::fs::write(p, &file_data)?;
     Ok(())
 }
