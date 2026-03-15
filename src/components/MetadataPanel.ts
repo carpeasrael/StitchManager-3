@@ -28,6 +28,13 @@ interface FormSnapshot {
   description: string;
   license: string;
   tags: string[];
+  sizeRange: string;
+  skillLevel: string;
+  language: string;
+  formatType: string;
+  fileSource: string;
+  purchaseLink: string;
+  status: string;
 }
 
 export class MetadataPanel extends Component {
@@ -110,6 +117,13 @@ export class MetadataPanel extends Component {
       description: file.description || "",
       license: file.license || "",
       tags: tags.map((t) => t.name).sort(),
+      sizeRange: file.sizeRange || "",
+      skillLevel: file.skillLevel || "",
+      language: file.language || "",
+      formatType: file.formatType || "",
+      fileSource: file.fileSource || "",
+      purchaseLink: file.purchaseLink || "",
+      status: file.status || "none",
     };
   }
 
@@ -124,7 +138,14 @@ export class MetadataPanel extends Component {
       current.theme !== this.snapshot.theme ||
       current.description !== this.snapshot.description ||
       current.license !== this.snapshot.license ||
-      JSON.stringify(current.tags) !== JSON.stringify(this.snapshot.tags);
+      JSON.stringify(current.tags) !== JSON.stringify(this.snapshot.tags) ||
+      current.sizeRange !== this.snapshot.sizeRange ||
+      current.skillLevel !== this.snapshot.skillLevel ||
+      current.language !== this.snapshot.language ||
+      current.formatType !== this.snapshot.formatType ||
+      current.fileSource !== this.snapshot.fileSource ||
+      current.purchaseLink !== this.snapshot.purchaseLink ||
+      current.status !== this.snapshot.status;
 
     // Check custom fields for changes
     if (!dirty) {
@@ -146,7 +167,7 @@ export class MetadataPanel extends Component {
 
   private getCurrentFormValues(): FormSnapshot {
     const getValue = (name: string): string => {
-      const el = this.el.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      const el = this.el.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
         `[data-field="${name}"]`
       );
       return el ? el.value : "";
@@ -160,6 +181,13 @@ export class MetadataPanel extends Component {
       description: getValue("description"),
       license: getValue("license"),
       tags: tags.sort(),
+      sizeRange: getValue("sizeRange"),
+      skillLevel: getValue("skillLevel"),
+      language: getValue("language"),
+      formatType: getValue("formatType"),
+      fileSource: getValue("fileSource"),
+      purchaseLink: getValue("purchaseLink"),
+      status: getValue("status"),
     };
   }
 
@@ -332,6 +360,53 @@ export class MetadataPanel extends Component {
       onChange: () => this.checkDirty(),
     });
     wrapper.appendChild(tagSection);
+
+    // Status section (visible for all file types)
+    const statusSection = document.createElement("div");
+    statusSection.className = "metadata-section";
+    const statusHeader = document.createElement("div");
+    statusHeader.className = "metadata-section-header";
+    statusHeader.textContent = "Status";
+    statusSection.appendChild(statusHeader);
+    const statusForm = document.createElement("div");
+    statusForm.className = "metadata-form";
+    this.addSelectField(statusForm, "Status", "status", file.status || "none", [
+      { value: "none", label: "Keiner" },
+      { value: "not_started", label: "Nicht begonnen" },
+      { value: "planned", label: "Geplant" },
+      { value: "in_progress", label: "In Arbeit" },
+      { value: "completed", label: "Fertig" },
+      { value: "archived", label: "Archiviert" },
+    ]);
+    statusSection.appendChild(statusForm);
+    wrapper.appendChild(statusSection);
+
+    // Sewing pattern fields (only for sewing_pattern file type)
+    if (file.fileType === "sewing_pattern") {
+      const sewingSection = document.createElement("div");
+      sewingSection.className = "metadata-section";
+      const sewingHeader = document.createElement("div");
+      sewingHeader.className = "metadata-section-header";
+      sewingHeader.textContent = "Schnittmuster";
+      sewingSection.appendChild(sewingHeader);
+      const sewingForm = document.createElement("div");
+      sewingForm.className = "metadata-form";
+      this.addFormField(sewingForm, "Größen", "sizeRange", file.sizeRange || "", "text");
+      this.addSelectField(sewingForm, "Schwierigkeit", "skillLevel", file.skillLevel || "", [
+        { value: "", label: "-- Auswählen --" },
+        { value: "beginner", label: "Anfänger" },
+        { value: "easy", label: "Einfach" },
+        { value: "intermediate", label: "Mittel" },
+        { value: "advanced", label: "Fortgeschritten" },
+        { value: "expert", label: "Experte" },
+      ]);
+      this.addFormField(sewingForm, "Sprache", "language", file.language || "", "text");
+      this.addFormField(sewingForm, "Formattyp", "formatType", file.formatType || "", "text");
+      this.addFormField(sewingForm, "Quelle", "fileSource", file.fileSource || "", "text");
+      this.addLinkField(sewingForm, "Kauflink", "purchaseLink", file.purchaseLink || "");
+      sewingSection.appendChild(sewingForm);
+      wrapper.appendChild(sewingSection);
+    }
 
     // Custom fields section
     if (this.customFields.length > 0) {
@@ -658,6 +733,89 @@ export class MetadataPanel extends Component {
     container.appendChild(group);
   }
 
+  private addSelectField(
+    container: HTMLElement,
+    label: string,
+    field: string,
+    value: string,
+    options: { value: string; label: string }[]
+  ): void {
+    const group = document.createElement("div");
+    group.className = "metadata-form-group";
+
+    const labelEl = document.createElement("label");
+    labelEl.className = "metadata-form-label";
+    labelEl.textContent = label;
+    group.appendChild(labelEl);
+
+    const select = document.createElement("select");
+    select.className = "metadata-form-input";
+    select.dataset.field = field;
+
+    for (const opt of options) {
+      const optEl = document.createElement("option");
+      optEl.value = opt.value;
+      optEl.textContent = opt.label;
+      select.appendChild(optEl);
+    }
+
+    select.value = value;
+    select.addEventListener("change", () => this.checkDirty());
+    group.appendChild(select);
+    container.appendChild(group);
+  }
+
+  private addLinkField(
+    container: HTMLElement,
+    label: string,
+    field: string,
+    value: string
+  ): void {
+    const group = document.createElement("div");
+    group.className = "metadata-form-group";
+
+    const labelEl = document.createElement("label");
+    labelEl.className = "metadata-form-label";
+    labelEl.textContent = label;
+    group.appendChild(labelEl);
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.gap = "var(--space-xs)";
+    row.style.alignItems = "center";
+
+    const input = document.createElement("input");
+    input.type = "url";
+    input.className = "metadata-form-input";
+    input.dataset.field = field;
+    input.value = value;
+    input.placeholder = "https://...";
+    input.style.flex = "1";
+    input.addEventListener("input", () => this.checkDirty());
+    row.appendChild(input);
+
+    if (value && /^https?:\/\//i.test(value)) {
+      const linkBtn = document.createElement("a");
+      linkBtn.className = "metadata-form-input";
+      linkBtn.style.display = "inline-flex";
+      linkBtn.style.alignItems = "center";
+      linkBtn.style.justifyContent = "center";
+      linkBtn.style.width = "auto";
+      linkBtn.style.padding = "var(--space-xs) var(--space-sm)";
+      linkBtn.style.textDecoration = "none";
+      linkBtn.style.cursor = "pointer";
+      linkBtn.href = value;
+      linkBtn.target = "_blank";
+      linkBtn.rel = "noopener noreferrer";
+      linkBtn.textContent = "\u2197";
+      linkBtn.title = "Link öffnen";
+      row.appendChild(linkBtn);
+    }
+
+    group.appendChild(row);
+    container.appendChild(group);
+  }
+
   private async save(): Promise<void> {
     if (!this.currentFile || !this.dirty || this.saving) return;
 
@@ -691,6 +849,34 @@ export class MetadataPanel extends Component {
         }
         if (values.license !== this.snapshot.license) {
           updates.license = values.license;
+          hasUpdates = true;
+        }
+        if (values.sizeRange !== this.snapshot.sizeRange) {
+          updates.sizeRange = values.sizeRange;
+          hasUpdates = true;
+        }
+        if (values.skillLevel !== this.snapshot.skillLevel) {
+          updates.skillLevel = values.skillLevel;
+          hasUpdates = true;
+        }
+        if (values.language !== this.snapshot.language) {
+          updates.language = values.language;
+          hasUpdates = true;
+        }
+        if (values.formatType !== this.snapshot.formatType) {
+          updates.formatType = values.formatType;
+          hasUpdates = true;
+        }
+        if (values.fileSource !== this.snapshot.fileSource) {
+          updates.fileSource = values.fileSource;
+          hasUpdates = true;
+        }
+        if (values.purchaseLink !== this.snapshot.purchaseLink) {
+          updates.purchaseLink = values.purchaseLink;
+          hasUpdates = true;
+        }
+        if (values.status !== this.snapshot.status) {
+          updates.status = values.status;
           hasUpdates = true;
         }
       }

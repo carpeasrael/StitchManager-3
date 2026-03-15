@@ -53,6 +53,14 @@ pub struct EmbroideryFile {
     pub comments: Option<String>,
     pub unique_id: Option<String>,
     pub is_favorite: bool,
+    pub file_type: String,
+    pub size_range: Option<String>,
+    pub skill_level: Option<String>,
+    pub language: Option<String>,
+    pub format_type: Option<String>,
+    pub file_source: Option<String>,
+    pub purchase_link: Option<String>,
+    pub status: String,
     pub ai_analyzed: bool,
     pub ai_confirmed: bool,
     pub created_at: String,
@@ -164,6 +172,13 @@ pub struct FileUpdate {
     pub theme: Option<String>,
     pub description: Option<String>,
     pub license: Option<String>,
+    pub size_range: Option<String>,
+    pub skill_level: Option<String>,
+    pub language: Option<String>,
+    pub format_type: Option<String>,
+    pub file_source: Option<String>,
+    pub purchase_link: Option<String>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,4 +218,15 @@ pub struct SearchParams {
 
     /// Thread color name or brand search
     pub color_search: Option<String>,
+
+    /// File type discriminator filter
+    pub file_type: Option<String>,
+    /// Status filter
+    pub status: Option<String>,
+    /// Skill level filter
+    pub skill_level: Option<String>,
+    /// Language filter
+    pub language: Option<String>,
+    /// File source filter
+    pub file_source: Option<String>,
 }

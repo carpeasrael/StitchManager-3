@@ -18,6 +18,11 @@ function activeFilterCount(sp: SearchParams): number {
   if (sp.aiAnalyzed != null) count++;
   if (sp.aiConfirmed != null) count++;
   if (sp.colorSearch) count++;
+  if (sp.fileType) count++;
+  if (sp.status) count++;
+  if (sp.skillLevel) count++;
+  if (sp.language) count++;
+  if (sp.fileSource) count++;
   return count;
 }
 
@@ -237,6 +242,29 @@ export class SearchBar extends Component {
     // --- Color/brand search ---
     grid.appendChild(this.buildColorSearch(sp));
 
+    // --- New filters: file type, status, skill level, language, source ---
+    grid.appendChild(this.buildSelectFilter("Dateityp", "fileType", [
+      { value: "embroidery", label: "Stickdatei" },
+      { value: "sewing_pattern", label: "Schnittmuster" },
+    ], sp));
+    grid.appendChild(this.buildSelectFilter("Status", "status", [
+      { value: "none", label: "Keiner" },
+      { value: "not_started", label: "Nicht begonnen" },
+      { value: "planned", label: "Geplant" },
+      { value: "in_progress", label: "In Arbeit" },
+      { value: "completed", label: "Fertig" },
+      { value: "archived", label: "Archiviert" },
+    ], sp));
+    grid.appendChild(this.buildSelectFilter("Schwierigkeit", "skillLevel", [
+      { value: "beginner", label: "Anfänger" },
+      { value: "easy", label: "Einfach" },
+      { value: "intermediate", label: "Mittel" },
+      { value: "advanced", label: "Fortgeschritten" },
+      { value: "expert", label: "Experte" },
+    ], sp));
+    grid.appendChild(this.buildTextFilter("Sprache", "language", "z.B. de, en\u2026", sp));
+    grid.appendChild(this.buildTextFilter("Quelle", "fileSource", "z.B. Makerist\u2026", sp));
+
     this.panelEl.appendChild(grid);
 
     // Active filter chips
@@ -399,7 +427,7 @@ export class SearchBar extends Component {
 
     const lbl = document.createElement("label");
     lbl.className = "search-advanced-label";
-    lbl.textContent = "Status";
+    lbl.textContent = "KI-Status";
     group.appendChild(lbl);
 
     const row = document.createElement("div");
@@ -472,6 +500,76 @@ export class SearchBar extends Component {
         delete updated.colorSearch;
       }
       appState.set("searchParams", updated);
+    });
+    group.appendChild(input);
+    return group;
+  }
+
+  private buildSelectFilter(
+    label: string,
+    key: keyof SearchParams,
+    options: { value: string; label: string }[],
+    sp: SearchParams
+  ): HTMLElement {
+    const group = document.createElement("div");
+    group.className = "search-advanced-group";
+    const lbl = document.createElement("label");
+    lbl.className = "search-advanced-label";
+    lbl.textContent = label;
+    group.appendChild(lbl);
+    const select = document.createElement("select");
+    select.className = "search-color-input";
+    const emptyOpt = document.createElement("option");
+    emptyOpt.value = "";
+    emptyOpt.textContent = "Alle";
+    select.appendChild(emptyOpt);
+    for (const opt of options) {
+      const optEl = document.createElement("option");
+      optEl.value = opt.value;
+      optEl.textContent = opt.label;
+      select.appendChild(optEl);
+    }
+    select.value = (sp[key] as string) || "";
+    select.addEventListener("change", () => {
+      const updated = { ...appState.get("searchParams") } as Record<string, unknown>;
+      const val = select.value;
+      if (val) {
+        updated[key] = val;
+      } else {
+        delete updated[key];
+      }
+      appState.set("searchParams", updated as SearchParams);
+    });
+    group.appendChild(select);
+    return group;
+  }
+
+  private buildTextFilter(
+    label: string,
+    key: keyof SearchParams,
+    placeholder: string,
+    sp: SearchParams
+  ): HTMLElement {
+    const group = document.createElement("div");
+    group.className = "search-advanced-group";
+    const lbl = document.createElement("label");
+    lbl.className = "search-advanced-label";
+    lbl.textContent = label;
+    group.appendChild(lbl);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "search-color-input";
+    input.placeholder = placeholder;
+    input.value = (sp[key] as string) || "";
+    input.addEventListener("change", () => {
+      const updated = { ...appState.get("searchParams") } as Record<string, unknown>;
+      const val = input.value.trim();
+      if (val) {
+        updated[key] = val;
+      } else {
+        delete updated[key];
+      }
+      appState.set("searchParams", updated as SearchParams);
     });
     group.appendChild(input);
     return group;
@@ -587,6 +685,70 @@ export class SearchBar extends Component {
         clearFn: () => {
           const u = { ...appState.get("searchParams") };
           delete u.colorSearch;
+          appState.set("searchParams", u);
+          this.renderPanel();
+        },
+      });
+    }
+    if (sp.fileType) {
+      const typeLabels: Record<string, string> = { embroidery: "Stickdatei", sewing_pattern: "Schnittmuster" };
+      labels.push({
+        label: `Typ: ${typeLabels[sp.fileType] || sp.fileType}`,
+        clearFn: () => {
+          const u = { ...appState.get("searchParams") };
+          delete u.fileType;
+          appState.set("searchParams", u);
+          this.renderPanel();
+        },
+      });
+    }
+    if (sp.status) {
+      const statusLabels: Record<string, string> = {
+        none: "Keiner", not_started: "Nicht begonnen", planned: "Geplant",
+        in_progress: "In Arbeit", completed: "Fertig", archived: "Archiviert",
+      };
+      labels.push({
+        label: `Status: ${statusLabels[sp.status] || sp.status}`,
+        clearFn: () => {
+          const u = { ...appState.get("searchParams") };
+          delete u.status;
+          appState.set("searchParams", u);
+          this.renderPanel();
+        },
+      });
+    }
+    if (sp.skillLevel) {
+      const skillLabels: Record<string, string> = {
+        beginner: "Anfänger", easy: "Einfach", intermediate: "Mittel",
+        advanced: "Fortgeschritten", expert: "Experte",
+      };
+      labels.push({
+        label: `Schwierigkeit: ${skillLabels[sp.skillLevel] || sp.skillLevel}`,
+        clearFn: () => {
+          const u = { ...appState.get("searchParams") };
+          delete u.skillLevel;
+          appState.set("searchParams", u);
+          this.renderPanel();
+        },
+      });
+    }
+    if (sp.language) {
+      labels.push({
+        label: `Sprache: ${sp.language}`,
+        clearFn: () => {
+          const u = { ...appState.get("searchParams") };
+          delete u.language;
+          appState.set("searchParams", u);
+          this.renderPanel();
+        },
+      });
+    }
+    if (sp.fileSource) {
+      labels.push({
+        label: `Quelle: ${sp.fileSource}`,
+        clearFn: () => {
+          const u = { ...appState.get("searchParams") };
+          delete u.fileSource;
           appState.set("searchParams", u);
           this.renderPanel();
         },

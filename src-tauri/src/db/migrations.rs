@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 8;
+const CURRENT_VERSION: i32 = 9;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -75,6 +75,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 8 {
         apply_v8(conn)?;
+    }
+
+    if current < 9 {
+        apply_v9(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -481,6 +485,111 @@ fn base32_encode(data: &[u8]) -> String {
     result
 }
 
+fn apply_v9(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- S1-01: file_type discriminator
+        ALTER TABLE embroidery_files ADD COLUMN file_type TEXT NOT NULL DEFAULT 'embroidery';
+        CREATE INDEX IF NOT EXISTS idx_files_file_type ON embroidery_files(file_type);
+
+        -- S1-02: sewing pattern metadata fields
+        ALTER TABLE embroidery_files ADD COLUMN size_range TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN skill_level TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN language TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN format_type TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN file_source TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN purchase_link TEXT;
+
+        -- S1-03: status tracking
+        ALTER TABLE embroidery_files ADD COLUMN status TEXT NOT NULL DEFAULT 'none';
+        CREATE INDEX IF NOT EXISTS idx_files_status ON embroidery_files(status);
+
+        -- S1-05: Rebuild FTS5 with new searchable columns
+        DROP TRIGGER IF EXISTS files_fts_insert;
+        DROP TRIGGER IF EXISTS files_fts_delete;
+        DROP TRIGGER IF EXISTS files_fts_update;
+        DROP TABLE IF EXISTS files_fts;
+
+        CREATE VIRTUAL TABLE files_fts USING fts5(
+            name, filename, theme, description, design_name,
+            category, author, keywords, comments, license, unique_id,
+            language, file_source, size_range,
+            content=embroidery_files, content_rowid=id
+        );
+
+        -- Repopulate FTS index
+        INSERT INTO files_fts(rowid, name, filename, theme, description, design_name,
+            category, author, keywords, comments, license, unique_id,
+            language, file_source, size_range)
+        SELECT id, COALESCE(name,''), filename, COALESCE(theme,''), COALESCE(description,''),
+            COALESCE(design_name,''), COALESCE(category,''), COALESCE(author,''),
+            COALESCE(keywords,''), COALESCE(comments,''), COALESCE(license,''),
+            COALESCE(unique_id,''),
+            COALESCE(language,''), COALESCE(file_source,''), COALESCE(size_range,'')
+        FROM embroidery_files;
+
+        -- Recreate triggers with all 14 indexed columns
+        CREATE TRIGGER files_fts_insert AFTER INSERT ON embroidery_files BEGIN
+            INSERT INTO files_fts(rowid, name, filename, theme, description, design_name,
+                category, author, keywords, comments, license, unique_id,
+                language, file_source, size_range)
+            VALUES (new.id, COALESCE(new.name,''), new.filename, COALESCE(new.theme,''),
+                COALESCE(new.description,''), COALESCE(new.design_name,''),
+                COALESCE(new.category,''), COALESCE(new.author,''),
+                COALESCE(new.keywords,''), COALESCE(new.comments,''),
+                COALESCE(new.license,''), COALESCE(new.unique_id,''),
+                COALESCE(new.language,''), COALESCE(new.file_source,''),
+                COALESCE(new.size_range,''));
+        END;
+
+        CREATE TRIGGER files_fts_delete AFTER DELETE ON embroidery_files BEGIN
+            INSERT INTO files_fts(files_fts, rowid, name, filename, theme, description,
+                design_name, category, author, keywords, comments, license, unique_id,
+                language, file_source, size_range)
+            VALUES ('delete', old.id, COALESCE(old.name,''), old.filename,
+                COALESCE(old.theme,''), COALESCE(old.description,''),
+                COALESCE(old.design_name,''), COALESCE(old.category,''),
+                COALESCE(old.author,''), COALESCE(old.keywords,''),
+                COALESCE(old.comments,''), COALESCE(old.license,''),
+                COALESCE(old.unique_id,''),
+                COALESCE(old.language,''), COALESCE(old.file_source,''),
+                COALESCE(old.size_range,''));
+        END;
+
+        CREATE TRIGGER files_fts_update AFTER UPDATE ON embroidery_files BEGIN
+            INSERT INTO files_fts(files_fts, rowid, name, filename, theme, description,
+                design_name, category, author, keywords, comments, license, unique_id,
+                language, file_source, size_range)
+            VALUES ('delete', old.id, COALESCE(old.name,''), old.filename,
+                COALESCE(old.theme,''), COALESCE(old.description,''),
+                COALESCE(old.design_name,''), COALESCE(old.category,''),
+                COALESCE(old.author,''), COALESCE(old.keywords,''),
+                COALESCE(old.comments,''), COALESCE(old.license,''),
+                COALESCE(old.unique_id,''),
+                COALESCE(old.language,''), COALESCE(old.file_source,''),
+                COALESCE(old.size_range,''));
+            INSERT INTO files_fts(rowid, name, filename, theme, description, design_name,
+                category, author, keywords, comments, license, unique_id,
+                language, file_source, size_range)
+            VALUES (new.id, COALESCE(new.name,''), new.filename, COALESCE(new.theme,''),
+                COALESCE(new.description,''), COALESCE(new.design_name,''),
+                COALESCE(new.category,''), COALESCE(new.author,''),
+                COALESCE(new.keywords,''), COALESCE(new.comments,''),
+                COALESCE(new.license,''), COALESCE(new.unique_id,''),
+                COALESCE(new.language,''), COALESCE(new.file_source,''),
+                COALESCE(new.size_range,''));
+        END;
+
+        INSERT INTO schema_version (version, description)
+        VALUES (9, 'Add file_type, sewing pattern metadata, status tracking, rebuild FTS5');
+
+        COMMIT;"
+    )?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,7 +642,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 8, "Schema version must be 8");
+        assert_eq!(version, 9, "Schema version must be 9");
     }
 
     #[test]
@@ -556,22 +665,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_eight() {
+    fn test_schema_version_is_nine() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 8",
+                "SELECT description FROM schema_version WHERE version = 9",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add file_versions and machine_profiles tables");
+        assert_eq!(desc, "Add file_type, sewing pattern metadata, status tracking, rebuild FTS5");
     }
 
     #[test]

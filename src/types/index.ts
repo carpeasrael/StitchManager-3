@@ -34,6 +34,14 @@ export interface EmbroideryFile {
   comments: string | null;
   uniqueId: string | null;
   isFavorite: boolean;
+  fileType: string;
+  sizeRange: string | null;
+  skillLevel: string | null;
+  language: string | null;
+  formatType: string | null;
+  fileSource: string | null;
+  purchaseLink: string | null;
+  status: string;
   aiAnalyzed: boolean;
   aiConfirmed: boolean;
   createdAt: string;
@@ -88,6 +96,13 @@ export interface FileUpdate {
   theme?: string;
   description?: string;
   license?: string;
+  sizeRange?: string;
+  skillLevel?: string;
+  language?: string;
+  formatType?: string;
+  fileSource?: string;
+  purchaseLink?: string;
+  status?: string;
 }
 
 export interface StitchSegment {
@@ -132,6 +147,11 @@ export interface SearchParams {
   aiAnalyzed?: boolean;
   aiConfirmed?: boolean;
   colorSearch?: string;
+  fileType?: string;
+  status?: string;
+  skillLevel?: string;
+  language?: string;
+  fileSource?: string;
 }
 
 export interface SelectedFields {

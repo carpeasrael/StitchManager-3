@@ -65,6 +65,7 @@ fn build_query_conditions(
                     "e.name", "e.filename", "e.theme", "e.description",
                     "e.design_name", "e.category", "e.author", "e.keywords",
                     "e.comments", "e.license", "e.unique_id",
+                    "e.language", "e.file_source", "e.size_range",
                 ];
                 let clauses: Vec<String> = text_fields
                     .iter()
@@ -175,6 +176,46 @@ fn build_query_conditions(
                     pi = *param_idx
                 ));
                 params.push(Box::new(like_val));
+                *param_idx += 1;
+            }
+        }
+        if let Some(ref file_type) = sp.file_type {
+            let trimmed = file_type.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.file_type = ?{}", *param_idx));
+                params.push(Box::new(trimmed.to_string()));
+                *param_idx += 1;
+            }
+        }
+        if let Some(ref status) = sp.status {
+            let trimmed = status.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.status = ?{}", *param_idx));
+                params.push(Box::new(trimmed.to_string()));
+                *param_idx += 1;
+            }
+        }
+        if let Some(ref skill_level) = sp.skill_level {
+            let trimmed = skill_level.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.skill_level = ?{}", *param_idx));
+                params.push(Box::new(trimmed.to_string()));
+                *param_idx += 1;
+            }
+        }
+        if let Some(ref language) = sp.language {
+            let trimmed = language.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.language = ?{}", *param_idx));
+                params.push(Box::new(trimmed.to_string()));
+                *param_idx += 1;
+            }
+        }
+        if let Some(ref file_source) = sp.file_source {
+            let trimmed = file_source.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.file_source = ?{}", *param_idx));
+                params.push(Box::new(trimmed.to_string()));
                 *param_idx += 1;
             }
         }
@@ -551,6 +592,13 @@ pub fn update_file(
         && updates.theme.is_none()
         && updates.description.is_none()
         && updates.license.is_none()
+        && updates.size_range.is_none()
+        && updates.skill_level.is_none()
+        && updates.language.is_none()
+        && updates.format_type.is_none()
+        && updates.file_source.is_none()
+        && updates.purchase_link.is_none()
+        && updates.status.is_none()
     {
         return Err(AppError::Validation(
             "Mindestens ein Feld muss aktualisiert werden".into(),
@@ -581,6 +629,51 @@ pub fn update_file(
     if let Some(ref license) = updates.license {
         set_clauses.push(format!("license = ?{idx}"));
         params.push(Box::new(license.clone()));
+        idx += 1;
+    }
+    if let Some(ref size_range) = updates.size_range {
+        set_clauses.push(format!("size_range = ?{idx}"));
+        params.push(Box::new(size_range.clone()));
+        idx += 1;
+    }
+    if let Some(ref skill_level) = updates.skill_level {
+        if !skill_level.is_empty() {
+            let valid = ["beginner", "easy", "intermediate", "advanced", "expert"];
+            if !valid.contains(&skill_level.as_str()) {
+                return Err(AppError::Validation(format!("Ungültiges Schwierigkeitslevel: {skill_level}")));
+            }
+        }
+        set_clauses.push(format!("skill_level = ?{idx}"));
+        params.push(Box::new(skill_level.clone()));
+        idx += 1;
+    }
+    if let Some(ref language) = updates.language {
+        set_clauses.push(format!("language = ?{idx}"));
+        params.push(Box::new(language.clone()));
+        idx += 1;
+    }
+    if let Some(ref format_type) = updates.format_type {
+        set_clauses.push(format!("format_type = ?{idx}"));
+        params.push(Box::new(format_type.clone()));
+        idx += 1;
+    }
+    if let Some(ref file_source) = updates.file_source {
+        set_clauses.push(format!("file_source = ?{idx}"));
+        params.push(Box::new(file_source.clone()));
+        idx += 1;
+    }
+    if let Some(ref purchase_link) = updates.purchase_link {
+        set_clauses.push(format!("purchase_link = ?{idx}"));
+        params.push(Box::new(purchase_link.clone()));
+        idx += 1;
+    }
+    if let Some(ref status) = updates.status {
+        let valid = ["none", "not_started", "planned", "in_progress", "completed", "archived"];
+        if !valid.contains(&status.as_str()) {
+            return Err(AppError::Validation(format!("Ungültiger Status: {status}")));
+        }
+        set_clauses.push(format!("status = ?{idx}"));
+        params.push(Box::new(status.clone()));
         idx += 1;
     }
 
@@ -646,6 +739,32 @@ pub fn delete_file(db: State<'_, DbState>, file_id: i64) -> Result<(), AppError>
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn update_file_status(
+    db: State<'_, DbState>,
+    file_id: i64,
+    status: String,
+) -> Result<EmbroideryFile, AppError> {
+    let valid = ["none", "not_started", "planned", "in_progress", "completed", "archived"];
+    if !valid.contains(&status.as_str()) {
+        return Err(AppError::Validation(format!("Ungültiger Status: {status}")));
+    }
+    let conn = lock_db(&db)?;
+    let changes = conn.execute(
+        "UPDATE embroidery_files SET status = ?2, updated_at = datetime('now') WHERE id = ?1",
+        rusqlite::params![file_id, status],
+    )?;
+    if changes == 0 {
+        return Err(AppError::NotFound(format!("Datei {file_id} nicht gefunden")));
+    }
+    conn.query_row(
+        &format!("{FILE_SELECT} WHERE id = ?1"),
+        [file_id],
+        |row| row_to_file(row),
+    )
+    .map_err(AppError::Database)
 }
 
 #[tauri::command]

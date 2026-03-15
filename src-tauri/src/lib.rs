@@ -136,6 +136,7 @@ pub fn run() {
             commands::files::get_file_colors,
             commands::files::get_file_tags,
             commands::files::update_file,
+            commands::files::update_file_status,
             commands::files::delete_file,
             commands::files::set_file_tags,
             commands::files::get_all_tags,

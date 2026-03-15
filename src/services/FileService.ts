@@ -77,6 +77,13 @@ export async function updateFile(
   return invoke<EmbroideryFile>("update_file", { fileId, updates });
 }
 
+export async function updateFileStatus(
+  fileId: number,
+  status: string
+): Promise<EmbroideryFile> {
+  return invoke<EmbroideryFile>("update_file_status", { fileId, status });
+}
+
 export async function deleteFile(fileId: number): Promise<void> {
   return invoke<void>("delete_file", { fileId });
 }
