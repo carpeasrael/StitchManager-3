@@ -61,6 +61,12 @@ pub fn create_cost_rate(
     if !VALID_RATE_TYPES.contains(&rate_type.as_str()) {
         return Err(AppError::Validation(format!("Ungueltiger Ratentyp: {rate_type}")));
     }
+    if rate_value < 0.0 {
+        return Err(AppError::Validation("Ratenwert darf nicht negativ sein".into()));
+    }
+    if setup_cost.unwrap_or(0.0) < 0.0 {
+        return Err(AppError::Validation("Ruestkosten duerfen nicht negativ sein".into()));
+    }
     let conn = lock_db(&db)?;
     conn.execute(
         "INSERT INTO cost_rates (rate_type, name, rate_value, unit, setup_cost, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -90,9 +96,15 @@ pub fn update_cost_rate(
         if t.is_empty() { return Err(AppError::Validation("Name darf nicht leer sein".into())); }
         params.push(Box::new(t.to_string())); sets.push(format!("name = ?{}", params.len()));
     }
-    if let Some(v) = rate_value { params.push(Box::new(v)); sets.push(format!("rate_value = ?{}", params.len())); }
+    if let Some(v) = rate_value {
+        if v < 0.0 { return Err(AppError::Validation("Ratenwert darf nicht negativ sein".into())); }
+        params.push(Box::new(v)); sets.push(format!("rate_value = ?{}", params.len()));
+    }
     if let Some(v) = &unit { params.push(Box::new(v.clone())); sets.push(format!("unit = ?{}", params.len())); }
-    if let Some(v) = setup_cost { params.push(Box::new(v)); sets.push(format!("setup_cost = ?{}", params.len())); }
+    if let Some(v) = setup_cost {
+        if v < 0.0 { return Err(AppError::Validation("Ruestkosten duerfen nicht negativ sein".into())); }
+        params.push(Box::new(v)); sets.push(format!("setup_cost = ?{}", params.len()));
+    }
     if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
 
     if sets.is_empty() {

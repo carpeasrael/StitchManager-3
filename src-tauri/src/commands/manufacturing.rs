@@ -719,6 +719,7 @@ pub struct TimeEntryCreate {
     pub actual_minutes: Option<f64>,
     pub worker: Option<String>,
     pub machine: Option<String>,
+    pub cost_rate_id: Option<i64>,
 }
 
 #[tauri::command]
@@ -732,13 +733,13 @@ pub fn create_time_entry(
     }
     let conn = lock_db(&db)?;
     conn.execute(
-        "INSERT INTO time_entries (project_id, step_name, planned_minutes, actual_minutes, worker, machine) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![entry.project_id, step, entry.planned_minutes, entry.actual_minutes, entry.worker, entry.machine],
+        "INSERT INTO time_entries (project_id, step_name, planned_minutes, actual_minutes, worker, machine, cost_rate_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![entry.project_id, step, entry.planned_minutes, entry.actual_minutes, entry.worker, entry.machine, entry.cost_rate_id],
     )?;
     let id = conn.last_insert_rowid();
     conn.query_row(
-        "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, recorded_at \
+        "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, cost_rate_id, recorded_at \
          FROM time_entries WHERE id = ?1",
         [id],
         row_to_time_entry,
@@ -749,7 +750,7 @@ pub fn create_time_entry(
 pub fn get_time_entries(db: State<'_, DbState>, project_id: i64) -> Result<Vec<TimeEntry>, AppError> {
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, recorded_at \
+        "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, cost_rate_id, recorded_at \
          FROM time_entries WHERE project_id = ?1 ORDER BY recorded_at DESC"
     )?;
     let entries = stmt
@@ -767,6 +768,7 @@ pub fn update_time_entry(
     actual_minutes: Option<f64>,
     worker: Option<String>,
     machine: Option<String>,
+    cost_rate_id: Option<i64>,
 ) -> Result<TimeEntry, AppError> {
     let conn = lock_db(&db)?;
     let mut sets: Vec<String> = Vec::new();
@@ -784,6 +786,7 @@ pub fn update_time_entry(
     if let Some(v) = actual_minutes { params.push(Box::new(v)); sets.push(format!("actual_minutes = ?{}", params.len())); }
     if let Some(v) = &worker { params.push(Box::new(v.clone())); sets.push(format!("worker = ?{}", params.len())); }
     if let Some(v) = &machine { params.push(Box::new(v.clone())); sets.push(format!("machine = ?{}", params.len())); }
+    if let Some(v) = cost_rate_id { params.push(Box::new(v)); sets.push(format!("cost_rate_id = ?{}", params.len())); }
 
     if sets.is_empty() {
         return conn.query_row(
