@@ -184,6 +184,12 @@ export class Toolbar extends Component {
             onClick: () => EventBus.emit("toolbar:show-projects"),
           },
           {
+            className: "menu-item-manufacturing",
+            icon: "\uD83D\uDD27",
+            label: "Fertigung",
+            onClick: () => EventBus.emit("toolbar:manufacturing"),
+          },
+          {
             className: "menu-item-print",
             icon: "\u2399",
             label: "Drucken",

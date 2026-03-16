@@ -22,6 +22,7 @@ import { ImageViewerDialog } from "./components/ImageViewerDialog";
 import { PrintPreviewDialog } from "./components/PrintPreviewDialog";
 import * as ProjectService from "./services/ProjectService";
 import { ProjectListDialog } from "./components/ProjectListDialog";
+import { ManufacturingDialog } from "./components/ManufacturingDialog";
 import * as BackupService from "./services/BackupService";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
@@ -440,6 +441,10 @@ function initEventHandlers(): () => void {
 
     EventBus.on("toolbar:show-projects", () => {
       ProjectListDialog.open();
+    }),
+
+    EventBus.on("toolbar:manufacturing", () => {
+      ManufacturingDialog.open();
     }),
 
     EventBus.on("collection:selected", async (data) => {
