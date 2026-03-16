@@ -24,6 +24,13 @@ export function initShortcuts(): () => void {
       return;
     }
 
+    // Cmd/Ctrl+P — print
+    if (mod && e.key === "p") {
+      e.preventDefault();
+      EventBus.emit("toolbar:print");
+      return;
+    }
+
     // Cmd/Ctrl+Shift+R — reveal in folder
     if (mod && e.shiftKey && (e.key === "r" || e.key === "R")) {
       e.preventDefault();

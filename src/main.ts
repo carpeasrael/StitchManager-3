@@ -19,6 +19,7 @@ import { Dashboard } from "./components/Dashboard";
 import { EditDialog } from "./components/EditDialog";
 import { DocumentViewer } from "./components/DocumentViewer";
 import { ImageViewerDialog } from "./components/ImageViewerDialog";
+import { PrintPreviewDialog } from "./components/PrintPreviewDialog";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -342,6 +343,20 @@ function initEventHandlers(): () => void {
       } else if (["png", "jpg", "jpeg", "svg", "gif", "webp", "bmp"].includes(ext)) {
         ImageViewerDialog.open([{ filePath, displayName: fileName }]);
       }
+    }),
+
+    EventBus.on("toolbar:print", async () => {
+      const fileId = appState.get("selectedFileId");
+      if (fileId === null) return;
+      const files = appState.get("files");
+      const file = files.find((f) => f.id === fileId);
+      if (!file?.filepath) return;
+      const ext = file.filepath.split(".").pop()?.toLowerCase() || "";
+      if (ext !== "pdf") {
+        ToastContainer.show("info", "Nur PDF-Dateien koennen gedruckt werden");
+        return;
+      }
+      await PrintPreviewDialog.open(file.filepath, fileId, file.name || file.filename);
     }),
 
     EventBus.on("toolbar:reveal-in-folder", () => revealSelectedFile()),

@@ -17,7 +17,7 @@ export class DocumentViewer {
   private static instance: DocumentViewer | null = null;
 
   private fileId = 0;
-  // filePath is stored but only used for initialization
+  private filePath = "";
   private fileName = "";
   private pdfDoc: PDFDocumentProxy | null = null;
   private currentPage = 1;
@@ -71,6 +71,7 @@ export class DocumentViewer {
     fileName: string
   ): Promise<void> {
     this.fileId = fileId;
+    this.filePath = filePath;
     this.fileName = fileName;
 
     this.overlay = this.buildUI();
@@ -294,6 +295,14 @@ export class DocumentViewer {
         "\u2630",
         "Seitenleiste",
         () => this.toggleSidebar()
+      )
+    );
+
+    sideGroup.appendChild(
+      this.createToolbarBtn(
+        "\u2399",
+        "Drucken",
+        () => this.openPrintPreview()
       )
     );
 
@@ -815,7 +824,21 @@ export class DocumentViewer {
       this.zoom = 1.0;
       this.renderPage(this.currentPage);
       this.updateNavUI();
+    } else if (e.ctrlKey && e.key === "p") {
+      e.preventDefault();
+      this.openPrintPreview();
     }
+  }
+
+  // --- Print ---
+
+  private openPrintPreview(): void {
+    if (!this.filePath) return;
+    import("./PrintPreviewDialog").then(({ PrintPreviewDialog }) => {
+      PrintPreviewDialog.open(this.filePath, this.fileId, this.fileName);
+    }).catch((e) => {
+      console.error("Failed to load print preview:", e);
+    });
   }
 
   // --- Error display ---

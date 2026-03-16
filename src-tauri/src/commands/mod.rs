@@ -10,6 +10,7 @@ pub mod settings;
 pub mod templates;
 pub mod thread_colors;
 pub mod transfer;
+pub mod print;
 pub mod versions;
 pub mod viewer;
 

@@ -178,6 +178,13 @@ export class Toolbar extends Component {
         label: "System",
         items: [
           {
+            className: "menu-item-print",
+            icon: "\u2399",
+            label: "Drucken",
+            shortcut: "Ctrl+P",
+            onClick: () => EventBus.emit("toolbar:print"),
+          },
+          {
             className: "menu-item-settings",
             icon: "\u2699",
             label: "Einstellungen",

@@ -276,6 +276,39 @@ export interface ViewerOpenEvent {
   fileName: string;
 }
 
+export interface PrinterInfo {
+  name: string;
+  displayName: string;
+  isDefault: boolean;
+}
+
+export interface PrintSettings {
+  printerName: string | null;
+  paperSize: string;
+  orientation: string;
+  copies: number;
+  scale: number;
+  fitToPage: boolean;
+  pageRanges: string | null;
+  tileEnabled: boolean;
+  tileOverlapMm: number;
+}
+
+export interface TileInfo {
+  sourcePage: number;
+  cols: number;
+  rows: number;
+  totalTiles: number;
+  tileWidthMm: number;
+  tileHeightMm: number;
+}
+
+export interface PdfLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+}
+
 export type ThemeMode = "hell" | "dunkel";
 
 export interface BatchResult {
