@@ -298,19 +298,23 @@ fn calculate_cost_breakdown(conn: &rusqlite::Connection, project_id: i64) -> Res
 
     let machine_cost = machine_time_cost + machine_setup_cost;
 
-    // 5. Beschaffungskosten: sum shipping_cost from purchase orders linked to project materials
+    // 5. Beschaffungskosten: sum shipping_cost from purchase orders linked to project
+    // Prefer direct project_id linkage; fall back to indirect BOM-material linkage
     let procurement_cost: f64 = conn.query_row(
         "SELECT COALESCE(SUM(po.shipping_cost), 0) \
-         FROM purchase_orders po WHERE po.deleted_at IS NULL AND po.id IN ( \
-             SELECT DISTINCT oi.order_id FROM order_items oi \
-             WHERE oi.material_id IN ( \
-                 SELECT b.material_id FROM bill_of_materials b \
-                 WHERE b.product_id IN ( \
-                     SELECT DISTINCT ps.product_id FROM product_steps ps \
-                     JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
-                     WHERE ws.project_id = ?1 \
+         FROM purchase_orders po WHERE po.deleted_at IS NULL AND ( \
+             po.project_id = ?1 \
+             OR (po.project_id IS NULL AND po.id IN ( \
+                 SELECT DISTINCT oi.order_id FROM order_items oi \
+                 WHERE oi.material_id IN ( \
+                     SELECT b.material_id FROM bill_of_materials b \
+                     WHERE b.product_id IN ( \
+                         SELECT DISTINCT ps.product_id FROM product_steps ps \
+                         JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
+                         WHERE ws.project_id = ?1 \
+                     ) \
                  ) \
-             ) \
+             )) \
          )",
         [project_id],
         |row| row.get(0),

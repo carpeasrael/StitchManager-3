@@ -1520,7 +1520,8 @@ export class ManufacturingDialog {
       const sub = document.createElement("span");
       sub.className = "mfg-item-sub";
       const supplier = this.suppliers.find((s) => s.id === o.supplierId);
-      sub.textContent = `${supplier?.name || "?"} - ${statusLabels[o.status] || o.status}`;
+      const project = o.projectId ? this.allProjects.find((p) => p.id === o.projectId) : null;
+      sub.textContent = `${supplier?.name || "?"} - ${statusLabels[o.status] || o.status}${project ? ` | ${project.name}` : ""}`;
       info.appendChild(sub);
       item.appendChild(info);
       item.addEventListener("click", async () => {
@@ -1559,6 +1560,18 @@ export class ManufacturingDialog {
     ], async (v) => {
       try {
         const updated = await ProcService.updateOrder(o.id, { status: v });
+        const idx = this.orders.findIndex((x) => x.id === o.id);
+        if (idx >= 0) this.orders[idx] = updated;
+        this.selectedOrder = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    // Project selector
+    const projectOptions = [{ value: "", label: "(Kein Projekt)" }, ...this.allProjects.map(p => ({ value: String(p.id), label: p.name }))];
+    this.addSelectField(form, "Projekt", o.projectId ? String(o.projectId) : "", projectOptions, async (v) => {
+      try {
+        const updatePayload = v ? { projectId: Number(v) } : { clearProjectId: true };
+        const updated = await ProcService.updateOrder(o.id, updatePayload);
         const idx = this.orders.findIndex((x) => x.id === o.id);
         if (idx >= 0) this.orders[idx] = updated;
         this.selectedOrder = updated;

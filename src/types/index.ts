@@ -440,6 +440,7 @@ export interface PurchaseOrder {
   id: number;
   orderNumber: string | null;
   supplierId: number;
+  projectId: number | null;
   status: string;
   orderDate: string | null;
   expectedDelivery: string | null;
@@ -447,6 +448,17 @@ export interface PurchaseOrder {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MaterialRequirement {
+  materialId: number;
+  materialName: string;
+  unit: string | null;
+  needed: number;
+  available: number;
+  shortage: number;
+  supplierId: number | null;
+  supplierName: string | null;
 }
 
 export interface OrderItem {

@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 18;
+const CURRENT_VERSION: i32 = 19;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -115,6 +115,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 18 {
         apply_v18(conn)?;
+    }
+
+    if current < 19 {
+        apply_v19(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1112,6 +1116,22 @@ fn apply_v18(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v19(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Add project linkage to purchase orders
+        ALTER TABLE purchase_orders ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_project_id ON purchase_orders(project_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (19, 'Add project_id to purchase_orders for project-order linkage');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1192,7 +1212,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18, "Schema version must be 17");
+        assert_eq!(version, 19, "Schema version must be 17");
     }
 
     #[test]
@@ -1215,22 +1235,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_eighteen() {
+    fn test_schema_version_is_nineteen() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18);
+        assert_eq!(version, 19);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 18",
+                "SELECT description FROM schema_version WHERE version = 19",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("consumption"), "v18 description should mention consumption");
+        assert!(desc.contains("project"), "v19 description should mention project");
     }
 
     #[test]

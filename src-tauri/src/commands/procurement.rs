@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use tauri::State;
 
-use crate::db::models::{Delivery, OrderItem, PurchaseOrder};
+use crate::db::models::{Delivery, MaterialRequirement, OrderItem, PurchaseOrder};
 use crate::error::{lock_db, AppError};
 use crate::DbState;
 
@@ -16,6 +16,7 @@ const VALID_ORDER_STATUSES: &[&str] = &[
 pub struct OrderCreate {
     pub order_number: Option<String>,
     pub supplier_id: i64,
+    pub project_id: Option<i64>,
     pub order_date: Option<String>,
     pub expected_delivery: Option<String>,
     pub shipping_cost: Option<f64>,
@@ -27,6 +28,8 @@ pub struct OrderCreate {
 pub struct OrderUpdate {
     pub order_number: Option<String>,
     pub status: Option<String>,
+    pub project_id: Option<i64>,
+    pub clear_project_id: Option<bool>,
     pub order_date: Option<String>,
     pub expected_delivery: Option<String>,
     pub shipping_cost: Option<f64>,
@@ -47,14 +50,24 @@ pub fn create_order(
     if !supplier_active {
         return Err(AppError::Validation(format!("Lieferant {} nicht gefunden oder geloescht", order.supplier_id)));
     }
+    // Validate project exists if provided
+    if let Some(pid) = order.project_id {
+        let project_exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+            [pid], |row| row.get(0),
+        )?;
+        if !project_exists {
+            return Err(AppError::NotFound(format!("Projekt {pid} nicht gefunden")));
+        }
+    }
     conn.execute(
-        "INSERT INTO purchase_orders (order_number, supplier_id, order_date, expected_delivery, shipping_cost, notes) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![order.order_number, order.supplier_id, order.order_date, order.expected_delivery, order.shipping_cost.unwrap_or(0.0), order.notes],
+        "INSERT INTO purchase_orders (order_number, supplier_id, project_id, order_date, expected_delivery, shipping_cost, notes) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![order.order_number, order.supplier_id, order.project_id, order.order_date, order.expected_delivery, order.shipping_cost.unwrap_or(0.0), order.notes],
     )?;
     let id = conn.last_insert_rowid();
     conn.query_row(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, project_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
         [id],
         row_to_order,
@@ -65,7 +78,7 @@ pub fn create_order(
 pub fn get_orders(db: State<'_, DbState>) -> Result<Vec<PurchaseOrder>, AppError> {
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, project_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )?;
     let orders = stmt.query_map([], row_to_order)?.collect::<Result<Vec<_>, _>>()?;
@@ -76,7 +89,7 @@ pub fn get_orders(db: State<'_, DbState>) -> Result<Vec<PurchaseOrder>, AppError
 pub fn get_order(db: State<'_, DbState>, order_id: i64) -> Result<PurchaseOrder, AppError> {
     let conn = lock_db(&db)?;
     conn.query_row(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, project_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
         [order_id],
         row_to_order,
@@ -103,6 +116,11 @@ pub fn update_order(
         }
         params.push(Box::new(v.clone())); sets.push(format!("status = ?{}", params.len()));
     }
+    if update.clear_project_id == Some(true) {
+        params.push(Box::new(rusqlite::types::Null)); sets.push(format!("project_id = ?{}", params.len()));
+    } else if let Some(v) = update.project_id {
+        params.push(Box::new(v)); sets.push(format!("project_id = ?{}", params.len()));
+    }
     if let Some(v) = &update.order_date { params.push(Box::new(v.clone())); sets.push(format!("order_date = ?{}", params.len())); }
     if let Some(v) = &update.expected_delivery { params.push(Box::new(v.clone())); sets.push(format!("expected_delivery = ?{}", params.len())); }
     if let Some(v) = update.shipping_cost { params.push(Box::new(v)); sets.push(format!("shipping_cost = ?{}", params.len())); }
@@ -110,7 +128,7 @@ pub fn update_order(
 
     if sets.is_empty() {
         return conn.query_row(
-            "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
+            "SELECT id, order_number, supplier_id, project_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
              FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [order_id], row_to_order,
         ).map_err(|e| match e {
@@ -127,7 +145,7 @@ pub fn update_order(
     if changes == 0 { return Err(AppError::NotFound(format!("Bestellung {order_id} nicht gefunden"))); }
 
     conn.query_row(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, project_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
         [order_id], row_to_order,
     ).map_err(AppError::Database)
@@ -149,13 +167,14 @@ fn row_to_order(row: &rusqlite::Row) -> rusqlite::Result<PurchaseOrder> {
         id: row.get(0)?,
         order_number: row.get(1)?,
         supplier_id: row.get(2)?,
-        status: row.get(3)?,
-        order_date: row.get(4)?,
-        expected_delivery: row.get(5)?,
-        shipping_cost: row.get::<_, Option<f64>>(6)?.unwrap_or(0.0),
-        notes: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        project_id: row.get(3)?,
+        status: row.get(4)?,
+        order_date: row.get(5)?,
+        expected_delivery: row.get(6)?,
+        shipping_cost: row.get::<_, Option<f64>>(7)?.unwrap_or(0.0),
+        notes: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 
@@ -367,6 +386,90 @@ fn row_to_delivery(row: &rusqlite::Row) -> rusqlite::Result<Delivery> {
     })
 }
 
+// ── Project-Order Queries ──────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_project_orders(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<PurchaseOrder>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, order_number, supplier_id, project_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
+         FROM purchase_orders WHERE project_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC"
+    )?;
+    let orders = stmt.query_map([project_id], row_to_order)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(orders)
+}
+
+#[tauri::command]
+pub fn get_project_requirements(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<MaterialRequirement>, AppError> {
+    let conn = lock_db(&db)?;
+
+    let quantity: i64 = conn.query_row(
+        "SELECT COALESCE(quantity, 1) FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        [project_id],
+        |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Projekt {project_id} nicht gefunden")),
+        _ => AppError::Database(e),
+    })?;
+    let qty = (quantity.max(1)) as f64;
+
+    let mut stmt = conn.prepare(
+        "SELECT m.id, m.name, m.unit, \
+             COALESCE(bom.total_qty, 0) * ?2 as needed, \
+             COALESCE(inv.total_stock, 0) - COALESCE(inv.reserved_stock, 0) as available, \
+             m.supplier_id, \
+             s.name as supplier_name \
+         FROM materials m \
+         JOIN ( \
+             SELECT b.material_id, SUM(b.quantity) as total_qty \
+             FROM bill_of_materials b \
+             WHERE b.product_id IN ( \
+                 SELECT DISTINCT ps.product_id FROM product_steps ps \
+                 JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
+                 WHERE ws.project_id = ?1 \
+             ) GROUP BY b.material_id \
+         ) bom ON bom.material_id = m.id \
+         LEFT JOIN material_inventory inv ON inv.material_id = m.id \
+         LEFT JOIN suppliers s ON s.id = m.supplier_id AND s.deleted_at IS NULL \
+         WHERE m.deleted_at IS NULL \
+         ORDER BY m.name"
+    )?;
+
+    let requirements = stmt.query_map(rusqlite::params![project_id, qty], |row| {
+        let needed: f64 = row.get(3)?;
+        let available: f64 = row.get(4)?;
+        let shortage = (needed - available).max(0.0);
+        Ok(MaterialRequirement {
+            material_id: row.get(0)?,
+            material_name: row.get(1)?,
+            unit: row.get(2)?,
+            needed,
+            available,
+            shortage,
+            supplier_id: row.get(5)?,
+            supplier_name: row.get(6)?,
+        })
+    })?.collect::<Result<Vec<_>, _>>()?;
+
+    Ok(requirements)
+}
+
+#[tauri::command]
+pub fn suggest_orders(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<MaterialRequirement>, AppError> {
+    let requirements = get_project_requirements(db, project_id)?;
+    // Return only materials with shortage > 0
+    Ok(requirements.into_iter().filter(|r| r.shortage > 0.0).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::db::migrations::init_database_in_memory;
@@ -446,5 +549,76 @@ mod tests {
         conn.execute("DELETE FROM purchase_orders WHERE id = ?1", [oid]).unwrap();
         let items: i64 = conn.query_row("SELECT COUNT(*) FROM order_items", [], |r| r.get(0)).unwrap();
         assert_eq!(items, 0);
+    }
+
+    #[test]
+    fn test_project_order_linkage() {
+        let conn = init_database_in_memory().unwrap();
+        conn.execute("INSERT INTO suppliers (name) VALUES ('TestSup')", []).unwrap();
+        conn.execute("INSERT INTO projects (name, status, quantity) VALUES ('ProjA', 'in_progress', 2)", []).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        // Create order linked to project
+        conn.execute(
+            "INSERT INTO purchase_orders (supplier_id, project_id, status) VALUES (1, ?1, 'draft')",
+            [pid],
+        ).unwrap();
+        let oid = conn.last_insert_rowid();
+
+        let project_id: Option<i64> = conn.query_row(
+            "SELECT project_id FROM purchase_orders WHERE id = ?1", [oid], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(project_id, Some(pid));
+
+        // Query by project
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM purchase_orders WHERE project_id = ?1 AND deleted_at IS NULL",
+            [pid], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_project_requirements() {
+        let conn = init_database_in_memory().unwrap();
+        conn.execute("INSERT INTO projects (name, status, quantity) VALUES ('Req', 'in_progress', 3)", []).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO products (name, status) VALUES ('Prod', 'active')", []).unwrap();
+        let prod_id = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO materials (name, unit, net_price) VALUES ('Garn', 'm', 2.0)", []).unwrap();
+        let mat_id = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO bill_of_materials (product_id, material_id, quantity) VALUES (?1, ?2, 5.0)",
+            rusqlite::params![prod_id, mat_id]).unwrap();
+
+        conn.execute("INSERT INTO step_definitions (name) VALUES ('Step')", []).unwrap();
+        let step_id = conn.last_insert_rowid();
+        conn.execute("INSERT INTO product_steps (product_id, step_definition_id) VALUES (?1, ?2)",
+            rusqlite::params![prod_id, step_id]).unwrap();
+        conn.execute("INSERT INTO workflow_steps (project_id, step_definition_id, status) VALUES (?1, ?2, 'pending')",
+            rusqlite::params![pid, step_id]).unwrap();
+
+        // Inventory: 10 available
+        conn.execute("INSERT INTO material_inventory (material_id, total_stock, reserved_stock) VALUES (?1, 10.0, 0.0)",
+            [mat_id]).unwrap();
+
+        // Requirements: needed = 5.0 * 3 = 15.0, available = 10.0, shortage = 5.0
+        let needed: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(b.quantity), 0) * 3 FROM bill_of_materials b \
+             WHERE b.product_id IN (SELECT DISTINCT ps.product_id FROM product_steps ps \
+                 JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
+                 WHERE ws.project_id = ?1) AND b.material_id = ?2",
+            rusqlite::params![pid, mat_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(needed, 15.0);
+
+        let available: f64 = conn.query_row(
+            "SELECT total_stock - reserved_stock FROM material_inventory WHERE material_id = ?1",
+            [mat_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(available, 10.0);
+        // shortage = 15 - 10 = 5
     }
 }

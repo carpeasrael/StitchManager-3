@@ -416,6 +416,7 @@ pub struct PurchaseOrder {
     pub id: i64,
     pub order_number: Option<String>,
     pub supplier_id: i64,
+    pub project_id: Option<i64>,
     pub status: String,
     pub order_date: Option<String>,
     pub expected_delivery: Option<String>,
@@ -445,6 +446,19 @@ pub struct Delivery {
     pub delivery_date: String,
     pub delivery_note: Option<String>,
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialRequirement {
+    pub material_id: i64,
+    pub material_name: String,
+    pub unit: Option<String>,
+    pub needed: f64,
+    pub available: f64,
+    pub shortage: f64,
+    pub supplier_id: Option<i64>,
+    pub supplier_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

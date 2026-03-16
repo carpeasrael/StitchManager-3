@@ -1,13 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { PurchaseOrder, OrderItem, Delivery } from "../types/index";
+import type { PurchaseOrder, OrderItem, Delivery, MaterialRequirement } from "../types/index";
 
 // ── Purchase Orders ────────────────────────────────────────────────
 
 export async function createOrder(order: {
   orderNumber?: string;
   supplierId: number;
+  projectId?: number;
   orderDate?: string;
   expectedDelivery?: string;
+  shippingCost?: number;
   notes?: string;
 }): Promise<PurchaseOrder> {
   return invoke("create_order", { order });
@@ -26,8 +28,11 @@ export async function updateOrder(
   update: {
     orderNumber?: string;
     status?: string;
+    projectId?: number;
+    clearProjectId?: boolean;
     orderDate?: string;
     expectedDelivery?: string;
+    shippingCost?: number;
     notes?: string;
   }
 ): Promise<PurchaseOrder> {
@@ -36,6 +41,20 @@ export async function updateOrder(
 
 export async function deleteOrder(orderId: number): Promise<void> {
   return invoke("delete_order", { orderId });
+}
+
+// ── Project-Order Queries ─────────────────────────────────────────
+
+export async function getProjectOrders(projectId: number): Promise<PurchaseOrder[]> {
+  return invoke("get_project_orders", { projectId });
+}
+
+export async function getProjectRequirements(projectId: number): Promise<MaterialRequirement[]> {
+  return invoke("get_project_requirements", { projectId });
+}
+
+export async function suggestOrders(projectId: number): Promise<MaterialRequirement[]> {
+  return invoke("suggest_orders", { projectId });
 }
 
 // ── Order Items ────────────────────────────────────────────────────
