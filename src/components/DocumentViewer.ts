@@ -81,8 +81,18 @@ export class DocumentViewer {
     this.keyHandler = (e: KeyboardEvent) => this.onKeyDown(e);
     document.addEventListener("keydown", this.keyHandler);
 
+    // Show loading indicator
+    if (this.canvasContainer) {
+      this.canvasContainer.innerHTML = '<div class="dv-loading">PDF wird geladen\u2026</div>';
+    }
+
     try {
       await this.loadPdf(filePath);
+      // Restore canvas after loading
+      if (this.canvasContainer && this.canvas) {
+        this.canvasContainer.innerHTML = "";
+        this.canvasContainer.appendChild(this.canvas);
+      }
       // Restore last viewed page
       const lastPage = await ViewerService.getLastViewedPage(fileId);
       if (lastPage && lastPage > 0 && lastPage <= this.totalPages) {

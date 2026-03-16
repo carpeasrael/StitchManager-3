@@ -2903,6 +2903,13 @@ a:focus:not(:focus-visible),
   background: white;
 }
 
+.dv-loading {
+  color: var(--color-muted);
+  padding: var(--spacing-8);
+  text-align: center;
+  font-size: var(--font-size-heading);
+}
+
 .dv-error {
   color: var(--color-error);
   padding: var(--spacing-8);

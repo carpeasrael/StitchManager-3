@@ -1,6 +1,6 @@
 [package]
 name = "app_lib"
-version = "26.3.3"
+version = "26.4.1"
 edition = "2021"
 
 [lib]
