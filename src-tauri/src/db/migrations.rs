@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 16;
+const CURRENT_VERSION: i32 = 17;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -107,6 +107,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 16 {
         apply_v16(conn)?;
+    }
+
+    if current < 17 {
+        apply_v17(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1002,6 +1006,67 @@ fn apply_v16(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v17(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Cost rates: configurable labor, machine, overhead, profit rates
+        CREATE TABLE IF NOT EXISTS cost_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rate_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            rate_value REAL NOT NULL,
+            unit TEXT,
+            setup_cost REAL DEFAULT 0,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_cost_rates_rate_type ON cost_rates(rate_type);
+        CREATE INDEX IF NOT EXISTS idx_cost_rates_deleted_at ON cost_rates(deleted_at);
+
+        -- Project cost items: persisted cost breakdown snapshots
+        CREATE TABLE IF NOT EXISTS project_cost_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            cost_type TEXT NOT NULL,
+            description TEXT,
+            amount REAL NOT NULL,
+            calculated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_cost_items_project_id ON project_cost_items(project_id);
+
+        -- Add cost fields to license_records
+        ALTER TABLE license_records ADD COLUMN cost_per_piece REAL DEFAULT 0;
+        ALTER TABLE license_records ADD COLUMN cost_per_series REAL DEFAULT 0;
+        ALTER TABLE license_records ADD COLUMN cost_flat REAL DEFAULT 0;
+
+        -- Link time entries to cost rates for per-resource costing
+        ALTER TABLE time_entries ADD COLUMN cost_rate_id INTEGER REFERENCES cost_rates(id) ON DELETE SET NULL;
+
+        -- Add shipping cost to purchase orders for procurement cost aggregation
+        ALTER TABLE purchase_orders ADD COLUMN shipping_cost REAL DEFAULT 0;
+
+        -- Add production quantity to projects for per-piece calculations
+        ALTER TABLE projects ADD COLUMN quantity INTEGER DEFAULT 1;
+
+        -- Link licenses to projects
+        CREATE TABLE IF NOT EXISTS project_license_links (
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            license_id INTEGER NOT NULL REFERENCES license_records(id) ON DELETE CASCADE,
+            PRIMARY KEY (project_id, license_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_license_links_license_id ON project_license_links(license_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (17, 'Add cost calculation: cost_rates, project_cost_items, license costs, project quantity');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,6 +1088,7 @@ mod tests {
             "bill_of_materials",
             "collection_items",
             "collections",
+            "cost_rates",
             "custom_field_definitions",
             "custom_field_values",
             "defect_records",
@@ -1050,7 +1116,9 @@ mod tests {
             "order_items",
             "product_steps",
             "products",
+            "project_cost_items",
             "project_details",
+            "project_license_links",
             "projects",
             "purchase_orders",
             "quality_inspections",
@@ -1077,7 +1145,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 16, "Schema version must be 16");
+        assert_eq!(version, 17, "Schema version must be 17");
     }
 
     #[test]
@@ -1100,22 +1168,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_sixteen() {
+    fn test_schema_version_is_seventeen() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, 17);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 16",
+                "SELECT description FROM schema_version WHERE version = 17",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("quality"), "v16 description should mention quality");
+        assert!(desc.contains("cost"), "v17 description should mention cost");
     }
 
     #[test]

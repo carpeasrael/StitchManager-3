@@ -787,7 +787,7 @@ pub fn update_time_entry(
 
     if sets.is_empty() {
         return conn.query_row(
-            "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, recorded_at FROM time_entries WHERE id = ?1",
+            "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, cost_rate_id, recorded_at FROM time_entries WHERE id = ?1",
             [entry_id],
             row_to_time_entry,
         ).map_err(|e| match e {
@@ -808,7 +808,7 @@ pub fn update_time_entry(
         return Err(AppError::NotFound(format!("Zeiteintrag {entry_id} nicht gefunden")));
     }
     conn.query_row(
-        "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, recorded_at FROM time_entries WHERE id = ?1",
+        "SELECT id, project_id, step_name, planned_minutes, actual_minutes, worker, machine, cost_rate_id, recorded_at FROM time_entries WHERE id = ?1",
         [entry_id],
         row_to_time_entry,
     ).map_err(AppError::Database)
@@ -833,7 +833,8 @@ fn row_to_time_entry(row: &rusqlite::Row) -> rusqlite::Result<TimeEntry> {
         actual_minutes: row.get(4)?,
         worker: row.get(5)?,
         machine: row.get(6)?,
-        recorded_at: row.get(7)?,
+        cost_rate_id: row.get(7)?,
+        recorded_at: row.get(8)?,
     })
 }
 
@@ -1125,6 +1126,9 @@ pub struct LicenseCreate {
     pub valid_until: Option<String>,
     pub max_uses: Option<i32>,
     pub commercial_allowed: Option<bool>,
+    pub cost_per_piece: Option<f64>,
+    pub cost_per_series: Option<f64>,
+    pub cost_flat: Option<f64>,
     pub source: Option<String>,
     pub notes: Option<String>,
 }
@@ -1138,14 +1142,16 @@ pub fn create_license(
     if name.is_empty() { return Err(AppError::Validation("Lizenzname darf nicht leer sein".into())); }
     let conn = lock_db(&db)?;
     conn.execute(
-        "INSERT INTO license_records (name, license_type, valid_from, valid_until, max_uses, commercial_allowed, source, notes) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO license_records (name, license_type, valid_from, valid_until, max_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         rusqlite::params![name, license.license_type, license.valid_from, license.valid_until,
-            license.max_uses, license.commercial_allowed.unwrap_or(false) as i32, license.source, license.notes],
+            license.max_uses, license.commercial_allowed.unwrap_or(false) as i32,
+            license.cost_per_piece.unwrap_or(0.0), license.cost_per_series.unwrap_or(0.0), license.cost_flat.unwrap_or(0.0),
+            license.source, license.notes],
     )?;
     let id = conn.last_insert_rowid();
     conn.query_row(
-        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes, created_at, updated_at \
          FROM license_records WHERE id = ?1",
         [id], row_to_license,
     ).map_err(AppError::Database)
@@ -1155,7 +1161,7 @@ pub fn create_license(
 pub fn get_licenses(db: State<'_, DbState>) -> Result<Vec<crate::db::models::LicenseRecord>, AppError> {
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes, created_at, updated_at \
          FROM license_records WHERE deleted_at IS NULL ORDER BY name"
     )?;
     let records = stmt.query_map([], row_to_license)?.collect::<Result<Vec<_>, _>>()?;
@@ -1166,7 +1172,7 @@ pub fn get_licenses(db: State<'_, DbState>) -> Result<Vec<crate::db::models::Lic
 pub fn get_license(db: State<'_, DbState>, license_id: i64) -> Result<crate::db::models::LicenseRecord, AppError> {
     let conn = lock_db(&db)?;
     conn.query_row(
-        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes, created_at, updated_at \
          FROM license_records WHERE id = ?1 AND deleted_at IS NULL",
         [license_id], row_to_license,
     ).map_err(|e| match e {
@@ -1185,6 +1191,9 @@ pub fn update_license(
     valid_until: Option<String>,
     max_uses: Option<i32>,
     commercial_allowed: Option<bool>,
+    cost_per_piece: Option<f64>,
+    cost_per_series: Option<f64>,
+    cost_flat: Option<f64>,
     source: Option<String>,
     notes: Option<String>,
 ) -> Result<crate::db::models::LicenseRecord, AppError> {
@@ -1202,12 +1211,15 @@ pub fn update_license(
     if let Some(v) = &valid_until { params.push(Box::new(v.clone())); sets.push(format!("valid_until = ?{}", params.len())); }
     if let Some(v) = max_uses { params.push(Box::new(v)); sets.push(format!("max_uses = ?{}", params.len())); }
     if let Some(v) = commercial_allowed { params.push(Box::new(v as i32)); sets.push(format!("commercial_allowed = ?{}", params.len())); }
+    if let Some(v) = cost_per_piece { params.push(Box::new(v)); sets.push(format!("cost_per_piece = ?{}", params.len())); }
+    if let Some(v) = cost_per_series { params.push(Box::new(v)); sets.push(format!("cost_per_series = ?{}", params.len())); }
+    if let Some(v) = cost_flat { params.push(Box::new(v)); sets.push(format!("cost_flat = ?{}", params.len())); }
     if let Some(v) = &source { params.push(Box::new(v.clone())); sets.push(format!("source = ?{}", params.len())); }
     if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
 
     if sets.is_empty() {
         return conn.query_row(
-            "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+            "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes, created_at, updated_at \
              FROM license_records WHERE id = ?1",
             [license_id], row_to_license,
         ).map_err(|e| match e {
@@ -1224,7 +1236,7 @@ pub fn update_license(
     if changes == 0 { return Err(AppError::NotFound(format!("Lizenz {license_id} nicht gefunden"))); }
 
     conn.query_row(
-        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes, created_at, updated_at \
          FROM license_records WHERE id = ?1",
         [license_id], row_to_license,
     ).map_err(AppError::Database)
@@ -1265,7 +1277,7 @@ pub fn unlink_license_from_file(db: State<'_, DbState>, license_id: i64, file_id
 pub fn get_file_licenses(db: State<'_, DbState>, file_id: i64) -> Result<Vec<crate::db::models::LicenseRecord>, AppError> {
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT l.id, l.name, l.license_type, l.valid_from, l.valid_until, l.max_uses, l.current_uses, l.commercial_allowed, l.source, l.notes, l.created_at, l.updated_at \
+        "SELECT l.id, l.name, l.license_type, l.valid_from, l.valid_until, l.max_uses, l.current_uses, l.commercial_allowed, l.cost_per_piece, l.cost_per_series, l.cost_flat, l.source, l.notes, l.created_at, l.updated_at \
          FROM license_records l JOIN license_file_links lf ON lf.license_id = l.id WHERE lf.file_id = ?1 AND l.deleted_at IS NULL ORDER BY l.name"
     )?;
     let records = stmt.query_map([file_id], row_to_license)?.collect::<Result<Vec<_>, _>>()?;
@@ -1277,7 +1289,7 @@ pub fn get_expiring_licenses(db: State<'_, DbState>, days_ahead: Option<i32>) ->
     let days = days_ahead.unwrap_or(30);
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes, created_at, updated_at \
          FROM license_records WHERE deleted_at IS NULL AND valid_until IS NOT NULL AND valid_until <= datetime('now', ?1) AND valid_until >= datetime('now') ORDER BY valid_until"
     )?;
     let threshold = format!("+{days} days");
@@ -1295,10 +1307,13 @@ fn row_to_license(row: &rusqlite::Row) -> rusqlite::Result<crate::db::models::Li
         max_uses: row.get(5)?,
         current_uses: row.get(6)?,
         commercial_allowed: row.get::<_, i32>(7)? != 0,
-        source: row.get(8)?,
-        notes: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        cost_per_piece: row.get::<_, Option<f64>>(8)?.unwrap_or(0.0),
+        cost_per_series: row.get::<_, Option<f64>>(9)?.unwrap_or(0.0),
+        cost_flat: row.get::<_, Option<f64>>(10)?.unwrap_or(0.0),
+        source: row.get(11)?,
+        notes: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
     })
 }
 

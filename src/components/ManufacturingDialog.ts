@@ -18,6 +18,8 @@ import type {
   QualityInspection,
   DefectRecord,
   ProjectReport,
+  CostBreakdown,
+  CostRate,
 } from "../types";
 
 type TabKey = "materials" | "suppliers" | "products" | "inventory" | "timetracking" | "workflow" | "orders" | "licenses" | "quality" | "reports";
@@ -71,6 +73,8 @@ export class ManufacturingDialog {
   // Reports state
   private reportProjectId: number | null = null;
   private currentReport: ProjectReport | null = null;
+  private costBreakdown: CostBreakdown | null = null;
+  private costRates: CostRate[] = [];
 
   static async open(): Promise<void> {
     if (ManufacturingDialog.instance) ManufacturingDialog.dismiss();
@@ -1947,7 +1951,13 @@ export class ManufacturingDialog {
 
   private renderReportsDashboard(container: HTMLElement): void {
     if (this.currentReport) {
-      this.addBadge(container, `Kosten: ${this.currentReport.totalCost.toFixed(2)} EUR`, "");
+      const cb = this.currentReport.costBreakdown;
+      if (cb) {
+        this.addBadge(container, `Selbstkosten: ${cb.selbstkosten.toFixed(2)} EUR`, "");
+        this.addBadge(container, `Verkaufspreis: ${cb.nettoVerkaufspreis.toFixed(2)} EUR`, "");
+      } else {
+        this.addBadge(container, `Kosten: ${this.currentReport.totalCost.toFixed(2)} EUR`, "");
+      }
       const pct = this.currentReport.workflowTotal > 0
         ? Math.round((this.currentReport.workflowCompleted / this.currentReport.workflowTotal) * 100) : 0;
       this.addBadge(container, `Fortschritt: ${pct}%`, "");
@@ -1975,8 +1985,15 @@ export class ManufacturingDialog {
       const id = projectSelect.value ? Number(projectSelect.value) : null;
       this.reportProjectId = id;
       if (id) {
-        try { this.currentReport = await ReportService.getProjectReport(id); } catch { this.currentReport = null; ToastContainer.show("error", "Bericht konnte nicht geladen werden"); }
-      } else { this.currentReport = null; }
+        try {
+          this.currentReport = await ReportService.getProjectReport(id);
+          this.costBreakdown = this.currentReport.costBreakdown;
+        } catch {
+          this.currentReport = null;
+          this.costBreakdown = null;
+          ToastContainer.show("error", "Bericht konnte nicht geladen werden");
+        }
+      } else { this.currentReport = null; this.costBreakdown = null; }
       this.renderActiveTab();
     });
     selectorRow.appendChild(projectSelect);
@@ -2005,13 +2022,20 @@ export class ManufacturingDialog {
     ]);
     cards.appendChild(timeCard);
 
-    // Cost card
-    const costCard = this.createReportCard("Kosten", [
-      { label: "Material", value: `${r.materialCost.toFixed(2)} EUR` },
-      { label: "Arbeit", value: `${r.laborCost.toFixed(2)} EUR` },
-      { label: "Gesamt", value: `${r.totalCost.toFixed(2)} EUR` },
-    ]);
-    cards.appendChild(costCard);
+    // Kalkulation card (full cost breakdown per project.md 7.3)
+    const cb = this.costBreakdown;
+    if (cb) {
+      const kalkCard = this.createKalkulationCard(cb);
+      cards.appendChild(kalkCard);
+    } else {
+      // Fallback simple cost card
+      const costCard = this.createReportCard("Kosten", [
+        { label: "Material", value: `${r.materialCost.toFixed(2)} EUR` },
+        { label: "Arbeit", value: `${r.laborCost.toFixed(2)} EUR` },
+        { label: "Gesamt", value: `${r.totalCost.toFixed(2)} EUR` },
+      ]);
+      cards.appendChild(costCard);
+    }
 
     // Quality card
     const passRate = r.inspectionCount > 0 ? Math.round((r.passCount / r.inspectionCount) * 100) : 0;
@@ -2034,9 +2058,11 @@ export class ManufacturingDialog {
 
     container.appendChild(cards);
 
-    // CSV export button
+    // Action buttons row
     const exportRow = document.createElement("div");
     exportRow.className = "mfg-actions";
+
+    // CSV export button
     const exportBtn = document.createElement("button");
     exportBtn.className = "dialog-btn dialog-btn-primary";
     exportBtn.textContent = "CSV Export";
@@ -2055,7 +2081,266 @@ export class ManufacturingDialog {
       } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
     });
     exportRow.appendChild(exportBtn);
+
+    // Save cost snapshot button
+    if (cb) {
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "dialog-btn";
+      saveBtn.textContent = "Kalkulation speichern";
+      saveBtn.addEventListener("click", async () => {
+        if (!this.reportProjectId) return;
+        try {
+          await ReportService.saveCostBreakdown(this.reportProjectId);
+          ToastContainer.show("success", "Kalkulation gespeichert");
+        } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+      });
+      exportRow.appendChild(saveBtn);
+    }
+
+    // Cost rates config button
+    const ratesBtn = document.createElement("button");
+    ratesBtn.className = "dialog-btn";
+    ratesBtn.textContent = "Kostensaetze";
+    ratesBtn.addEventListener("click", () => this.showCostRatesDialog());
+    exportRow.appendChild(ratesBtn);
+
     container.appendChild(exportRow);
+  }
+
+  private createKalkulationCard(cb: CostBreakdown): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "mfg-report-card mfg-kalkulation-card";
+
+    const h = document.createElement("h4");
+    h.className = "mfg-report-card-title";
+    h.textContent = "Kalkulation";
+    card.appendChild(h);
+
+    const lines: { label: string; value: string; cls?: string; separator?: boolean }[] = [
+      { label: "Materialkosten netto", value: `${cb.materialCost.toFixed(2)} EUR` },
+      { label: "Lizenzkosten netto", value: `${cb.licenseCost.toFixed(2)} EUR` },
+      { label: "Arbeitskosten netto", value: `${cb.laborCost.toFixed(2)} EUR` },
+      { label: "Maschinenkosten netto", value: `${cb.machineCost.toFixed(2)} EUR` },
+      { label: "Beschaffungskosten netto", value: `${cb.procurementCost.toFixed(2)} EUR` },
+      { label: "Verpackungskosten netto", value: "(in Materialkosten)" },
+      { label: "Herstellkosten", value: `${cb.herstellkosten.toFixed(2)} EUR`, separator: true },
+      { label: `Gemeinkosten (${cb.overheadPct.toFixed(1)}%)`, value: `${cb.overheadCost.toFixed(2)} EUR` },
+      { label: "Selbstkosten netto", value: `${cb.selbstkosten.toFixed(2)} EUR`, cls: "mfg-kalk-subtotal", separator: true },
+      { label: `Gewinnzuschlag (${cb.profitMarginPct.toFixed(1)}%)`, value: `${cb.profitAmount.toFixed(2)} EUR` },
+      { label: "Netto-Verkaufspreis", value: `${cb.nettoVerkaufspreis.toFixed(2)} EUR`, cls: "mfg-kalk-total", separator: true },
+    ];
+
+    if (cb.quantity > 1) {
+      lines.push({ label: `Selbstkosten/Stueck (${cb.quantity} St.)`, value: `${cb.selbstkostenPerPiece.toFixed(2)} EUR` });
+      lines.push({ label: `Verkaufspreis/Stueck`, value: `${cb.verkaufspreisPerPiece.toFixed(2)} EUR` });
+    }
+
+    for (const line of lines) {
+      if (line.separator) {
+        const sep = document.createElement("hr");
+        sep.className = "mfg-kalk-separator";
+        card.appendChild(sep);
+      }
+      const row = document.createElement("div");
+      row.className = "mfg-report-row" + (line.cls ? ` ${line.cls}` : "");
+      const lbl = document.createElement("span");
+      lbl.className = "mfg-report-label";
+      lbl.textContent = line.label;
+      const val = document.createElement("span");
+      val.className = "mfg-report-value";
+      val.textContent = line.value;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      card.appendChild(row);
+    }
+
+    return card;
+  }
+
+  private async showCostRatesDialog(): Promise<void> {
+    try {
+      this.costRates = await ReportService.listCostRates();
+    } catch { this.costRates = []; }
+
+    const overlay = document.createElement("div");
+    overlay.className = "dialog-overlay";
+    overlay.style.zIndex = "10001";
+
+    const dialog = document.createElement("div");
+    dialog.className = "dialog-window";
+    dialog.style.width = "600px";
+    dialog.style.maxHeight = "80vh";
+
+    const header = document.createElement("div");
+    header.className = "dialog-header";
+    const title = document.createElement("h2");
+    title.className = "dialog-title";
+    title.textContent = "Kostensaetze verwalten";
+    header.appendChild(title);
+    dialog.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "dialog-body";
+    body.style.overflowY = "auto";
+    body.style.maxHeight = "60vh";
+
+    const renderRates = () => {
+      body.innerHTML = "";
+
+      const groups: Record<string, CostRate[]> = { labor: [], machine: [], overhead: [], profit: [] };
+      for (const r of this.costRates) {
+        if (groups[r.rateType]) groups[r.rateType].push(r);
+      }
+
+      const labels: Record<string, string> = { labor: "Arbeit (EUR/h)", machine: "Maschine (EUR/h)", overhead: "Gemeinkosten (%)", profit: "Gewinn (%)" };
+
+      for (const [type, rates] of Object.entries(groups)) {
+        const section = document.createElement("div");
+        section.className = "mfg-form-section";
+        const sTitle = document.createElement("h4");
+        sTitle.className = "mfg-form-section-title";
+        sTitle.textContent = labels[type] || type;
+        section.appendChild(sTitle);
+
+        for (const rate of rates) {
+          const row = document.createElement("div");
+          row.className = "mfg-list-row";
+          row.style.display = "flex";
+          row.style.gap = "8px";
+          row.style.alignItems = "center";
+          row.style.marginBottom = "4px";
+
+          const nameSpan = document.createElement("span");
+          nameSpan.style.flex = "1";
+          nameSpan.textContent = rate.name;
+          row.appendChild(nameSpan);
+
+          const valSpan = document.createElement("span");
+          valSpan.style.minWidth = "80px";
+          valSpan.style.textAlign = "right";
+          valSpan.textContent = `${rate.rateValue}${rate.unit ? " " + rate.unit : ""}`;
+          row.appendChild(valSpan);
+
+          if (rate.setupCost > 0) {
+            const setupSpan = document.createElement("span");
+            setupSpan.style.minWidth = "100px";
+            setupSpan.style.textAlign = "right";
+            setupSpan.style.fontSize = "0.85em";
+            setupSpan.style.opacity = "0.7";
+            setupSpan.textContent = `Ruestk. ${rate.setupCost.toFixed(2)}`;
+            row.appendChild(setupSpan);
+          }
+
+          const delBtn = document.createElement("button");
+          delBtn.className = "dialog-btn dialog-btn-danger";
+          delBtn.style.padding = "2px 8px";
+          delBtn.style.fontSize = "0.85em";
+          delBtn.textContent = "X";
+          delBtn.addEventListener("click", async () => {
+            try {
+              await ReportService.deleteCostRate(rate.id);
+              this.costRates = this.costRates.filter(r => r.id !== rate.id);
+              renderRates();
+            } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+          });
+          row.appendChild(delBtn);
+
+          section.appendChild(row);
+        }
+
+        // Add new rate form
+        const addRow = document.createElement("div");
+        addRow.style.display = "flex";
+        addRow.style.gap = "8px";
+        addRow.style.marginTop = "4px";
+
+        const nameInput = document.createElement("input");
+        nameInput.className = "mfg-input";
+        nameInput.placeholder = "Name";
+        nameInput.style.flex = "1";
+        addRow.appendChild(nameInput);
+
+        const valInput = document.createElement("input");
+        valInput.className = "mfg-input";
+        valInput.type = "number";
+        valInput.step = "0.01";
+        valInput.placeholder = "Wert";
+        valInput.style.width = "80px";
+        addRow.appendChild(valInput);
+
+        if (type === "machine") {
+          const setupInput = document.createElement("input");
+          setupInput.className = "mfg-input";
+          setupInput.type = "number";
+          setupInput.step = "0.01";
+          setupInput.placeholder = "Ruestk.";
+          setupInput.style.width = "80px";
+          addRow.appendChild(setupInput);
+
+          const addBtn = document.createElement("button");
+          addBtn.className = "dialog-btn dialog-btn-primary";
+          addBtn.style.padding = "2px 12px";
+          addBtn.textContent = "+";
+          addBtn.addEventListener("click", async () => {
+            const n = nameInput.value.trim();
+            const v = parseFloat(valInput.value);
+            const s = parseFloat(setupInput.value) || 0;
+            if (!n || isNaN(v)) return;
+            try {
+              const created = await ReportService.createCostRate(type, n, v, "EUR/h", s);
+              this.costRates.push(created);
+              renderRates();
+            } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
+          });
+          addRow.appendChild(addBtn);
+        } else {
+          const addBtn = document.createElement("button");
+          addBtn.className = "dialog-btn dialog-btn-primary";
+          addBtn.style.padding = "2px 12px";
+          addBtn.textContent = "+";
+          addBtn.addEventListener("click", async () => {
+            const n = nameInput.value.trim();
+            const v = parseFloat(valInput.value);
+            if (!n || isNaN(v)) return;
+            try {
+              const unit = (type === "overhead" || type === "profit") ? "%" : "EUR/h";
+              const created = await ReportService.createCostRate(type, n, v, unit);
+              this.costRates.push(created);
+              renderRates();
+            } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
+          });
+          addRow.appendChild(addBtn);
+        }
+
+        section.appendChild(addRow);
+        body.appendChild(section);
+      }
+    };
+
+    renderRates();
+    dialog.appendChild(body);
+
+    const footer = document.createElement("div");
+    footer.className = "dialog-footer";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "dialog-btn";
+    closeBtn.textContent = "Schliessen";
+    closeBtn.addEventListener("click", () => {
+      overlay.remove();
+      // Refresh report to reflect rate changes
+      if (this.reportProjectId) {
+        ReportService.getProjectReport(this.reportProjectId).then(r => {
+          this.currentReport = r;
+          this.costBreakdown = r.costBreakdown;
+          this.renderActiveTab();
+        }).catch(() => {});
+      }
+    });
+    footer.appendChild(closeBtn);
+    dialog.appendChild(footer);
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
   }
 
   private createReportCard(title: string, rows: { label: string; value: string; cls?: string }[]): HTMLElement {

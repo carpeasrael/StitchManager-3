@@ -18,6 +18,7 @@ pub struct OrderCreate {
     pub supplier_id: i64,
     pub order_date: Option<String>,
     pub expected_delivery: Option<String>,
+    pub shipping_cost: Option<f64>,
     pub notes: Option<String>,
 }
 
@@ -28,6 +29,7 @@ pub struct OrderUpdate {
     pub status: Option<String>,
     pub order_date: Option<String>,
     pub expected_delivery: Option<String>,
+    pub shipping_cost: Option<f64>,
     pub notes: Option<String>,
 }
 
@@ -46,13 +48,13 @@ pub fn create_order(
         return Err(AppError::Validation(format!("Lieferant {} nicht gefunden oder geloescht", order.supplier_id)));
     }
     conn.execute(
-        "INSERT INTO purchase_orders (order_number, supplier_id, order_date, expected_delivery, notes) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![order.order_number, order.supplier_id, order.order_date, order.expected_delivery, order.notes],
+        "INSERT INTO purchase_orders (order_number, supplier_id, order_date, expected_delivery, shipping_cost, notes) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![order.order_number, order.supplier_id, order.order_date, order.expected_delivery, order.shipping_cost.unwrap_or(0.0), order.notes],
     )?;
     let id = conn.last_insert_rowid();
     conn.query_row(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
         [id],
         row_to_order,
@@ -63,7 +65,7 @@ pub fn create_order(
 pub fn get_orders(db: State<'_, DbState>) -> Result<Vec<PurchaseOrder>, AppError> {
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )?;
     let orders = stmt.query_map([], row_to_order)?.collect::<Result<Vec<_>, _>>()?;
@@ -74,7 +76,7 @@ pub fn get_orders(db: State<'_, DbState>) -> Result<Vec<PurchaseOrder>, AppError
 pub fn get_order(db: State<'_, DbState>, order_id: i64) -> Result<PurchaseOrder, AppError> {
     let conn = lock_db(&db)?;
     conn.query_row(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
         [order_id],
         row_to_order,
@@ -103,11 +105,12 @@ pub fn update_order(
     }
     if let Some(v) = &update.order_date { params.push(Box::new(v.clone())); sets.push(format!("order_date = ?{}", params.len())); }
     if let Some(v) = &update.expected_delivery { params.push(Box::new(v.clone())); sets.push(format!("expected_delivery = ?{}", params.len())); }
+    if let Some(v) = update.shipping_cost { params.push(Box::new(v)); sets.push(format!("shipping_cost = ?{}", params.len())); }
     if let Some(v) = &update.notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
 
     if sets.is_empty() {
         return conn.query_row(
-            "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, notes, created_at, updated_at \
+            "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
              FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [order_id], row_to_order,
         ).map_err(|e| match e {
@@ -124,7 +127,7 @@ pub fn update_order(
     if changes == 0 { return Err(AppError::NotFound(format!("Bestellung {order_id} nicht gefunden"))); }
 
     conn.query_row(
-        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, notes, created_at, updated_at \
+        "SELECT id, order_number, supplier_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \
          FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
         [order_id], row_to_order,
     ).map_err(AppError::Database)
@@ -149,9 +152,10 @@ fn row_to_order(row: &rusqlite::Row) -> rusqlite::Result<PurchaseOrder> {
         status: row.get(3)?,
         order_date: row.get(4)?,
         expected_delivery: row.get(5)?,
-        notes: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        shipping_cost: row.get::<_, Option<f64>>(6)?.unwrap_or(0.0),
+        notes: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 

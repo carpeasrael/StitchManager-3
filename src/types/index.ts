@@ -293,6 +293,7 @@ export interface Project {
   deadline: string | null;
   responsiblePerson: string | null;
   approvalStatus: string | null;
+  quantity: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -375,6 +376,7 @@ export interface TimeEntry {
   actualMinutes: number | null;
   worker: string | null;
   machine: string | null;
+  costRateId: number | null;
   recordedAt: string;
 }
 
@@ -417,6 +419,7 @@ export interface PurchaseOrder {
   status: string;
   orderDate: string | null;
   expectedDelivery: string | null;
+  shippingCost: number;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -451,6 +454,9 @@ export interface LicenseRecord {
   maxUses: number | null;
   currentUses: number;
   commercialAllowed: boolean;
+  costPerPiece: number;
+  costPerSeries: number;
+  costFlat: number;
   source: string | null;
   notes: string | null;
   createdAt: string;
@@ -481,6 +487,38 @@ export interface DefectRecord {
   createdAt: string;
 }
 
+export interface CostRate {
+  id: number;
+  rateType: string;
+  name: string;
+  rateValue: number;
+  unit: string | null;
+  setupCost: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CostBreakdown {
+  projectId: number;
+  projectName: string;
+  quantity: number;
+  materialCost: number;
+  licenseCost: number;
+  laborCost: number;
+  machineCost: number;
+  procurementCost: number;
+  herstellkosten: number;
+  overheadPct: number;
+  overheadCost: number;
+  selbstkosten: number;
+  profitMarginPct: number;
+  profitAmount: number;
+  nettoVerkaufspreis: number;
+  selbstkostenPerPiece: number;
+  verkaufspreisPerPiece: number;
+}
+
 export interface ProjectReport {
   projectId: number;
   projectName: string;
@@ -495,6 +533,7 @@ export interface ProjectReport {
   openDefects: number;
   workflowTotal: number;
   workflowCompleted: number;
+  costBreakdown: CostBreakdown | null;
 }
 
 export interface PrinterInfo {

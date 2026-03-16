@@ -4122,3 +4122,33 @@ a:focus:not(:focus-visible),
   font-weight: 500;
   color: var(--color-text);
 }
+
+/* Kalkulation card */
+.mfg-kalkulation-card {
+  grid-column: span 2;
+}
+
+.mfg-kalk-separator {
+  border: none;
+  border-top: 1px solid var(--color-border-light);
+  margin: var(--spacing-1) 0;
+}
+
+.mfg-kalk-subtotal .mfg-report-label,
+.mfg-kalk-subtotal .mfg-report-value {
+  font-weight: 600;
+}
+
+.mfg-kalk-total {
+  background: var(--color-accent-bg, rgba(var(--color-accent-rgb, 99, 102, 241), 0.08));
+  border-radius: var(--radius-sm, 4px);
+  padding: var(--spacing-1) var(--spacing-2);
+  margin: var(--spacing-1) calc(-1 * var(--spacing-2));
+}
+
+.mfg-kalk-total .mfg-report-label,
+.mfg-kalk-total .mfg-report-value {
+  font-weight: 700;
+  color: var(--color-accent);
+  font-size: var(--font-size-body);
+}

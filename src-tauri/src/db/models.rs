@@ -229,6 +229,7 @@ pub struct Project {
     pub deadline: Option<String>,
     pub responsible_person: Option<String>,
     pub approval_status: Option<String>,
+    pub quantity: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -327,6 +328,7 @@ pub struct TimeEntry {
     pub actual_minutes: Option<f64>,
     pub worker: Option<String>,
     pub machine: Option<String>,
+    pub cost_rate_id: Option<i64>,
     pub recorded_at: String,
 }
 
@@ -377,6 +379,7 @@ pub struct PurchaseOrder {
     pub status: String,
     pub order_date: Option<String>,
     pub expected_delivery: Option<String>,
+    pub shipping_cost: f64,
     pub notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -426,6 +429,9 @@ pub struct LicenseRecord {
     pub max_uses: Option<i32>,
     pub current_uses: i32,
     pub commercial_allowed: bool,
+    pub cost_per_piece: f64,
+    pub cost_per_series: f64,
+    pub cost_flat: f64,
     pub source: Option<String>,
     pub notes: Option<String>,
     pub created_at: String,
@@ -460,6 +466,44 @@ pub struct DefectRecord {
     pub created_at: String,
 }
 
+// Cost Calculation
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostRate {
+    pub id: i64,
+    pub rate_type: String,
+    pub name: String,
+    pub rate_value: f64,
+    pub unit: Option<String>,
+    pub setup_cost: f64,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostBreakdown {
+    pub project_id: i64,
+    pub project_name: String,
+    pub quantity: i64,
+    pub material_cost: f64,
+    pub license_cost: f64,
+    pub labor_cost: f64,
+    pub machine_cost: f64,
+    pub procurement_cost: f64,
+    pub herstellkosten: f64,
+    pub overhead_pct: f64,
+    pub overhead_cost: f64,
+    pub selbstkosten: f64,
+    pub profit_margin_pct: f64,
+    pub profit_amount: f64,
+    pub netto_verkaufspreis: f64,
+    pub selbstkosten_per_piece: f64,
+    pub verkaufspreis_per_piece: f64,
+}
+
 // Phase 3: Reporting
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -478,6 +522,7 @@ pub struct ProjectReport {
     pub open_defects: i64,
     pub workflow_total: i64,
     pub workflow_completed: i64,
+    pub cost_breakdown: Option<CostBreakdown>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
