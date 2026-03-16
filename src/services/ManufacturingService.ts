@@ -6,6 +6,7 @@ import type {
   MaterialConsumption,
   NachkalkulationLine,
   Product,
+  ProductVariant,
   BillOfMaterial,
   TimeEntry,
   StepDefinition,
@@ -148,6 +149,43 @@ export async function updateProduct(
 
 export async function deleteProduct(productId: number): Promise<void> {
   return invoke("delete_product", { productId });
+}
+
+// ── Product Variants ──────────────────────────────────────────────────────
+
+export async function createVariant(
+  productId: number,
+  variant: {
+    sku?: string;
+    variantName?: string;
+    size?: string;
+    color?: string;
+    additionalCost?: number;
+    notes?: string;
+  }
+): Promise<ProductVariant> {
+  return invoke("create_variant", { productId, variant });
+}
+
+export async function getProductVariants(productId: number): Promise<ProductVariant[]> {
+  return invoke("get_product_variants", { productId });
+}
+
+export async function updateVariant(
+  variantId: number,
+  sku?: string,
+  variantName?: string,
+  size?: string,
+  color?: string,
+  additionalCost?: number,
+  notes?: string,
+  status?: string
+): Promise<ProductVariant> {
+  return invoke("update_variant", { variantId, sku, variantName, size, color, additionalCost, notes, status });
+}
+
+export async function deleteVariant(variantId: number): Promise<void> {
+  return invoke("delete_variant", { variantId });
 }
 
 // ── Bill of Materials ──────────────────────────────────────────────────────

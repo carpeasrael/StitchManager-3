@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use tauri::State;
 
-use crate::db::models::{BillOfMaterial, Material, MaterialConsumption, MaterialInventory, NachkalkulationLine, Product, Supplier, TimeEntry};
+use crate::db::models::{BillOfMaterial, Material, MaterialConsumption, MaterialInventory, NachkalkulationLine, Product, ProductVariant, Supplier, TimeEntry};
 use crate::error::{lock_db, AppError};
 use crate::DbState;
 
@@ -1011,6 +1011,129 @@ fn row_to_product(row: &rusqlite::Row) -> rusqlite::Result<Product> {
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
     })
+}
+
+// ── Product Variants ──────────────────────────────────────────────────────
+
+const VARIANT_SELECT: &str =
+    "SELECT id, product_id, sku, variant_name, size, color, additional_cost, notes, status, created_at, updated_at FROM product_variants";
+
+fn row_to_variant(row: &rusqlite::Row) -> rusqlite::Result<ProductVariant> {
+    Ok(ProductVariant {
+        id: row.get(0)?,
+        product_id: row.get(1)?,
+        sku: row.get(2)?,
+        variant_name: row.get(3)?,
+        size: row.get(4)?,
+        color: row.get(5)?,
+        additional_cost: row.get::<_, Option<f64>>(6)?.unwrap_or(0.0),
+        notes: row.get(7)?,
+        status: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariantCreate {
+    pub sku: Option<String>,
+    pub variant_name: Option<String>,
+    pub size: Option<String>,
+    pub color: Option<String>,
+    pub additional_cost: Option<f64>,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub fn create_variant(
+    db: State<'_, DbState>,
+    product_id: i64,
+    variant: VariantCreate,
+) -> Result<ProductVariant, AppError> {
+    let conn = lock_db(&db)?;
+    let product_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM products WHERE id = ?1 AND deleted_at IS NULL",
+        [product_id], |row| row.get(0),
+    )?;
+    if !product_exists {
+        return Err(AppError::NotFound(format!("Produkt {product_id} nicht gefunden")));
+    }
+    conn.execute(
+        "INSERT INTO product_variants (product_id, sku, variant_name, size, color, additional_cost, notes) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![product_id, variant.sku, variant.variant_name, variant.size, variant.color,
+            variant.additional_cost.unwrap_or(0.0), variant.notes],
+    )?;
+    let id = conn.last_insert_rowid();
+    let sql = format!("{VARIANT_SELECT} WHERE id = ?1");
+    conn.query_row(&sql, [id], row_to_variant).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn get_product_variants(
+    db: State<'_, DbState>,
+    product_id: i64,
+) -> Result<Vec<ProductVariant>, AppError> {
+    let conn = lock_db(&db)?;
+    let sql = format!("{VARIANT_SELECT} WHERE product_id = ?1 AND deleted_at IS NULL ORDER BY variant_name, size, color");
+    let mut stmt = conn.prepare(&sql)?;
+    let variants = stmt.query_map([product_id], row_to_variant)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(variants)
+}
+
+#[tauri::command]
+pub fn update_variant(
+    db: State<'_, DbState>,
+    variant_id: i64,
+    sku: Option<String>,
+    variant_name: Option<String>,
+    size: Option<String>,
+    color: Option<String>,
+    additional_cost: Option<f64>,
+    notes: Option<String>,
+    status: Option<String>,
+) -> Result<ProductVariant, AppError> {
+    let conn = lock_db(&db)?;
+    let mut sets: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(v) = &sku { params.push(Box::new(v.clone())); sets.push(format!("sku = ?{}", params.len())); }
+    if let Some(v) = &variant_name { params.push(Box::new(v.clone())); sets.push(format!("variant_name = ?{}", params.len())); }
+    if let Some(v) = &size { params.push(Box::new(v.clone())); sets.push(format!("size = ?{}", params.len())); }
+    if let Some(v) = &color { params.push(Box::new(v.clone())); sets.push(format!("color = ?{}", params.len())); }
+    if let Some(v) = additional_cost { params.push(Box::new(v)); sets.push(format!("additional_cost = ?{}", params.len())); }
+    if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
+    if let Some(v) = &status { params.push(Box::new(v.clone())); sets.push(format!("status = ?{}", params.len())); }
+
+    if sets.is_empty() {
+        let sql = format!("{VARIANT_SELECT} WHERE id = ?1 AND deleted_at IS NULL");
+        return conn.query_row(&sql, [variant_id], row_to_variant).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Variante {variant_id} nicht gefunden")),
+            _ => AppError::Database(e),
+        });
+    }
+
+    sets.push("updated_at = datetime('now')".to_string());
+    params.push(Box::new(variant_id));
+    let sql = format!("UPDATE product_variants SET {} WHERE id = ?{} AND deleted_at IS NULL", sets.join(", "), params.len());
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let changes = conn.execute(&sql, param_refs.as_slice())?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Variante {variant_id} nicht gefunden"))); }
+
+    let sql = format!("{VARIANT_SELECT} WHERE id = ?1");
+    conn.query_row(&sql, [variant_id], row_to_variant).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn delete_variant(db: State<'_, DbState>, variant_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let changes = conn.execute(
+        "UPDATE product_variants SET deleted_at = datetime('now') WHERE id = ?1 AND deleted_at IS NULL",
+        [variant_id],
+    )?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Variante {variant_id} nicht gefunden"))); }
+    Ok(())
 }
 
 // ── Bill of Materials ──────────────────────────────────────────────────────
@@ -2156,5 +2279,56 @@ mod tests {
         ).unwrap();
         assert_eq!(planned, 6.0); // BOM 3.0 × qty 2
         assert_eq!(actual, 4.0);   // consumed 4.0
+    }
+
+    #[test]
+    fn test_product_variant_crud() {
+        let conn = init_database_in_memory().unwrap();
+        conn.execute("INSERT INTO products (name, status) VALUES ('Tasche', 'active')", []).unwrap();
+        let prod_id = conn.last_insert_rowid();
+
+        // Create variant
+        conn.execute(
+            "INSERT INTO product_variants (product_id, sku, variant_name, size, color, additional_cost) \
+             VALUES (?1, 'T-L-ROT', 'Gross Rot', 'L', 'Rot', 2.50)",
+            [prod_id],
+        ).unwrap();
+        let vid = conn.last_insert_rowid();
+
+        // Read variant
+        let (sku, size, color): (String, String, String) = conn.query_row(
+            "SELECT sku, size, color FROM product_variants WHERE id = ?1", [vid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        assert_eq!(sku, "T-L-ROT");
+        assert_eq!(size, "L");
+        assert_eq!(color, "Rot");
+
+        // SKU uniqueness
+        let dup = conn.execute(
+            "INSERT INTO product_variants (product_id, sku) VALUES (?1, 'T-L-ROT')",
+            [prod_id],
+        );
+        assert!(dup.is_err(), "Duplicate SKU should fail");
+
+        // Soft delete
+        conn.execute(
+            "UPDATE product_variants SET deleted_at = datetime('now') WHERE id = ?1", [vid],
+        ).unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM product_variants WHERE product_id = ?1 AND deleted_at IS NULL",
+            [prod_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 0);
+
+        // Cascade delete
+        conn.execute(
+            "INSERT INTO product_variants (product_id, sku, size) VALUES (?1, 'T-M-BLU', 'M')", [prod_id],
+        ).unwrap();
+        conn.execute("DELETE FROM products WHERE id = ?1", [prod_id]).unwrap();
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM product_variants", [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(total, 0, "Cascade delete should remove variants");
     }
 }

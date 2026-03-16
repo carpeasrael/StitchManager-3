@@ -861,6 +861,107 @@ export class ManufacturingDialog {
     bomSection.appendChild(addRow);
     container.appendChild(bomSection);
 
+    // Variants section
+    const varSection = document.createElement("div");
+    varSection.className = "mfg-bom-section";
+    const varTitle = document.createElement("h4");
+    varTitle.className = "mfg-section-title";
+    varTitle.textContent = "Varianten";
+    varSection.appendChild(varTitle);
+
+    // Load and render variants
+    MfgService.getProductVariants(p.id).then(variants => {
+      if (variants.length > 0) {
+        const vtable = document.createElement("table");
+        vtable.className = "mfg-bom-table";
+        vtable.innerHTML = "<thead><tr><th>SKU</th><th>Name</th><th>Groesse</th><th>Farbe</th><th>Zusatzk.</th><th></th></tr></thead>";
+        const vtbody = document.createElement("tbody");
+        for (const v of variants) {
+          const vtr = document.createElement("tr");
+          for (const cell of [v.sku || "-", v.variantName || "-", v.size || "-", v.color || "-", v.additionalCost ? `${v.additionalCost.toFixed(2)} EUR` : "-"]) {
+            const vtd = document.createElement("td");
+            vtd.textContent = cell;
+            vtr.appendChild(vtd);
+          }
+          const vtdAction = document.createElement("td");
+          const vrmBtn = document.createElement("button");
+          vrmBtn.className = "mfg-bom-remove";
+          vrmBtn.textContent = "\u2716";
+          vrmBtn.title = "Variante loeschen";
+          vrmBtn.addEventListener("click", async () => {
+            try {
+              await MfgService.deleteVariant(v.id);
+              this.renderActiveTab();
+            } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+          });
+          vtdAction.appendChild(vrmBtn);
+          vtr.appendChild(vtdAction);
+          vtbody.appendChild(vtr);
+        }
+        vtable.appendChild(vtbody);
+        varSection.insertBefore(vtable, varSection.lastElementChild);
+      }
+    }).catch(() => { ToastContainer.show("error", "Varianten konnten nicht geladen werden"); });
+
+    // Add variant form
+    const varAddRow = document.createElement("div");
+    varAddRow.className = "mfg-bom-add";
+    varAddRow.style.flexWrap = "wrap";
+
+    const skuIn = document.createElement("input");
+    skuIn.className = "mfg-input mfg-input-sm";
+    skuIn.placeholder = "SKU";
+    varAddRow.appendChild(skuIn);
+
+    const vnameIn = document.createElement("input");
+    vnameIn.className = "mfg-input mfg-input-sm";
+    vnameIn.placeholder = "Name";
+    varAddRow.appendChild(vnameIn);
+
+    const sizeIn = document.createElement("input");
+    sizeIn.className = "mfg-input mfg-input-sm";
+    sizeIn.placeholder = "Groesse";
+    sizeIn.style.width = "70px";
+    varAddRow.appendChild(sizeIn);
+
+    const colorIn = document.createElement("input");
+    colorIn.className = "mfg-input mfg-input-sm";
+    colorIn.placeholder = "Farbe";
+    colorIn.style.width = "70px";
+    varAddRow.appendChild(colorIn);
+
+    const costIn = document.createElement("input");
+    costIn.className = "mfg-input mfg-input-sm";
+    costIn.type = "number";
+    costIn.step = "0.01";
+    costIn.placeholder = "Zusatzkosten";
+    costIn.style.width = "90px";
+    varAddRow.appendChild(costIn);
+
+    const varAddBtn = document.createElement("button");
+    varAddBtn.className = "dialog-btn dialog-btn-primary";
+    varAddBtn.textContent = "+";
+    varAddBtn.addEventListener("click", async () => {
+      if (!skuIn.value && !vnameIn.value && !sizeIn.value && !colorIn.value) {
+        ToastContainer.show("error", "Mindestens SKU, Name, Groesse oder Farbe angeben");
+        return;
+      }
+      try {
+        await MfgService.createVariant(p.id, {
+          sku: skuIn.value || undefined,
+          variantName: vnameIn.value || undefined,
+          size: sizeIn.value || undefined,
+          color: colorIn.value || undefined,
+          additionalCost: costIn.value ? parseFloat(costIn.value) : undefined,
+        });
+        this.renderActiveTab();
+        ToastContainer.show("success", "Variante erstellt");
+      } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
+    });
+    varAddRow.appendChild(varAddBtn);
+    varSection.appendChild(varAddRow);
+    container.appendChild(varSection);
+
     // Actions
     const actions = document.createElement("div");
     actions.className = "mfg-actions";

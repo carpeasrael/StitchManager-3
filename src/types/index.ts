@@ -383,6 +383,20 @@ export interface Product {
   updatedAt: string;
 }
 
+export interface ProductVariant {
+  id: number;
+  productId: number;
+  sku: string | null;
+  variantName: string | null;
+  size: string | null;
+  color: string | null;
+  additionalCost: number;
+  notes: string | null;
+  status: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BillOfMaterial {
   id: number;
   productId: number;

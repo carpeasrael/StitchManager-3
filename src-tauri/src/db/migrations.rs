@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 19;
+const CURRENT_VERSION: i32 = 20;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -119,6 +119,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 19 {
         apply_v19(conn)?;
+    }
+
+    if current < 20 {
+        apply_v20(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1132,6 +1136,36 @@ fn apply_v19(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v20(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS product_variants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            sku TEXT,
+            variant_name TEXT,
+            size TEXT,
+            color TEXT,
+            additional_cost REAL DEFAULT 0,
+            notes TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_product_variants_product_id ON product_variants(product_id);
+        CREATE INDEX IF NOT EXISTS idx_product_variants_deleted_at ON product_variants(deleted_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_product_variants_sku_active ON product_variants(sku) WHERE deleted_at IS NULL;
+
+        INSERT INTO schema_version (version, description)
+        VALUES (20, 'Add product_variants table for sizes, colors, and customization');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1182,6 +1216,7 @@ mod tests {
             "materials",
             "order_items",
             "product_steps",
+            "product_variants",
             "products",
             "project_cost_items",
             "project_details",
@@ -1212,7 +1247,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 19, "Schema version must be 17");
+        assert_eq!(version, 20, "Schema version must be 17");
     }
 
     #[test]
@@ -1235,22 +1270,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_nineteen() {
+    fn test_schema_version_is_twenty() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 19);
+        assert_eq!(version, 20);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 19",
+                "SELECT description FROM schema_version WHERE version = 20",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("project"), "v19 description should mention project");
+        assert!(desc.contains("variant"), "v20 description should mention variant");
     }
 
     #[test]

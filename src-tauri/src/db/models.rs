@@ -349,6 +349,22 @@ pub struct Product {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProductVariant {
+    pub id: i64,
+    pub product_id: i64,
+    pub sku: Option<String>,
+    pub variant_name: Option<String>,
+    pub size: Option<String>,
+    pub color: Option<String>,
+    pub additional_cost: f64,
+    pub notes: Option<String>,
+    pub status: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BillOfMaterial {
     pub id: i64,
     pub product_id: i64,
