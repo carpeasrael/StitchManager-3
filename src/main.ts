@@ -233,7 +233,7 @@ function showInfoDialog(): void {
   dialog.setAttribute("aria-label", "Info");
 
   dialog.innerHTML = `
-    <h3 class="info-title">StichMan</h3>
+    <h3 class="info-title">Stitch Manager</h3>
     <div class="info-subtitle">Stickdateien-Verwaltung</div>
     <div class="info-version">Version 26.4.1 (26.04-a1)</div>
     <div class="info-details">
@@ -428,7 +428,7 @@ function initEventHandlers(): () => void {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "stichman_export.json";
+        a.download = "stitchmanager_export.json";
         a.click();
         URL.revokeObjectURL(url);
         ToastContainer.show("success", `${ids.length} Dateien exportiert`);

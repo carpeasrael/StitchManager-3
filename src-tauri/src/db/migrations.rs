@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 13;
+const CURRENT_VERSION: i32 = 14;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -95,6 +95,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 13 {
         apply_v13(conn)?;
+    }
+
+    if current < 14 {
+        apply_v14(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -725,6 +729,117 @@ fn apply_v12(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v14(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Extend projects table with manufacturing fields
+        ALTER TABLE projects ADD COLUMN order_number TEXT;
+        ALTER TABLE projects ADD COLUMN customer TEXT;
+        ALTER TABLE projects ADD COLUMN priority TEXT DEFAULT 'normal';
+        ALTER TABLE projects ADD COLUMN deadline TEXT;
+        ALTER TABLE projects ADD COLUMN responsible_person TEXT;
+        ALTER TABLE projects ADD COLUMN approval_status TEXT DEFAULT 'draft';
+
+        CREATE INDEX IF NOT EXISTS idx_projects_priority ON projects(priority);
+        CREATE INDEX IF NOT EXISTS idx_projects_deadline ON projects(deadline);
+        CREATE INDEX IF NOT EXISTS idx_projects_approval_status ON projects(approval_status);
+
+        -- Suppliers
+        CREATE TABLE IF NOT EXISTS suppliers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            contact TEXT,
+            website TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_suppliers_deleted_at ON suppliers(deleted_at);
+
+        -- Materials
+        CREATE TABLE IF NOT EXISTS materials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_number TEXT UNIQUE,
+            name TEXT NOT NULL,
+            material_type TEXT,
+            unit TEXT DEFAULT 'Stk',
+            supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+            net_price REAL,
+            waste_factor REAL DEFAULT 0.0,
+            min_stock REAL DEFAULT 0,
+            reorder_time_days INTEGER,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_materials_supplier_id ON materials(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_materials_material_type ON materials(material_type);
+        CREATE INDEX IF NOT EXISTS idx_materials_deleted_at ON materials(deleted_at);
+
+        -- Material inventory
+        CREATE TABLE IF NOT EXISTS material_inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            total_stock REAL DEFAULT 0,
+            reserved_stock REAL DEFAULT 0,
+            location TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_material_inventory_material_id ON material_inventory(material_id);
+
+        -- Products
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_number TEXT UNIQUE,
+            name TEXT NOT NULL,
+            category TEXT,
+            description TEXT,
+            product_type TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type);
+        CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
+        CREATE INDEX IF NOT EXISTS idx_products_deleted_at ON products(deleted_at);
+
+        -- Bill of materials
+        CREATE TABLE IF NOT EXISTS bill_of_materials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            quantity REAL NOT NULL,
+            unit TEXT,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_bom_product_id ON bill_of_materials(product_id);
+        CREATE INDEX IF NOT EXISTS idx_bom_material_id ON bill_of_materials(material_id);
+
+        -- Time entries
+        CREATE TABLE IF NOT EXISTS time_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            step_name TEXT NOT NULL,
+            planned_minutes REAL,
+            actual_minutes REAL,
+            worker TEXT,
+            machine TEXT,
+            recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_time_entries_project_id ON time_entries(project_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (14, 'Add manufacturing tables: suppliers, materials, inventory, products, BOM, time_entries; extend projects');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -743,6 +858,7 @@ mod tests {
 
         let expected = vec![
             "ai_analysis_results",
+            "bill_of_materials",
             "collection_items",
             "collections",
             "custom_field_definitions",
@@ -762,11 +878,16 @@ mod tests {
             "instruction_bookmarks",
             "instruction_notes",
             "machine_profiles",
+            "material_inventory",
+            "materials",
+            "products",
             "project_details",
             "projects",
             "schema_version",
             "settings",
+            "suppliers",
             "tags",
+            "time_entries",
         ];
 
         assert_eq!(tables, expected, "All tables must exist (including FTS5)");
@@ -783,7 +904,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 13, "Schema version must be 13");
+        assert_eq!(version, 14, "Schema version must be 14");
     }
 
     #[test]
@@ -806,22 +927,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_thirteen() {
+    fn test_schema_version_is_fourteen() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 13);
+        assert_eq!(version, 14);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 13",
+                "SELECT description FROM schema_version WHERE version = 14",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add deleted_at column for soft delete / recycle bin");
+        assert!(desc.contains("manufacturing"), "v14 description should mention manufacturing");
     }
 
     #[test]

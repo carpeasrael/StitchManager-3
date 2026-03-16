@@ -12,6 +12,12 @@ pub struct ProjectCreate {
     pub pattern_file_id: Option<i64>,
     pub status: Option<String>,
     pub notes: Option<String>,
+    pub order_number: Option<String>,
+    pub customer: Option<String>,
+    pub priority: Option<String>,
+    pub deadline: Option<String>,
+    pub responsible_person: Option<String>,
+    pub approval_status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -20,16 +26,44 @@ pub struct ProjectUpdate {
     pub name: Option<String>,
     pub status: Option<String>,
     pub notes: Option<String>,
+    pub order_number: Option<String>,
+    pub customer: Option<String>,
+    pub priority: Option<String>,
+    pub deadline: Option<String>,
+    pub responsible_person: Option<String>,
+    pub approval_status: Option<String>,
 }
 
 const VALID_STATUSES: &[&str] = &[
     "not_started", "planned", "in_progress", "completed", "archived",
 ];
 
+const VALID_PRIORITIES: &[&str] = &["low", "normal", "high", "urgent"];
+
+const VALID_APPROVAL_STATUSES: &[&str] = &["draft", "pending", "approved", "rejected"];
+
 fn validate_status(status: &str) -> Result<(), AppError> {
     if !VALID_STATUSES.contains(&status) {
         return Err(AppError::Validation(format!(
             "Ungueltiger Projektstatus: {status}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_priority(priority: &str) -> Result<(), AppError> {
+    if !VALID_PRIORITIES.contains(&priority) {
+        return Err(AppError::Validation(format!(
+            "Ungueltige Prioritaet: {priority}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_approval_status(status: &str) -> Result<(), AppError> {
+    if !VALID_APPROVAL_STATUSES.contains(&status) {
+        return Err(AppError::Validation(format!(
+            "Ungueltiger Genehmigungsstatus: {status}"
         )));
     }
     Ok(())
@@ -47,15 +81,23 @@ pub fn create_project(
     let status = project.status.as_deref().unwrap_or("not_started");
     validate_status(status)?;
 
+    let priority = project.priority.as_deref().unwrap_or("normal");
+    validate_priority(priority)?;
+    let approval = project.approval_status.as_deref().unwrap_or("draft");
+    validate_approval_status(approval)?;
+
     let conn = lock_db(&db)?;
     conn.execute(
-        "INSERT INTO projects (name, pattern_file_id, status, notes) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![name, project.pattern_file_id, status, project.notes],
+        "INSERT INTO projects (name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![name, project.pattern_file_id, status, project.notes,
+            project.order_number, project.customer, priority, project.deadline,
+            project.responsible_person, approval],
     )?;
     let id = conn.last_insert_rowid();
 
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [id],
         row_to_project,
     ).map_err(AppError::Database)
@@ -68,7 +110,7 @@ pub fn get_projects(
     pattern_file_id: Option<i64>,
 ) -> Result<Vec<Project>, AppError> {
     let conn = lock_db(&db)?;
-    let mut sql = "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects".to_string();
+    let mut sql = "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, created_at, updated_at FROM projects".to_string();
     let mut conditions: Vec<String> = vec!["deleted_at IS NULL".to_string()];
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -102,7 +144,7 @@ pub fn get_project(
 ) -> Result<Project, AppError> {
     let conn = lock_db(&db)?;
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
         row_to_project,
     ).map_err(|e| match e {
@@ -139,11 +181,17 @@ pub fn update_project(
         params.push(Box::new(notes.clone()));
         sets.push(format!("notes = ?{}", params.len()));
     }
+    if let Some(v) = &update.order_number { params.push(Box::new(v.clone())); sets.push(format!("order_number = ?{}", params.len())); }
+    if let Some(v) = &update.customer { params.push(Box::new(v.clone())); sets.push(format!("customer = ?{}", params.len())); }
+    if let Some(v) = &update.priority { validate_priority(v)?; params.push(Box::new(v.clone())); sets.push(format!("priority = ?{}", params.len())); }
+    if let Some(v) = &update.deadline { params.push(Box::new(v.clone())); sets.push(format!("deadline = ?{}", params.len())); }
+    if let Some(v) = &update.responsible_person { params.push(Box::new(v.clone())); sets.push(format!("responsible_person = ?{}", params.len())); }
+    if let Some(v) = &update.approval_status { validate_approval_status(v)?; params.push(Box::new(v.clone())); sets.push(format!("approval_status = ?{}", params.len())); }
 
     if sets.is_empty() {
         // No changes — return current state
         return conn.query_row(
-            "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
             [project_id],
             row_to_project,
         ).map_err(|e| match e {
@@ -167,7 +215,7 @@ pub fn update_project(
     }
 
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
         row_to_project,
     ).map_err(AppError::Database)
@@ -196,7 +244,7 @@ pub fn duplicate_project(
 
     // Load source project
     let source = conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
         row_to_project,
     ).map_err(|e| match e {
@@ -206,10 +254,13 @@ pub fn duplicate_project(
 
     let name = new_name.unwrap_or_else(|| format!("{} (Kopie)", source.name));
 
-    // Create new project with same pattern reference
+    // Create new project with same pattern reference and manufacturing fields
     conn.execute(
-        "INSERT INTO projects (name, pattern_file_id, status, notes) VALUES (?1, ?2, 'not_started', ?3)",
-        rusqlite::params![name, source.pattern_file_id, source.notes],
+        "INSERT INTO projects (name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status) \
+         VALUES (?1, ?2, 'not_started', ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![name, source.pattern_file_id, source.notes,
+            source.order_number, source.customer, source.priority,
+            source.deadline, source.responsible_person, source.approval_status],
     )?;
     let new_id = conn.last_insert_rowid();
 
@@ -221,7 +272,7 @@ pub fn duplicate_project(
     )?;
 
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [new_id],
         row_to_project,
     ).map_err(AppError::Database)
@@ -415,8 +466,14 @@ fn row_to_project(row: &rusqlite::Row) -> rusqlite::Result<Project> {
         pattern_file_id: row.get(2)?,
         status: row.get(3)?,
         notes: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        order_number: row.get(5)?,
+        customer: row.get(6)?,
+        priority: row.get(7)?,
+        deadline: row.get(8)?,
+        responsible_person: row.get(9)?,
+        approval_status: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 

@@ -686,7 +686,7 @@ pub async fn generate_pdf_report(
 
     // Save to temp directory
     let temp_dir = std::env::temp_dir();
-    let filename = format!("stichman_report_{}.pdf", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+    let filename = format!("stitchmanager_report_{}.pdf", chrono::Local::now().format("%Y%m%d_%H%M%S"));
     let path = temp_dir.join(&filename);
     std::fs::write(&path, &pdf_bytes)?;
 

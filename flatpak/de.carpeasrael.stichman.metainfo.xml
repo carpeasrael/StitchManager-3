@@ -2,7 +2,7 @@
 <!-- Copyright 2026 carpeasrael -->
 <component type="desktop-application">
   <id>de.carpeasrael.stichman</id>
-  <name>StichMan</name>
+  <name>Stitch Manager</name>
   <summary>Manage, convert, and organize embroidery files</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
@@ -13,7 +13,7 @@
 
   <description>
     <p>
-      StichMan is a desktop application for managing embroidery machine files
+      Stitch Manager is a desktop application for managing embroidery machine files
       (Stickdateien-Verwaltung). It natively parses PES, DST, JEF, and VP3
       formats and provides a unified workspace for organizing, converting,
       and analyzing your embroidery design library.

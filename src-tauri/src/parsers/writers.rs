@@ -46,7 +46,7 @@ pub fn write_dst(segments: &[StitchSegment], output_path: &Path) -> Result<(), A
     let minus_y = ((-min_y).max(0.0) * 10.0) as i64;
 
     // DST header layout: label at field start, value follows (see dst.rs constants)
-    write_header_field(&mut header, 0, &format!("LA:StichMan          \r"));
+    write_header_field(&mut header, 0, &format!("LA:Stitch Manager    \r"));
     write_header_field(&mut header, 20, &format!("ST:{stitch_count:7}\r"));
     write_header_field(&mut header, 31, &format!("CO:{color_count:3}\r"));
     write_header_field(&mut header, 39, &format!("+X:{plus_x:5}\r"));
@@ -127,7 +127,7 @@ pub fn write_pes(segments: &[StitchSegment], output_path: &Path) -> Result<(), A
     let pec_start = output.len();
 
     // Label (19 bytes, space-padded) + CR
-    let label = b"StichMan Export    ";
+    let label = b"Stitch Manager Exp ";
     output.extend_from_slice(&label[..19]);
     output.push(0x0D); // CR — total 20 bytes
 

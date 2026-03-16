@@ -27,7 +27,7 @@ pub async fn create_backup(
     std::fs::create_dir_all(&backup_dir)?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let zip_name = format!("stichman_backup_{timestamp}.zip");
+    let zip_name = format!("stitchmanager_backup_{timestamp}.zip");
     let zip_path = backup_dir.join(&zip_name);
 
     // Create a temporary copy of the DB to avoid locking issues

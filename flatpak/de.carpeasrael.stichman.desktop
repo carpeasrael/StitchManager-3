@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=StichMan
+Name=Stitch Manager
 GenericName=Embroidery File Manager
 Comment=Manage, convert, and organize embroidery files (Stickdateien-Verwaltung)
 Exec=stichman %u
@@ -9,5 +9,5 @@ Type=Application
 Categories=Graphics;Utility;
 Keywords=embroidery;stitch;PES;DST;JEF;VP3;Stickdatei;sewing;
 MimeType=application/x-pes;application/x-dst;application/x-jef;application/x-vp3;
-StartupWMClass=StichMan
+StartupWMClass=Stitch Manager
 StartupNotify=true

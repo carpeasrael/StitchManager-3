@@ -8,6 +8,12 @@ export async function createProject(project: {
   patternFileId?: number | null;
   status?: string;
   notes?: string;
+  orderNumber?: string;
+  customer?: string;
+  priority?: string;
+  deadline?: string;
+  responsiblePerson?: string;
+  approvalStatus?: string;
 }): Promise<Project> {
   return invoke("create_project", { project });
 }
@@ -28,7 +34,17 @@ export async function getProject(projectId: number): Promise<Project> {
 
 export async function updateProject(
   projectId: number,
-  update: { name?: string; status?: string; notes?: string }
+  update: {
+    name?: string;
+    status?: string;
+    notes?: string;
+    orderNumber?: string;
+    customer?: string;
+    priority?: string;
+    deadline?: string;
+    responsiblePerson?: string;
+    approvalStatus?: string;
+  }
 ): Promise<Project> {
   return invoke("update_project", { projectId, update });
 }

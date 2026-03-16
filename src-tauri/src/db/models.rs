@@ -223,6 +223,12 @@ pub struct Project {
     pub pattern_file_id: Option<i64>,
     pub status: String,
     pub notes: Option<String>,
+    pub order_number: Option<String>,
+    pub customer: Option<String>,
+    pub priority: Option<String>,
+    pub deadline: Option<String>,
+    pub responsible_person: Option<String>,
+    pub approval_status: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -243,6 +249,85 @@ pub struct Collection {
     pub name: String,
     pub description: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Supplier {
+    pub id: i64,
+    pub name: String,
+    pub contact: Option<String>,
+    pub website: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Material {
+    pub id: i64,
+    pub material_number: Option<String>,
+    pub name: String,
+    pub material_type: Option<String>,
+    pub unit: Option<String>,
+    pub supplier_id: Option<i64>,
+    pub net_price: Option<f64>,
+    pub waste_factor: Option<f64>,
+    pub min_stock: Option<f64>,
+    pub reorder_time_days: Option<i32>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialInventory {
+    pub id: i64,
+    pub material_id: i64,
+    pub total_stock: f64,
+    pub reserved_stock: f64,
+    pub location: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Product {
+    pub id: i64,
+    pub product_number: Option<String>,
+    pub name: String,
+    pub category: Option<String>,
+    pub description: Option<String>,
+    pub product_type: Option<String>,
+    pub status: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BillOfMaterial {
+    pub id: i64,
+    pub product_id: i64,
+    pub material_id: i64,
+    pub quantity: f64,
+    pub unit: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeEntry {
+    pub id: i64,
+    pub project_id: i64,
+    pub step_name: String,
+    pub planned_minutes: Option<f64>,
+    pub actual_minutes: Option<f64>,
+    pub worker: Option<String>,
+    pub machine: Option<String>,
+    pub recorded_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

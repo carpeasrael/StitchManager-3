@@ -287,6 +287,12 @@ export interface Project {
   patternFileId: number | null;
   status: string;
   notes: string | null;
+  orderNumber: string | null;
+  customer: string | null;
+  priority: string | null;
+  deadline: string | null;
+  responsiblePerson: string | null;
+  approvalStatus: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -303,6 +309,73 @@ export interface Collection {
   name: string;
   description: string | null;
   createdAt: string;
+}
+
+export interface Supplier {
+  id: number;
+  name: string;
+  contact: string | null;
+  website: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Material {
+  id: number;
+  materialNumber: string | null;
+  name: string;
+  materialType: string | null;
+  unit: string | null;
+  supplierId: number | null;
+  netPrice: number | null;
+  wasteFactor: number | null;
+  minStock: number | null;
+  reorderTimeDays: number | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaterialInventory {
+  id: number;
+  materialId: number;
+  totalStock: number;
+  reservedStock: number;
+  location: string | null;
+  updatedAt: string;
+}
+
+export interface Product {
+  id: number;
+  productNumber: string | null;
+  name: string;
+  category: string | null;
+  description: string | null;
+  productType: string | null;
+  status: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillOfMaterial {
+  id: number;
+  productId: number;
+  materialId: number;
+  quantity: number;
+  unit: string | null;
+  notes: string | null;
+}
+
+export interface TimeEntry {
+  id: number;
+  projectId: number;
+  stepName: string;
+  plannedMinutes: number | null;
+  actualMinutes: number | null;
+  worker: string | null;
+  machine: string | null;
+  recordedAt: string;
 }
 
 export interface PrinterInfo {

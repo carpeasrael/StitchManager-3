@@ -13,6 +13,7 @@ pub mod thread_colors;
 pub mod transfer;
 pub mod print;
 pub mod projects;
+pub mod manufacturing;
 pub mod versions;
 pub mod viewer;
 

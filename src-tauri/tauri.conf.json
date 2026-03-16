@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicoverbruggen/tauri-v2-schema/main/tauri.conf.json",
-  "productName": "StichMan",
+  "productName": "Stitch Manager",
   "version": "26.4.1",
   "identifier": "de.carpeasrael.stichman",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "StichMan",
+        "title": "Stitch Manager",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
