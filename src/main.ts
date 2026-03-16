@@ -450,14 +450,13 @@ function initEventHandlers(): () => void {
           ToastContainer.show("info", "Sammlung ist leer");
           return;
         }
-        // Filter the current file list to show only collection files
-        const allFiles = appState.get("files");
-        const filtered = allFiles.filter((f) => fileIds.includes(f.id));
-        if (filtered.length > 0) {
-          appState.set("selectedFolderId", null);
-          appState.set("files", filtered);
-          ToastContainer.show("info", `${filtered.length} Dateien in Sammlung`);
-        }
+        // Fetch full file objects from backend (not in-memory filter)
+        const files = await FileService.getFilesByIds(fileIds);
+        appState.set("selectedFileId", null);
+        appState.set("selectedFileIds", []);
+        appState.set("selectedFolderId", null);
+        appState.set("files", files);
+        ToastContainer.show("info", `${files.length} Dateien in Sammlung`);
       } catch (e) {
         console.warn("Failed to load collection files:", e);
       }

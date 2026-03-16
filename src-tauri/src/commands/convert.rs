@@ -73,7 +73,7 @@ fn convert_file_inner(
         let desc = format!("Konvertierung nach {target_format}");
         let _ = super::versions::create_version_snapshot(&conn, file_id, "convert", Some(&desc));
         conn.query_row(
-            "SELECT filepath FROM embroidery_files WHERE id = ?1",
+            "SELECT filepath FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
             [file_id],
             |row| row.get(0),
         ).map_err(|e| match e {

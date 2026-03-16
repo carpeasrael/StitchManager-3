@@ -245,7 +245,7 @@ pub fn relink_file(
     }
     let conn = lock_db(&db)?;
     let changes = conn.execute(
-        "UPDATE embroidery_files SET filepath = ?1, updated_at = datetime('now') WHERE id = ?2",
+        "UPDATE embroidery_files SET filepath = ?1, updated_at = datetime('now') WHERE id = ?2 AND deleted_at IS NULL",
         rusqlite::params![new_path, file_id],
     )?;
     if changes == 0 {
@@ -264,7 +264,7 @@ pub fn relink_batch(
     super::validate_no_traversal(&new_prefix)?;
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT id, filepath FROM embroidery_files WHERE filepath LIKE ?1"
+        "SELECT id, filepath FROM embroidery_files WHERE filepath LIKE ?1 AND deleted_at IS NULL"
     )?;
     let like_pattern = format!("{}%", old_prefix);
     let files: Vec<(i64, String)> = stmt
@@ -279,7 +279,7 @@ pub fn relink_batch(
         let new_path = old_path.replacen(&old_prefix, &new_prefix, 1);
         if Path::new(&new_path).exists() {
             conn.execute(
-                "UPDATE embroidery_files SET filepath = ?1, updated_at = datetime('now') WHERE id = ?2",
+                "UPDATE embroidery_files SET filepath = ?1, updated_at = datetime('now') WHERE id = ?2 AND deleted_at IS NULL",
                 rusqlite::params![new_path, id],
             )?;
             count += 1;
@@ -566,7 +566,7 @@ pub fn import_metadata_json(
         if let Some(uid) = unique_id {
             // Try to merge by unique_id
             let existing: Option<i64> = conn.query_row(
-                "SELECT id FROM embroidery_files WHERE unique_id = ?1",
+                "SELECT id FROM embroidery_files WHERE unique_id = ?1 AND deleted_at IS NULL",
                 [uid],
                 |row| row.get(0),
             ).ok();
@@ -719,7 +719,7 @@ pub fn import_library(
         // Skip if already exists by unique_id
         if let Some(uid) = unique_id {
             let exists: bool = conn.query_row(
-                "SELECT COUNT(*) > 0 FROM embroidery_files WHERE unique_id = ?1",
+                "SELECT COUNT(*) > 0 FROM embroidery_files WHERE unique_id = ?1 AND deleted_at IS NULL",
                 [uid],
                 |row| row.get(0),
             ).unwrap_or(false);

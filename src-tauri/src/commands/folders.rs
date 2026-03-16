@@ -166,7 +166,7 @@ pub fn get_folder_file_count(
     let conn = lock_db(&db)?;
 
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1",
+        "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1 AND deleted_at IS NULL",
         [folder_id],
         |row| row.get(0),
     )?;
@@ -181,7 +181,7 @@ pub fn get_all_folder_file_counts(
     let conn = lock_db(&db)?;
 
     let mut stmt = conn.prepare(
-        "SELECT folder_id, COUNT(*) FROM embroidery_files GROUP BY folder_id",
+        "SELECT folder_id, COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL GROUP BY folder_id",
     )?;
     let counts = stmt
         .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
@@ -231,7 +231,7 @@ mod tests {
         // File count (should be 0)
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1",
+                "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1 AND deleted_at IS NULL",
                 [id],
                 |row| row.get(0),
             )
@@ -358,7 +358,7 @@ mod tests {
         // Files should be cascade-deleted
         let file_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1",
+                "SELECT COUNT(*) FROM embroidery_files WHERE folder_id = ?1 AND deleted_at IS NULL",
                 [folder_id],
                 |row| row.get(0),
             )

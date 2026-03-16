@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::{DbState, ThumbnailState};
 use crate::db::models::{EmbroideryFile, FileAttachment, FileFormat, FileThreadColor, FileUpdate, PaginatedFiles, SearchParams, Tag};
-use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, row_to_file};
+use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, FILE_SELECT_LIVE_BY_ID, row_to_file};
 use crate::error::{lock_db, AppError};
 
 /// Escape SQL LIKE wildcard characters in user input.
@@ -325,6 +325,28 @@ pub fn get_files(
 }
 
 #[tauri::command]
+pub fn get_files_by_ids(
+    db: State<'_, DbState>,
+    file_ids: Vec<i64>,
+) -> Result<Vec<EmbroideryFile>, AppError> {
+    if file_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conn = lock_db(&db)?;
+    let placeholders: Vec<String> = file_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+    let sql = format!(
+        "{FILE_SELECT} WHERE id IN ({}) AND deleted_at IS NULL",
+        placeholders.join(",")
+    );
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = file_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let files = stmt
+        .query_map(param_refs.as_slice(), |row| row_to_file(row))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(files)
+}
+
+#[tauri::command]
 pub fn get_files_paginated(
     db: State<'_, DbState>,
     folder_id: Option<i64>,
@@ -396,7 +418,7 @@ pub fn get_thumbnails_batch(
         let conn = lock_db(&db)?;
         let placeholders: Vec<String> = file_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
         let sql = format!(
-            "SELECT id, thumbnail_path, filepath FROM embroidery_files WHERE id IN ({})",
+            "SELECT id, thumbnail_path, filepath FROM embroidery_files WHERE id IN ({}) AND deleted_at IS NULL",
             placeholders.join(",")
         );
         let param_refs: Vec<&dyn rusqlite::types::ToSql> = file_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
@@ -497,7 +519,7 @@ pub fn toggle_favorite(
 ) -> Result<bool, AppError> {
     let conn = lock_db(&db)?;
     let current: bool = conn.query_row(
-        "SELECT is_favorite FROM embroidery_files WHERE id = ?1",
+        "SELECT is_favorite FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
         [file_id],
         |row| row.get(0),
     ).map_err(|e| match e {
@@ -506,7 +528,7 @@ pub fn toggle_favorite(
     })?;
     let new_val = !current;
     conn.execute(
-        "UPDATE embroidery_files SET is_favorite = ?2 WHERE id = ?1",
+        "UPDATE embroidery_files SET is_favorite = ?2 WHERE id = ?1 AND deleted_at IS NULL",
         rusqlite::params![file_id, new_val],
     )?;
     Ok(new_val)
@@ -548,7 +570,7 @@ pub fn get_file(
     let conn = lock_db(&db)?;
 
     conn.query_row(
-        &format!("{FILE_SELECT} WHERE id = ?1"),
+        &format!("{FILE_SELECT_LIVE_BY_ID}"),
         [file_id],
         |row| row_to_file(row),
     )
@@ -740,7 +762,7 @@ pub fn update_file(
     set_clauses.push(format!("updated_at = datetime('now')"));
 
     let sql = format!(
-        "UPDATE embroidery_files SET {} WHERE id = ?{idx}",
+        "UPDATE embroidery_files SET {} WHERE id = ?{idx} AND deleted_at IS NULL",
         set_clauses.join(", ")
     );
     params.push(Box::new(file_id));
@@ -755,7 +777,7 @@ pub fn update_file(
     }
 
     conn.query_row(
-        &format!("{FILE_SELECT} WHERE id = ?1"),
+        &format!("{FILE_SELECT_LIVE_BY_ID}"),
         [file_id],
         |row| row_to_file(row),
     )
@@ -769,7 +791,7 @@ pub fn delete_file(db: State<'_, DbState>, file_id: i64) -> Result<(), AppError>
     // Query thumbnail path before deleting the row
     let thumbnail_path: Option<String> = conn
         .query_row(
-            "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+            "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
             [file_id],
             |row| row.get(0),
         )
@@ -813,14 +835,14 @@ pub fn update_file_status(
     }
     let conn = lock_db(&db)?;
     let changes = conn.execute(
-        "UPDATE embroidery_files SET status = ?2, updated_at = datetime('now') WHERE id = ?1",
+        "UPDATE embroidery_files SET status = ?2, updated_at = datetime('now') WHERE id = ?1 AND deleted_at IS NULL",
         rusqlite::params![file_id, status],
     )?;
     if changes == 0 {
         return Err(AppError::NotFound(format!("Datei {file_id} nicht gefunden")));
     }
     conn.query_row(
-        &format!("{FILE_SELECT} WHERE id = ?1"),
+        &format!("{FILE_SELECT_LIVE_BY_ID}"),
         [file_id],
         |row| row_to_file(row),
     )
@@ -846,7 +868,7 @@ pub fn set_file_tags(
 
     // Verify the file exists
     let exists: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1",
+        "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
         [file_id],
         |row| row.get(0),
     )?;
@@ -946,7 +968,7 @@ pub fn get_thumbnail(
     let (thumbnail_path, filepath): (Option<String>, String) = {
         let conn = lock_db(&db)?;
         conn.query_row(
-            "SELECT thumbnail_path, filepath FROM embroidery_files WHERE id = ?1",
+            "SELECT thumbnail_path, filepath FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
             [file_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -1472,7 +1494,7 @@ mod tests {
 
         let exists: bool = conn
             .query_row(
-                "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1",
+                "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| row.get(0),
             )
@@ -1573,7 +1595,7 @@ mod tests {
         // Query thumbnail path, delete row, then clean up — mirrors the command logic
         let thumbnail_path: Option<String> = conn
             .query_row(
-                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| row.get(0),
             )
@@ -1607,7 +1629,7 @@ mod tests {
         // Should not error when thumbnail_path is NULL
         let thumbnail_path: Option<String> = conn
             .query_row(
-                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| row.get(0),
             )

@@ -28,7 +28,7 @@ pub fn create_version_snapshot(
 ) -> Result<(), AppError> {
     // Read the current file data from disk
     let filepath: String = conn.query_row(
-        "SELECT filepath FROM embroidery_files WHERE id = ?1",
+        "SELECT filepath FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
         [file_id],
         |row| row.get(0),
     ).map_err(|e| match e {
@@ -119,7 +119,7 @@ pub fn restore_version(
     let (file_data, filepath): (Vec<u8>, String) = conn.query_row(
         "SELECT fv.file_data, ef.filepath FROM file_versions fv \
          JOIN embroidery_files ef ON ef.id = fv.file_id \
-         WHERE fv.id = ?1 AND fv.file_id = ?2",
+         WHERE fv.id = ?1 AND fv.file_id = ?2 AND ef.deleted_at IS NULL",
         rusqlite::params![version_id, file_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|e| match e {

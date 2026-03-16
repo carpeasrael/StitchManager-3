@@ -34,7 +34,7 @@ export class ProjectListDialog {
     document.body.appendChild(this.overlay);
 
     this.keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") ProjectListDialog.dismiss();
+      if (e.key === "Escape") { e.stopImmediatePropagation(); ProjectListDialog.dismiss(); }
     };
     document.addEventListener("keydown", this.keyHandler);
   }

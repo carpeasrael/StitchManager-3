@@ -11,9 +11,15 @@ export function initShortcuts(): () => void {
   const handler = (e: KeyboardEvent) => {
     const mod = e.metaKey || e.ctrlKey;
 
-    // Always handle Escape regardless of focus
+    // Always handle Escape regardless of focus — but skip if a singleton dialog is open
+    // (singleton dialogs handle their own Escape via document-level keydown)
     if (e.key === "Escape") {
-      EventBus.emit("shortcut:escape");
+      const hasOverlay = document.querySelector(
+        ".document-viewer-overlay, .image-viewer-overlay, .print-preview-overlay, .project-list-overlay"
+      );
+      if (!hasOverlay) {
+        EventBus.emit("shortcut:escape");
+      }
       return;
     }
 

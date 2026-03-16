@@ -797,6 +797,7 @@ export class DocumentViewer {
 
   private onKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
+      e.stopImmediatePropagation();
       DocumentViewer.dismiss();
       return;
     }

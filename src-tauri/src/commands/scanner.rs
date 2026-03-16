@@ -6,7 +6,7 @@ use walkdir::WalkDir;
 use crate::{DbState, ThumbnailState};
 use crate::db::models::EmbroideryFile;
 use crate::db::migrations::generate_unique_id;
-use crate::db::queries::{FILE_SELECT, row_to_file};
+use crate::db::queries::{FILE_SELECT_LIVE_BY_ID, row_to_file};
 use crate::error::{lock_db, AppError};
 use crate::parsers::{self, ParsedFileInfo, StitchSegment};
 
@@ -335,7 +335,7 @@ pub fn import_files(
         let conn = lock_db(&db)?;
         for (id, _, _) in &imported_ids {
             match conn.query_row(
-                &format!("{FILE_SELECT} WHERE id = ?1"),
+                &format!("{FILE_SELECT_LIVE_BY_ID}"),
                 [id],
                 |row| row_to_file(row),
             ) {

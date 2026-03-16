@@ -22,6 +22,17 @@ pub const FILE_SELECT_ALIASED: &str =
      e.ai_analyzed, e.ai_confirmed, \
      e.created_at, e.updated_at FROM embroidery_files e";
 
+/// FILE_SELECT with a WHERE clause that filters by ID and excludes soft-deleted files.
+pub const FILE_SELECT_LIVE_BY_ID: &str =
+    "SELECT id, folder_id, filename, filepath, name, theme, description, license, \
+     width_mm, height_mm, stitch_count, color_count, file_size_bytes, thumbnail_path, \
+     design_name, jump_count, trim_count, hoop_width_mm, hoop_height_mm, \
+     category, author, keywords, comments, unique_id, is_favorite, \
+     file_type, size_range, skill_level, language, format_type, file_source, purchase_link, status, \
+     page_count, paper_size, \
+     ai_analyzed, ai_confirmed, created_at, updated_at FROM embroidery_files \
+     WHERE id = ?1 AND deleted_at IS NULL";
+
 pub fn row_to_file(row: &rusqlite::Row) -> rusqlite::Result<EmbroideryFile> {
     Ok(EmbroideryFile {
         id: row.get(0)?,

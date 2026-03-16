@@ -129,7 +129,7 @@ pub fn transfer_files(
         let mut result = Vec::new();
         for fid in &file_ids {
             match conn.query_row(
-                "SELECT filepath FROM embroidery_files WHERE id = ?1",
+                "SELECT filepath FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [fid],
                 |row| row.get::<_, String>(0),
             ) {

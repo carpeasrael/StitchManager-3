@@ -277,6 +277,7 @@ export class ImageViewerDialog {
 
   private onKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
+      e.stopImmediatePropagation();
       ImageViewerDialog.dismiss();
     } else if (e.key === "ArrowLeft") {
       this.prev();

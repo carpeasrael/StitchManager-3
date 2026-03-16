@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::db::models::EmbroideryFile;
-use crate::db::queries::{FILE_SELECT, row_to_file};
+use crate::db::queries::{FILE_SELECT_LIVE_BY_ID, row_to_file};
 use crate::error::{lock_db, AppError};
 use crate::DbState;
 
@@ -127,7 +127,7 @@ pub async fn batch_rename(
             .iter()
             .map(|id| {
                 let file = match conn.query_row(
-                    &format!("{FILE_SELECT} WHERE id = ?1"),
+                    &format!("{FILE_SELECT_LIVE_BY_ID}"),
                     [id],
                     |row| row_to_file(row),
                 ) {
@@ -304,7 +304,7 @@ pub async fn batch_organize(
             .iter()
             .map(|id| {
                 let file = match conn.query_row(
-                    &format!("{FILE_SELECT} WHERE id = ?1"),
+                    &format!("{FILE_SELECT_LIVE_BY_ID}"),
                     [id],
                     |row| row_to_file(row),
                 ) {
@@ -516,7 +516,7 @@ pub async fn batch_export_usb(
             .iter()
             .map(|id| {
                 let result = match conn.query_row(
-                    "SELECT filename, filepath FROM embroidery_files WHERE id = ?1",
+                    "SELECT filename, filepath FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                     [id],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 ) {
@@ -631,7 +631,7 @@ pub async fn generate_pdf_report(
 
         for file_id in &file_ids {
             let file = match conn.query_row(
-                &format!("{FILE_SELECT} WHERE id = ?1"),
+                &format!("{FILE_SELECT_LIVE_BY_ID}"),
                 [file_id],
                 |row| row_to_file(row),
             ) {
@@ -943,7 +943,7 @@ mod tests {
         // Simulate rename: build new name from pattern
         let file = conn
             .query_row(
-                &format!("{FILE_SELECT} WHERE id = ?1"),
+                &format!("{FILE_SELECT_LIVE_BY_ID}"),
                 [file_id],
                 |row| row_to_file(row),
             )
@@ -962,7 +962,7 @@ mod tests {
 
         let updated_name: String = conn
             .query_row(
-                "SELECT filename FROM embroidery_files WHERE id = ?1",
+                "SELECT filename FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| row.get(0),
             )

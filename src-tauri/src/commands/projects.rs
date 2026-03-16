@@ -55,7 +55,7 @@ pub fn create_project(
     let id = conn.last_insert_rowid();
 
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1",
+        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [id],
         row_to_project,
     ).map_err(AppError::Database)
@@ -143,7 +143,7 @@ pub fn update_project(
     if sets.is_empty() {
         // No changes — return current state
         return conn.query_row(
-            "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1",
+            "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
             [project_id],
             row_to_project,
         ).map_err(|e| match e {
@@ -167,7 +167,7 @@ pub fn update_project(
     }
 
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1",
+        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
         row_to_project,
     ).map_err(AppError::Database)
@@ -196,7 +196,7 @@ pub fn duplicate_project(
 
     // Load source project
     let source = conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1",
+        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
         row_to_project,
     ).map_err(|e| match e {
@@ -221,7 +221,7 @@ pub fn duplicate_project(
     )?;
 
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1",
+        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [new_id],
         row_to_project,
     ).map_err(AppError::Database)
@@ -245,7 +245,7 @@ pub fn set_project_details(
 
     // Verify project exists
     let exists: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM projects WHERE id = ?1",
+        "SELECT COUNT(*) > 0 FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
         |row| row.get(0),
     )?;

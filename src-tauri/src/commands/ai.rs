@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::db::models::{AiAnalysisResult, EmbroideryFile};
-use crate::db::queries::{FILE_SELECT, row_to_file};
+use crate::db::queries::{FILE_SELECT_LIVE_BY_ID, row_to_file};
 use crate::error::{lock_db, AppError};
 use crate::services::ai_client::{AiClient, AiConfig, AiProvider};
 use crate::DbState;
@@ -100,7 +100,7 @@ fn build_prompt_for_file(
 ) -> Result<String, AppError> {
     let file = conn
         .query_row(
-            &format!("{FILE_SELECT} WHERE id = ?1"),
+            &format!("{FILE_SELECT_LIVE_BY_ID}"),
             [file_id],
             |row| row_to_file(row),
         )
@@ -213,7 +213,7 @@ pub async fn ai_analyze_file(
 
         let thumbnail_path: Option<String> = conn
             .query_row(
-                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+                "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| row.get(0),
             )
@@ -467,7 +467,7 @@ pub fn ai_accept_result(
 
     // Return updated file
     conn.query_row(
-        &format!("{FILE_SELECT} WHERE id = ?1"),
+        &format!("{FILE_SELECT_LIVE_BY_ID}"),
         [result.file_id],
         |row| row_to_file(row),
     )
@@ -536,7 +536,7 @@ pub async fn ai_analyze_batch(
 
                 let thumbnail_path: Option<String> = conn
                     .query_row(
-                        "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1",
+                        "SELECT thumbnail_path FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                         [file_id],
                         |row| row.get(0),
                     )
@@ -671,7 +671,7 @@ mod tests {
         // Build prompt by reading directly (mimicking command logic)
         let name: Option<String> = conn
             .query_row(
-                "SELECT name FROM embroidery_files WHERE id = ?1",
+                "SELECT name FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| row.get(0),
             )
@@ -746,7 +746,7 @@ mod tests {
 
         let (name, ai_confirmed): (Option<String>, bool) = conn
             .query_row(
-                "SELECT name, ai_confirmed FROM embroidery_files WHERE id = ?1",
+                "SELECT name, ai_confirmed FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -797,7 +797,7 @@ mod tests {
 
         let (ai_analyzed, ai_confirmed): (bool, bool) = conn
             .query_row(
-                "SELECT ai_analyzed, ai_confirmed FROM embroidery_files WHERE id = ?1",
+                "SELECT ai_analyzed, ai_confirmed FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
                 [file_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )

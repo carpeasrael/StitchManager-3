@@ -36,6 +36,12 @@ export async function getFiles(
   });
 }
 
+export async function getFilesByIds(
+  fileIds: number[]
+): Promise<EmbroideryFile[]> {
+  return invoke("get_files_by_ids", { fileIds });
+}
+
 export async function getFilesPaginated(
   folderId?: number | null,
   search?: string | null,

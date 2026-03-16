@@ -138,7 +138,7 @@ export class PrintPreviewDialog {
     this.detectLargeFormat();
 
     this.keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") PrintPreviewDialog.dismiss();
+      if (e.key === "Escape") { e.stopImmediatePropagation(); PrintPreviewDialog.dismiss(); }
     };
     document.addEventListener("keydown", this.keyHandler);
 
