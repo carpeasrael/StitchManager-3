@@ -8,6 +8,8 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { ToastContainer } from "./Toast";
 import { TagInput } from "./TagInput";
 import { ImagePreviewDialog } from "./ImagePreviewDialog";
+import * as ProjectService from "../services/ProjectService";
+import type { Project } from "../types";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as ThreadColorService from "../services/ThreadColorService";
 import type {
@@ -299,6 +301,23 @@ export class MetadataPanel extends Component {
       });
       viewBar.appendChild(viewBtn);
       wrapper.appendChild(viewBar);
+    }
+
+    // "New project from pattern" button (sewing patterns and PDFs only)
+    if (file.fileType === "sewing_pattern" || fileExt === "pdf") {
+      const projectBar = document.createElement("div");
+      projectBar.className = "metadata-view-bar";
+      const projectBtn = document.createElement("button");
+      projectBtn.className = "metadata-project-btn";
+      projectBtn.textContent = "+ Neues Projekt";
+      projectBtn.addEventListener("click", () => {
+        EventBus.emit("project:create-from-pattern", {
+          patternFileId: file.id,
+          patternName: file.name || file.filename,
+        });
+      });
+      projectBar.appendChild(projectBtn);
+      wrapper.appendChild(projectBar);
     }
 
     // AI analyze button (always visible for analysis)
@@ -732,6 +751,9 @@ export class MetadataPanel extends Component {
 
     wrapper.appendChild(attachSection);
 
+    // Projects section — show projects linked to this file
+    this.renderProjectsSection(wrapper, file.id);
+
     // Save button
     const saveBar = document.createElement("div");
     saveBar.className = "metadata-save-bar";
@@ -865,6 +887,95 @@ export class MetadataPanel extends Component {
 
     group.appendChild(row);
     container.appendChild(group);
+  }
+
+  private renderProjectsSection(wrapper: HTMLElement, fileId: number): void {
+    // Remove existing projects section to avoid duplicates
+    const existing = wrapper.querySelector(".metadata-projects-section");
+    if (existing) existing.remove();
+
+    const section = document.createElement("div");
+    section.className = "metadata-section metadata-projects-section";
+
+    const header = document.createElement("div");
+    header.className = "metadata-section-header";
+    header.textContent = "Projekte";
+    section.appendChild(header);
+
+    const list = document.createElement("div");
+    list.className = "metadata-projects-list";
+    list.textContent = "Laden...";
+    section.appendChild(list);
+
+    wrapper.appendChild(section);
+
+    // Load projects asynchronously
+    ProjectService.getProjects(undefined, fileId).then((projects: Project[]) => {
+      list.textContent = "";
+      if (projects.length === 0) {
+        list.textContent = "Keine Projekte";
+        list.className = "metadata-projects-list metadata-no-colors";
+        return;
+      }
+
+      const statusLabels: Record<string, string> = {
+        not_started: "Nicht begonnen",
+        planned: "Geplant",
+        in_progress: "In Arbeit",
+        completed: "Abgeschlossen",
+        archived: "Archiviert",
+      };
+
+      for (const project of projects) {
+        const item = document.createElement("div");
+        item.className = "metadata-project-item";
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "metadata-project-name";
+        nameEl.textContent = project.name;
+        item.appendChild(nameEl);
+
+        const statusEl = document.createElement("span");
+        statusEl.className = `metadata-project-status status-${project.status}`;
+        statusEl.textContent = statusLabels[project.status] || project.status;
+        item.appendChild(statusEl);
+
+        const dupBtn = document.createElement("button");
+        dupBtn.className = "metadata-attachment-view";
+        dupBtn.textContent = "Duplizieren";
+        dupBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await ProjectService.duplicateProject(project.id);
+            ToastContainer.show("success", "Projekt dupliziert");
+            this.renderProjectsSection(wrapper, fileId);
+          } catch {
+            ToastContainer.show("error", "Duplizierung fehlgeschlagen");
+          }
+        });
+        item.appendChild(dupBtn);
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "metadata-attachment-delete";
+        delBtn.textContent = "\u00D7";
+        delBtn.title = "Projekt loeschen";
+        delBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Projekt "${project.name}" wirklich loeschen?`)) return;
+          try {
+            await ProjectService.deleteProject(project.id);
+            this.renderProjectsSection(wrapper, fileId);
+          } catch {
+            ToastContainer.show("error", "Loeschen fehlgeschlagen");
+          }
+        });
+        item.appendChild(delBtn);
+
+        list.appendChild(item);
+      }
+    }).catch(() => {
+      list.textContent = "Projekte konnten nicht geladen werden";
+    });
   }
 
   private async save(): Promise<void> {

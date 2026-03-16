@@ -215,6 +215,36 @@ pub struct InstructionNote {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: i64,
+    pub name: String,
+    pub pattern_file_id: Option<i64>,
+    pub status: String,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDetail {
+    pub id: i64,
+    pub project_id: i64,
+    pub key: String,
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchParams {

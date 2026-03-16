@@ -1256,6 +1256,79 @@
   color: #fff;
 }
 
+.metadata-project-btn {
+  width: 100%;
+  padding: var(--spacing-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+}
+
+.metadata-project-btn:hover {
+  background: var(--color-accent-10);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.metadata-project-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1);
+  border-radius: var(--radius-input);
+}
+
+.metadata-project-item:hover {
+  background: var(--color-accent-10);
+}
+
+.metadata-project-name {
+  flex: 1;
+  font-size: var(--font-size-caption);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metadata-project-status {
+  font-size: 10px;
+  padding: 1px var(--spacing-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-border-light);
+  color: var(--color-muted);
+  flex-shrink: 0;
+}
+
+.metadata-project-status.status-in_progress {
+  background: var(--color-accent-10);
+  color: var(--color-accent);
+}
+
+.metadata-project-status.status-completed {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.metadata-projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.sidebar-collections {
+  margin-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border-light);
+  padding-top: var(--spacing-2);
+}
+
+.collection-item {
+  font-style: italic;
+}
+
 .metadata-attachment-view {
   background: none;
   border: 1px solid var(--color-border);
@@ -3356,6 +3429,124 @@ a:focus:not(:focus-visible),
 
 .pp-print-btn:hover {
   background: var(--color-accent-strong);
+}
+
+/* ===== Project List Dialog ===== */
+
+.project-list-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 115;
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.project-list-dialog {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.pl-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pl-title {
+  font-size: var(--font-size-heading);
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.pl-dashboard {
+  display: flex;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-wrap: wrap;
+}
+
+.pl-status-badge {
+  font-size: var(--font-size-caption);
+  padding: 2px var(--spacing-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-border-light);
+  color: var(--color-muted);
+}
+
+.pl-status-badge.status-in_progress {
+  background: var(--color-accent-10);
+  color: var(--color-accent);
+}
+
+.pl-status-badge.status-completed {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.pl-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.pl-list-pane {
+  width: 300px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border-light);
+  padding: var(--spacing-2);
+}
+
+.pl-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  border-radius: var(--radius-card);
+  cursor: pointer;
+}
+
+.pl-item:hover {
+  background: var(--color-accent-10);
+}
+
+.pl-item.selected {
+  background: var(--color-accent-10);
+  border: 1px solid var(--color-accent);
+}
+
+.pl-item-name {
+  flex: 1;
+  font-size: var(--font-size-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pl-detail-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-4);
+  color: var(--color-muted);
+}
+
+.pl-field {
+  margin-bottom: var(--spacing-3);
+}
+
+.pl-actions {
+  display: flex;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-4);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border-light);
 }
 
 .pp-tile-info {

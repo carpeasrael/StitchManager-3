@@ -276,6 +276,30 @@ export interface ViewerOpenEvent {
   fileName: string;
 }
 
+export interface Project {
+  id: number;
+  name: string;
+  patternFileId: number | null;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectDetail {
+  id: number;
+  projectId: number;
+  key: string;
+  value: string | null;
+}
+
+export interface Collection {
+  id: number;
+  name: string;
+  description: string | null;
+  createdAt: string;
+}
+
 export interface PrinterInfo {
   name: string;
   displayName: string;

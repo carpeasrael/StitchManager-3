@@ -3,9 +3,12 @@ import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import * as FolderService from "../services/FolderService";
+import * as ProjectService from "../services/ProjectService";
+import type { Collection } from "../types";
 
 export class Sidebar extends Component {
   private folderCounts = new Map<number, number>();
+  private collections: Collection[] = [];
 
   constructor(container: HTMLElement) {
     super(container);
@@ -16,6 +19,7 @@ export class Sidebar extends Component {
       appState.on("selectedFolderId", () => this.render())
     );
     this.loadFolders();
+    this.loadCollections();
   }
 
   private async loadFolders(): Promise<void> {
@@ -147,6 +151,90 @@ export class Sidebar extends Component {
     }
 
     this.el.appendChild(list);
+
+    // Collections section
+    this.renderCollections();
+  }
+
+  private async loadCollections(): Promise<void> {
+    try {
+      this.collections = await ProjectService.getCollections();
+      this.render();
+    } catch {
+      // Silently continue without collections
+    }
+  }
+
+  private renderCollections(): void {
+    const section = document.createElement("div");
+    section.className = "sidebar-collections";
+
+    const header = document.createElement("div");
+    header.className = "sidebar-header";
+
+    const title = document.createElement("span");
+    title.className = "sidebar-title";
+    title.textContent = "Sammlungen";
+    header.appendChild(title);
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "sidebar-add-btn";
+    addBtn.textContent = "+";
+    addBtn.title = "Neue Sammlung";
+    addBtn.setAttribute("aria-label", "Neue Sammlung");
+    addBtn.addEventListener("click", async () => {
+      const name = prompt("Sammlungsname:");
+      if (!name?.trim()) return;
+      try {
+        await ProjectService.createCollection(name.trim());
+        await this.loadCollections();
+      } catch {
+        ToastContainer.show("error", "Sammlung konnte nicht erstellt werden");
+      }
+    });
+    header.appendChild(addBtn);
+    section.appendChild(header);
+
+    if (this.collections.length > 0) {
+      const list = document.createElement("ul");
+      list.className = "folder-list";
+
+      for (const col of this.collections) {
+        const li = document.createElement("li");
+        li.className = "folder-item collection-item";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "folder-name";
+        nameSpan.textContent = col.name;
+        li.appendChild(nameSpan);
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "folder-delete-btn";
+        delBtn.textContent = "\u00D7";
+        delBtn.title = "Sammlung loeschen";
+        delBtn.setAttribute("aria-label", `Sammlung ${col.name} loeschen`);
+        delBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await ProjectService.deleteCollection(col.id);
+            await this.loadCollections();
+          } catch {
+            ToastContainer.show("error", "Sammlung konnte nicht geloescht werden");
+          }
+        });
+        li.appendChild(delBtn);
+
+        li.addEventListener("click", () => {
+          EventBus.emit("collection:selected", { collectionId: col.id, collectionName: col.name });
+        });
+
+        list.appendChild(li);
+      }
+
+      section.appendChild(list);
+    }
+
+    this.el.appendChild(section);
   }
 
   private deleteFolder(folderId: number): void {

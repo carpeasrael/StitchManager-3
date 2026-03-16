@@ -20,6 +20,8 @@ import { EditDialog } from "./components/EditDialog";
 import { DocumentViewer } from "./components/DocumentViewer";
 import { ImageViewerDialog } from "./components/ImageViewerDialog";
 import { PrintPreviewDialog } from "./components/PrintPreviewDialog";
+import * as ProjectService from "./services/ProjectService";
+import { ProjectListDialog } from "./components/ProjectListDialog";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -357,6 +359,45 @@ function initEventHandlers(): () => void {
         return;
       }
       await PrintPreviewDialog.open(file.filepath, fileId, file.name || file.filename);
+    }),
+
+    EventBus.on("toolbar:show-projects", () => {
+      ProjectListDialog.open();
+    }),
+
+    EventBus.on("collection:selected", async (data) => {
+      const { collectionId } = data as { collectionId: number; collectionName: string };
+      try {
+        const fileIds = await ProjectService.getCollectionFiles(collectionId);
+        if (fileIds.length === 0) {
+          ToastContainer.show("info", "Sammlung ist leer");
+          return;
+        }
+        // Filter the current file list to show only collection files
+        const allFiles = appState.get("files");
+        const filtered = allFiles.filter((f) => fileIds.includes(f.id));
+        if (filtered.length > 0) {
+          appState.set("selectedFolderId", null);
+          appState.set("files", filtered);
+          ToastContainer.show("info", `${filtered.length} Dateien in Sammlung`);
+        }
+      } catch (e) {
+        console.warn("Failed to load collection files:", e);
+      }
+    }),
+
+    EventBus.on("project:create-from-pattern", async (data) => {
+      const { patternFileId, patternName } = data as { patternFileId: number; patternName: string };
+      try {
+        const project = await ProjectService.createProject({
+          name: `Projekt: ${patternName}`,
+          patternFileId,
+        });
+        ToastContainer.show("success", `Projekt "${project.name}" erstellt`);
+      } catch (e) {
+        console.warn("Failed to create project:", e);
+        ToastContainer.show("error", "Projekt konnte nicht erstellt werden");
+      }
     }),
 
     EventBus.on("toolbar:reveal-in-folder", () => revealSelectedFile()),

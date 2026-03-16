@@ -178,6 +178,12 @@ export class Toolbar extends Component {
         label: "System",
         items: [
           {
+            className: "menu-item-projects",
+            icon: "\uD83D\uDCCB",
+            label: "Projekte",
+            onClick: () => EventBus.emit("toolbar:show-projects"),
+          },
+          {
             className: "menu-item-print",
             icon: "\u2399",
             label: "Drucken",

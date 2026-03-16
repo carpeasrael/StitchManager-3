@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 11;
+const CURRENT_VERSION: i32 = 12;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -87,6 +87,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 11 {
         apply_v11(conn)?;
+    }
+
+    if current < 12 {
+        apply_v12(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -652,6 +656,53 @@ fn apply_v11(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v12(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS projects (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            pattern_file_id INTEGER REFERENCES embroidery_files(id) ON DELETE SET NULL,
+            status          TEXT NOT NULL DEFAULT 'not_started',
+            notes           TEXT,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_projects_pattern_file_id ON projects(pattern_file_id);
+        CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+
+        CREATE TABLE IF NOT EXISTS project_details (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            key        TEXT NOT NULL,
+            value      TEXT,
+            UNIQUE(project_id, key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_details_project_id ON project_details(project_id);
+
+        CREATE TABLE IF NOT EXISTS collections (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            description TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS collection_items (
+            collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+            file_id       INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            PRIMARY KEY (collection_id, file_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_collection_items_file_id ON collection_items(file_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (12, 'Add projects, project_details, collections, collection_items tables');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,6 +721,8 @@ mod tests {
 
         let expected = vec![
             "ai_analysis_results",
+            "collection_items",
+            "collections",
             "custom_field_definitions",
             "custom_field_values",
             "embroidery_files",
@@ -687,6 +740,8 @@ mod tests {
             "instruction_bookmarks",
             "instruction_notes",
             "machine_profiles",
+            "project_details",
+            "projects",
             "schema_version",
             "settings",
             "tags",
@@ -706,7 +761,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 11, "Schema version must be 11");
+        assert_eq!(version, 12, "Schema version must be 12");
     }
 
     #[test]
@@ -729,22 +784,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_eleven() {
+    fn test_schema_version_is_twelve() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 11",
+                "SELECT description FROM schema_version WHERE version = 12",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add instruction_bookmarks and instruction_notes tables");
+        assert_eq!(desc, "Add projects, project_details, collections, collection_items tables");
     }
 
     #[test]
