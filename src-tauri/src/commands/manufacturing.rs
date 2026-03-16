@@ -1302,6 +1302,213 @@ fn row_to_license(row: &rusqlite::Row) -> rusqlite::Result<crate::db::models::Li
     })
 }
 
+// ── Quality Inspections ────────────────────────────────────────────
+
+const VALID_INSPECTION_RESULTS: &[&str] = &["pending", "passed", "failed", "rework"];
+const VALID_DEFECT_SEVERITIES: &[&str] = &["minor", "major", "critical"];
+const VALID_DEFECT_STATUSES: &[&str] = &["open", "rework", "resolved"];
+
+#[tauri::command]
+pub fn create_inspection(
+    db: State<'_, DbState>,
+    project_id: i64,
+    workflow_step_id: Option<i64>,
+    inspector: Option<String>,
+    result: Option<String>,
+    notes: Option<String>,
+) -> Result<crate::db::models::QualityInspection, AppError> {
+    let res = result.as_deref().unwrap_or("pending");
+    if !VALID_INSPECTION_RESULTS.contains(&res) {
+        return Err(AppError::Validation(format!("Ungueltiges Pruefergebnis: {res}")));
+    }
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "INSERT INTO quality_inspections (project_id, workflow_step_id, inspector, result, notes) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![project_id, workflow_step_id, inspector, res, notes],
+    )?;
+    let id = conn.last_insert_rowid();
+    conn.query_row(
+        "SELECT id, project_id, workflow_step_id, inspector, inspection_date, result, notes, created_at FROM quality_inspections WHERE id = ?1",
+        [id], row_to_inspection,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn get_inspections(db: State<'_, DbState>, project_id: i64) -> Result<Vec<crate::db::models::QualityInspection>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, workflow_step_id, inspector, inspection_date, result, notes, created_at \
+         FROM quality_inspections WHERE project_id = ?1 ORDER BY inspection_date DESC"
+    )?;
+    let inspections = stmt.query_map([project_id], row_to_inspection)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(inspections)
+}
+
+#[tauri::command]
+pub fn update_inspection(
+    db: State<'_, DbState>,
+    inspection_id: i64,
+    result: Option<String>,
+    inspector: Option<String>,
+    notes: Option<String>,
+) -> Result<crate::db::models::QualityInspection, AppError> {
+    let conn = lock_db(&db)?;
+    let mut sets: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(r) = &result {
+        if !VALID_INSPECTION_RESULTS.contains(&r.as_str()) {
+            return Err(AppError::Validation(format!("Ungueltiges Pruefergebnis: {r}")));
+        }
+        params.push(Box::new(r.clone())); sets.push(format!("result = ?{}", params.len()));
+    }
+    if let Some(v) = &inspector { params.push(Box::new(v.clone())); sets.push(format!("inspector = ?{}", params.len())); }
+    if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
+
+    if sets.is_empty() {
+        return conn.query_row(
+            "SELECT id, project_id, workflow_step_id, inspector, inspection_date, result, notes, created_at FROM quality_inspections WHERE id = ?1",
+            [inspection_id], row_to_inspection,
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Pruefung {inspection_id} nicht gefunden")),
+            _ => AppError::Database(e),
+        });
+    }
+
+    params.push(Box::new(inspection_id));
+    let sql = format!("UPDATE quality_inspections SET {} WHERE id = ?{}", sets.join(", "), params.len());
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let changes = conn.execute(&sql, param_refs.as_slice())?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Pruefung {inspection_id} nicht gefunden"))); }
+
+    conn.query_row(
+        "SELECT id, project_id, workflow_step_id, inspector, inspection_date, result, notes, created_at FROM quality_inspections WHERE id = ?1",
+        [inspection_id], row_to_inspection,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn delete_inspection(db: State<'_, DbState>, inspection_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let changes = conn.execute("DELETE FROM quality_inspections WHERE id = ?1", [inspection_id])?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Pruefung {inspection_id} nicht gefunden"))); }
+    Ok(())
+}
+
+fn row_to_inspection(row: &rusqlite::Row) -> rusqlite::Result<crate::db::models::QualityInspection> {
+    Ok(crate::db::models::QualityInspection {
+        id: row.get(0)?, project_id: row.get(1)?, workflow_step_id: row.get(2)?,
+        inspector: row.get(3)?, inspection_date: row.get(4)?, result: row.get(5)?,
+        notes: row.get(6)?, created_at: row.get(7)?,
+    })
+}
+
+// ── Defect Records ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn create_defect(
+    db: State<'_, DbState>,
+    inspection_id: i64,
+    description: String,
+    severity: Option<String>,
+    notes: Option<String>,
+) -> Result<crate::db::models::DefectRecord, AppError> {
+    let desc = description.trim().to_string();
+    if desc.is_empty() { return Err(AppError::Validation("Fehlerbeschreibung darf nicht leer sein".into())); }
+    if let Some(s) = &severity {
+        if !VALID_DEFECT_SEVERITIES.contains(&s.as_str()) {
+            return Err(AppError::Validation(format!("Ungueltige Schwere: {s}")));
+        }
+    }
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "INSERT INTO defect_records (inspection_id, description, severity, notes) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![inspection_id, desc, severity.as_deref().unwrap_or("minor"), notes],
+    )?;
+    let id = conn.last_insert_rowid();
+    conn.query_row(
+        "SELECT id, inspection_id, description, severity, status, resolved_at, notes, created_at FROM defect_records WHERE id = ?1",
+        [id], row_to_defect,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn get_defects(db: State<'_, DbState>, inspection_id: i64) -> Result<Vec<crate::db::models::DefectRecord>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, inspection_id, description, severity, status, resolved_at, notes, created_at FROM defect_records WHERE inspection_id = ?1 ORDER BY created_at DESC"
+    )?;
+    let defects = stmt.query_map([inspection_id], row_to_defect)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(defects)
+}
+
+#[tauri::command]
+pub fn update_defect(
+    db: State<'_, DbState>,
+    defect_id: i64,
+    description: Option<String>,
+    severity: Option<String>,
+    status: Option<String>,
+    notes: Option<String>,
+) -> Result<crate::db::models::DefectRecord, AppError> {
+    let conn = lock_db(&db)?;
+    let mut sets: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(d) = &description {
+        let t = d.trim();
+        if t.is_empty() { return Err(AppError::Validation("Fehlerbeschreibung darf nicht leer sein".into())); }
+        params.push(Box::new(t.to_string())); sets.push(format!("description = ?{}", params.len()));
+    }
+    if let Some(s) = &severity {
+        if !VALID_DEFECT_SEVERITIES.contains(&s.as_str()) { return Err(AppError::Validation(format!("Ungueltige Schwere: {s}"))); }
+        params.push(Box::new(s.clone())); sets.push(format!("severity = ?{}", params.len()));
+    }
+    if let Some(s) = &status {
+        if !VALID_DEFECT_STATUSES.contains(&s.as_str()) { return Err(AppError::Validation(format!("Ungueltiger Fehlerstatus: {s}"))); }
+        params.push(Box::new(s.clone())); sets.push(format!("status = ?{}", params.len()));
+        if s == "resolved" { sets.push("resolved_at = datetime('now')".to_string()); }
+    }
+    if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
+
+    if sets.is_empty() {
+        return conn.query_row(
+            "SELECT id, inspection_id, description, severity, status, resolved_at, notes, created_at FROM defect_records WHERE id = ?1",
+            [defect_id], row_to_defect,
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Fehler {defect_id} nicht gefunden")),
+            _ => AppError::Database(e),
+        });
+    }
+
+    params.push(Box::new(defect_id));
+    let sql = format!("UPDATE defect_records SET {} WHERE id = ?{}", sets.join(", "), params.len());
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let changes = conn.execute(&sql, param_refs.as_slice())?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Fehler {defect_id} nicht gefunden"))); }
+
+    conn.query_row(
+        "SELECT id, inspection_id, description, severity, status, resolved_at, notes, created_at FROM defect_records WHERE id = ?1",
+        [defect_id], row_to_defect,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn delete_defect(db: State<'_, DbState>, defect_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let changes = conn.execute("DELETE FROM defect_records WHERE id = ?1", [defect_id])?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Fehler {defect_id} nicht gefunden"))); }
+    Ok(())
+}
+
+fn row_to_defect(row: &rusqlite::Row) -> rusqlite::Result<crate::db::models::DefectRecord> {
+    Ok(crate::db::models::DefectRecord {
+        id: row.get(0)?, inspection_id: row.get(1)?, description: row.get(2)?,
+        severity: row.get(3)?, status: row.get(4)?, resolved_at: row.get(5)?,
+        notes: row.get(6)?, created_at: row.get(7)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::db::migrations::init_database_in_memory;

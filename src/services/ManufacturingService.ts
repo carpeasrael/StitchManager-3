@@ -10,6 +10,8 @@ import type {
   ProductStep,
   WorkflowStep,
   LicenseRecord,
+  QualityInspection,
+  DefectRecord,
 } from "../types/index";
 
 // ── Suppliers ──────────────────────────────────────────────────────────────
@@ -324,4 +326,60 @@ export async function getFileLicenses(fileId: number): Promise<LicenseRecord[]> 
 
 export async function getExpiringLicenses(daysAhead?: number): Promise<LicenseRecord[]> {
   return invoke("get_expiring_licenses", { daysAhead });
+}
+
+// ── Quality Inspections ────────────────────────────────────────────
+
+export async function createInspection(
+  projectId: number,
+  workflowStepId?: number,
+  inspector?: string,
+  result?: string,
+  notes?: string
+): Promise<QualityInspection> {
+  return invoke("create_inspection", { projectId, workflowStepId, inspector, result, notes });
+}
+
+export async function getInspections(projectId: number): Promise<QualityInspection[]> {
+  return invoke("get_inspections", { projectId });
+}
+
+export async function updateInspection(
+  inspectionId: number,
+  result?: string,
+  inspector?: string,
+  notes?: string
+): Promise<QualityInspection> {
+  return invoke("update_inspection", { inspectionId, result, inspector, notes });
+}
+
+export async function deleteInspection(inspectionId: number): Promise<void> {
+  return invoke("delete_inspection", { inspectionId });
+}
+
+export async function createDefect(
+  inspectionId: number,
+  description: string,
+  severity?: string,
+  notes?: string
+): Promise<DefectRecord> {
+  return invoke("create_defect", { inspectionId, description, severity, notes });
+}
+
+export async function getDefects(inspectionId: number): Promise<DefectRecord[]> {
+  return invoke("get_defects", { inspectionId });
+}
+
+export async function updateDefect(
+  defectId: number,
+  description?: string,
+  severity?: string,
+  status?: string,
+  notes?: string
+): Promise<DefectRecord> {
+  return invoke("update_defect", { defectId, description, severity, status, notes });
+}
+
+export async function deleteDefect(defectId: number): Promise<void> {
+  return invoke("delete_defect", { defectId });
 }

@@ -4081,3 +4081,44 @@ a:focus:not(:focus-visible),
   padding: var(--spacing-1) 0;
   font-weight: 500;
 }
+
+/* ===== Report Cards ===== */
+
+.mfg-report-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+}
+
+.mfg-report-card {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-card);
+  padding: var(--spacing-3);
+  background: var(--color-surface);
+}
+
+.mfg-report-card-title {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-accent);
+  margin: 0 0 var(--spacing-2) 0;
+  padding-bottom: var(--spacing-1);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.mfg-report-row {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--spacing-1) 0;
+  font-size: var(--font-size-caption);
+}
+
+.mfg-report-label {
+  color: var(--color-text-secondary);
+}
+
+.mfg-report-value {
+  font-weight: 500;
+  color: var(--color-text);
+}

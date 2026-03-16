@@ -457,6 +457,46 @@ export interface LicenseRecord {
   updatedAt: string;
 }
 
+// Phase 3: Quality & Reporting
+
+export interface QualityInspection {
+  id: number;
+  projectId: number;
+  workflowStepId: number | null;
+  inspector: string | null;
+  inspectionDate: string;
+  result: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface DefectRecord {
+  id: number;
+  inspectionId: number;
+  description: string;
+  severity: string | null;
+  status: string | null;
+  resolvedAt: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface ProjectReport {
+  projectId: number;
+  projectName: string;
+  totalPlannedMinutes: number;
+  totalActualMinutes: number;
+  materialCost: number;
+  laborCost: number;
+  totalCost: number;
+  inspectionCount: number;
+  passCount: number;
+  failCount: number;
+  openDefects: number;
+  workflowTotal: number;
+  workflowCompleted: number;
+}
+
 export interface PrinterInfo {
   name: string;
   displayName: string;

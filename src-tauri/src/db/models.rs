@@ -432,6 +432,54 @@ pub struct LicenseRecord {
     pub updated_at: String,
 }
 
+// Phase 3: Quality Management
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityInspection {
+    pub id: i64,
+    pub project_id: i64,
+    pub workflow_step_id: Option<i64>,
+    pub inspector: Option<String>,
+    pub inspection_date: String,
+    pub result: String,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefectRecord {
+    pub id: i64,
+    pub inspection_id: i64,
+    pub description: String,
+    pub severity: Option<String>,
+    pub status: Option<String>,
+    pub resolved_at: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+// Phase 3: Reporting
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectReport {
+    pub project_id: i64,
+    pub project_name: String,
+    pub total_planned_minutes: f64,
+    pub total_actual_minutes: f64,
+    pub material_cost: f64,
+    pub labor_cost: f64,
+    pub total_cost: f64,
+    pub inspection_count: i64,
+    pub pass_count: i64,
+    pub fail_count: i64,
+    pub open_defects: i64,
+    pub workflow_total: i64,
+    pub workflow_completed: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchParams {

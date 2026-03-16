@@ -2,6 +2,7 @@ import * as MfgService from "../services/ManufacturingService";
 import { ToastContainer } from "./Toast";
 import * as ProjectService from "../services/ProjectService";
 import * as ProcService from "../services/ProcurementService";
+import * as ReportService from "../services/ReportService";
 import type {
   Supplier,
   Material,
@@ -14,9 +15,12 @@ import type {
   PurchaseOrder,
   OrderItem,
   LicenseRecord,
+  QualityInspection,
+  DefectRecord,
+  ProjectReport,
 } from "../types";
 
-type TabKey = "materials" | "suppliers" | "products" | "inventory" | "timetracking" | "workflow" | "orders" | "licenses";
+type TabKey = "materials" | "suppliers" | "products" | "inventory" | "timetracking" | "workflow" | "orders" | "licenses" | "quality" | "reports";
 
 export class ManufacturingDialog {
   private static instance: ManufacturingDialog | null = null;
@@ -57,6 +61,16 @@ export class ManufacturingDialog {
   // License state
   private licenses: LicenseRecord[] = [];
   private selectedLicense: LicenseRecord | null = null;
+
+  // Quality state
+  private qaProjectId: number | null = null;
+  private inspections: QualityInspection[] = [];
+  private selectedInspection: QualityInspection | null = null;
+  private defects: DefectRecord[] = [];
+
+  // Reports state
+  private reportProjectId: number | null = null;
+  private currentReport: ProjectReport | null = null;
 
   static async open(): Promise<void> {
     if (ManufacturingDialog.instance) ManufacturingDialog.dismiss();
@@ -156,6 +170,8 @@ export class ManufacturingDialog {
       { key: "workflow", label: "Workflow" },
       { key: "orders", label: "Bestellungen" },
       { key: "licenses", label: "Lizenzen" },
+      { key: "quality", label: "Qualitaet" },
+      { key: "reports", label: "Berichte" },
     ];
     for (const t of tabs) {
       const btn = document.createElement("button");
@@ -238,6 +254,14 @@ export class ManufacturingDialog {
       case "licenses":
         this.renderLicensesDashboard(dashboard);
         this.renderLicensesTab(content);
+        break;
+      case "quality":
+        this.renderQualityDashboard(dashboard);
+        this.renderQualityTab(content);
+        break;
+      case "reports":
+        this.renderReportsDashboard(dashboard);
+        this.renderReportsTab(content);
         break;
     }
   }
@@ -1702,6 +1726,359 @@ export class ManufacturingDialog {
       this.renderActiveTab();
       ToastContainer.show("success", "Lizenz erstellt");
     } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
+  }
+
+  // ── Quality Tab ──────────────────────────────────────────────────
+
+  private renderQualityDashboard(container: HTMLElement): void {
+    this.addBadge(container, `Pruefungen: ${this.inspections.length}`, "");
+    const failed = this.inspections.filter((i) => i.result === "failed").length;
+    if (failed > 0) this.addBadge(container, `Fehlgeschlagen: ${failed}`, "mfg-badge-warn");
+    this.addCreateBtn(container, "Pruefung", () => this.createInspection());
+  }
+
+  private renderQualityTab(container: HTMLElement): void {
+    // Project selector
+    const selectorRow = document.createElement("div");
+    selectorRow.className = "mfg-tt-selector";
+    const selectorLabel = document.createElement("label");
+    selectorLabel.className = "mfg-label";
+    selectorLabel.textContent = "Projekt:";
+    selectorRow.appendChild(selectorLabel);
+    const projectSelect = document.createElement("select");
+    projectSelect.className = "mfg-input";
+    const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt waehlen";
+    projectSelect.appendChild(emptyOpt);
+    for (const p of this.allProjects) {
+      const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
+      if (this.qaProjectId === p.id) opt.selected = true;
+      projectSelect.appendChild(opt);
+    }
+    projectSelect.addEventListener("change", async () => {
+      const id = projectSelect.value ? Number(projectSelect.value) : null;
+      this.qaProjectId = id;
+      this.selectedInspection = null;
+      this.defects = [];
+      if (id) {
+        try { this.inspections = await MfgService.getInspections(id); } catch { this.inspections = []; }
+      } else { this.inspections = []; }
+      this.renderActiveTab();
+    });
+    selectorRow.appendChild(projectSelect);
+    container.insertBefore(selectorRow, container.firstChild);
+
+    if (!this.qaProjectId) {
+      const hint = document.createElement("div");
+      hint.className = "mfg-tt-hint";
+      hint.textContent = "Projekt auswaehlen";
+      container.appendChild(hint);
+      return;
+    }
+
+    const listPane = document.createElement("div");
+    listPane.className = "mfg-list-pane";
+    this.renderInspectionList(listPane);
+    container.appendChild(listPane);
+
+    const detailPane = document.createElement("div");
+    detailPane.className = "mfg-detail-pane";
+    if (this.selectedInspection) {
+      this.renderInspectionDetail(detailPane, this.selectedInspection);
+    } else {
+      detailPane.textContent = "Pruefung auswaehlen";
+    }
+    container.appendChild(detailPane);
+  }
+
+  private renderInspectionList(container: HTMLElement): void {
+    container.innerHTML = "";
+    if (this.inspections.length === 0) { container.textContent = "Keine Pruefungen"; return; }
+    const resultLabels: Record<string, string> = { pending: "Ausstehend", passed: "Bestanden", failed: "Fehlgeschlagen", rework: "Nacharbeit" };
+    for (const insp of this.inspections) {
+      const item = document.createElement("div");
+      item.className = "mfg-item";
+      if (this.selectedInspection?.id === insp.id) item.classList.add("selected");
+      const dot = document.createElement("span");
+      dot.className = "mfg-stock-dot " + (insp.result === "passed" ? "mfg-stock-ok" : insp.result === "failed" ? "mfg-stock-low" : "mfg-stock-warn");
+      item.appendChild(dot);
+      const info = document.createElement("div");
+      info.className = "mfg-item-info";
+      const nameEl = document.createElement("span");
+      nameEl.className = "mfg-item-name";
+      nameEl.textContent = resultLabels[insp.result] || insp.result;
+      info.appendChild(nameEl);
+      const sub = document.createElement("span");
+      sub.className = "mfg-item-sub";
+      sub.textContent = (insp.inspector || "Kein Pruefer") + " - " + insp.inspectionDate.slice(0, 10);
+      info.appendChild(sub);
+      item.appendChild(info);
+      item.addEventListener("click", async () => {
+        try {
+          this.selectedInspection = insp;
+          this.defects = await MfgService.getDefects(insp.id);
+          this.renderActiveTab();
+        } catch { ToastContainer.show("error", "Fehler konnten nicht geladen werden"); }
+      });
+      container.appendChild(item);
+    }
+  }
+
+  private renderInspectionDetail(container: HTMLElement, insp: QualityInspection): void {
+    container.innerHTML = "";
+    const form = document.createElement("div");
+    form.className = "mfg-form";
+
+    this.addSelectField(form, "Ergebnis", insp.result, [
+      { value: "pending", label: "Ausstehend" }, { value: "passed", label: "Bestanden" },
+      { value: "failed", label: "Fehlgeschlagen" }, { value: "rework", label: "Nacharbeit" },
+    ], async (v) => {
+      try {
+        const updated = await MfgService.updateInspection(insp.id, v);
+        const idx = this.inspections.findIndex((x) => x.id === insp.id);
+        if (idx >= 0) this.inspections[idx] = updated;
+        this.selectedInspection = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addTextField(form, "Pruefer", insp.inspector || "", async (v) => {
+      try { await MfgService.updateInspection(insp.id, undefined, v); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addTextArea(form, "Notizen", insp.notes || "", async (v) => {
+      try { await MfgService.updateInspection(insp.id, undefined, undefined, v); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    container.appendChild(form);
+
+    // Defects section
+    const defSection = document.createElement("div");
+    defSection.className = "mfg-bom-section";
+    const defTitle = document.createElement("h4");
+    defTitle.className = "mfg-section-title";
+    defTitle.textContent = "Fehler / Maengel";
+    defSection.appendChild(defTitle);
+
+    for (const d of this.defects) {
+      const row = document.createElement("div");
+      row.className = "mfg-item";
+      const info = document.createElement("div");
+      info.className = "mfg-item-info";
+      const descEl = document.createElement("span");
+      descEl.className = "mfg-item-name";
+      descEl.textContent = d.description;
+      info.appendChild(descEl);
+      const sub = document.createElement("span");
+      sub.className = "mfg-item-sub";
+      sub.textContent = `${d.severity || "minor"} - ${d.status || "open"}`;
+      info.appendChild(sub);
+      row.appendChild(info);
+      const rmBtn = document.createElement("button");
+      rmBtn.className = "mfg-bom-remove";
+      rmBtn.textContent = "\u2716";
+      rmBtn.addEventListener("click", async () => {
+        try {
+          await MfgService.deleteDefect(d.id);
+          this.defects = await MfgService.getDefects(insp.id);
+          this.renderActiveTab();
+        } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+      });
+      row.appendChild(rmBtn);
+      defSection.appendChild(row);
+    }
+
+    // Add defect form
+    const addRow = document.createElement("div");
+    addRow.className = "mfg-bom-add";
+    const descInput = document.createElement("input");
+    descInput.type = "text"; descInput.className = "mfg-input"; descInput.placeholder = "Fehlerbeschreibung";
+    addRow.appendChild(descInput);
+    const sevSelect = document.createElement("select");
+    sevSelect.className = "mfg-input mfg-input-sm";
+    for (const s of [{ v: "minor", l: "Gering" }, { v: "major", l: "Gross" }, { v: "critical", l: "Kritisch" }]) {
+      const opt = document.createElement("option"); opt.value = s.v; opt.textContent = s.l; sevSelect.appendChild(opt);
+    }
+    addRow.appendChild(sevSelect);
+    const addBtn = document.createElement("button");
+    addBtn.className = "dialog-btn dialog-btn-primary"; addBtn.textContent = "+";
+    addBtn.addEventListener("click", async () => {
+      if (!descInput.value.trim()) { ToastContainer.show("error", "Beschreibung angeben"); return; }
+      try {
+        await MfgService.createDefect(insp.id, descInput.value.trim(), sevSelect.value);
+        this.defects = await MfgService.getDefects(insp.id);
+        descInput.value = "";
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Fehler erstellen fehlgeschlagen"); }
+    });
+    addRow.appendChild(addBtn);
+    defSection.appendChild(addRow);
+    container.appendChild(defSection);
+
+    // Actions
+    const actions = document.createElement("div");
+    actions.className = "mfg-actions";
+    const delBtn = document.createElement("button");
+    delBtn.className = "dialog-btn dialog-btn-danger";
+    delBtn.textContent = "Pruefung loeschen";
+    delBtn.addEventListener("click", async () => {
+      if (!confirm("Pruefung wirklich loeschen?")) return;
+      try {
+        await MfgService.deleteInspection(insp.id);
+        this.selectedInspection = null;
+        this.defects = [];
+        if (this.qaProjectId) this.inspections = await MfgService.getInspections(this.qaProjectId);
+        this.renderActiveTab();
+        ToastContainer.show("success", "Pruefung geloescht");
+      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+    });
+    actions.appendChild(delBtn);
+    container.appendChild(actions);
+  }
+
+  private async createInspection(): Promise<void> {
+    if (!this.qaProjectId) { ToastContainer.show("error", "Bitte zuerst ein Projekt waehlen"); return; }
+    try {
+      const insp = await MfgService.createInspection(this.qaProjectId);
+      this.inspections = await MfgService.getInspections(this.qaProjectId);
+      this.selectedInspection = this.inspections.find((x) => x.id === insp.id) || null;
+      this.renderActiveTab();
+      ToastContainer.show("success", "Pruefung erstellt");
+    } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
+  }
+
+  // ── Reports Tab ─────────────────────────────────────────────────
+
+  private renderReportsDashboard(container: HTMLElement): void {
+    if (this.currentReport) {
+      this.addBadge(container, `Kosten: ${this.currentReport.totalCost.toFixed(2)} EUR`, "");
+      const pct = this.currentReport.workflowTotal > 0
+        ? Math.round((this.currentReport.workflowCompleted / this.currentReport.workflowTotal) * 100) : 0;
+      this.addBadge(container, `Fortschritt: ${pct}%`, "");
+    }
+  }
+
+  private renderReportsTab(container: HTMLElement): void {
+    // Project selector
+    const selectorRow = document.createElement("div");
+    selectorRow.className = "mfg-tt-selector";
+    const selectorLabel = document.createElement("label");
+    selectorLabel.className = "mfg-label";
+    selectorLabel.textContent = "Projekt:";
+    selectorRow.appendChild(selectorLabel);
+    const projectSelect = document.createElement("select");
+    projectSelect.className = "mfg-input";
+    const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt waehlen";
+    projectSelect.appendChild(emptyOpt);
+    for (const p of this.allProjects) {
+      const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
+      if (this.reportProjectId === p.id) opt.selected = true;
+      projectSelect.appendChild(opt);
+    }
+    projectSelect.addEventListener("change", async () => {
+      const id = projectSelect.value ? Number(projectSelect.value) : null;
+      this.reportProjectId = id;
+      if (id) {
+        try { this.currentReport = await ReportService.getProjectReport(id); } catch { this.currentReport = null; ToastContainer.show("error", "Bericht konnte nicht geladen werden"); }
+      } else { this.currentReport = null; }
+      this.renderActiveTab();
+    });
+    selectorRow.appendChild(projectSelect);
+    container.insertBefore(selectorRow, container.firstChild);
+
+    if (!this.currentReport) {
+      const hint = document.createElement("div");
+      hint.className = "mfg-tt-hint";
+      hint.textContent = this.reportProjectId ? "Bericht wird geladen..." : "Projekt auswaehlen";
+      container.appendChild(hint);
+      return;
+    }
+
+    const r = this.currentReport;
+    container.className = "mfg-content mfg-content-single";
+
+    // Report cards
+    const cards = document.createElement("div");
+    cards.className = "mfg-report-cards";
+
+    // Time card
+    const timeCard = this.createReportCard("Zeit", [
+      { label: "Geplant", value: this.fmtHours(r.totalPlannedMinutes) },
+      { label: "Tatsaechlich", value: this.fmtHours(r.totalActualMinutes) },
+      { label: "Differenz", value: this.fmtHours(Math.abs(r.totalActualMinutes - r.totalPlannedMinutes)), cls: r.totalActualMinutes > r.totalPlannedMinutes ? "pl-tc-over" : "pl-tc-under" },
+    ]);
+    cards.appendChild(timeCard);
+
+    // Cost card
+    const costCard = this.createReportCard("Kosten", [
+      { label: "Material", value: `${r.materialCost.toFixed(2)} EUR` },
+      { label: "Arbeit", value: `${r.laborCost.toFixed(2)} EUR` },
+      { label: "Gesamt", value: `${r.totalCost.toFixed(2)} EUR` },
+    ]);
+    cards.appendChild(costCard);
+
+    // Quality card
+    const passRate = r.inspectionCount > 0 ? Math.round((r.passCount / r.inspectionCount) * 100) : 0;
+    const qualityCard = this.createReportCard("Qualitaet", [
+      { label: "Pruefungen", value: String(r.inspectionCount) },
+      { label: "Bestanden", value: `${r.passCount} (${passRate}%)` },
+      { label: "Fehlgeschlagen", value: String(r.failCount), cls: r.failCount > 0 ? "pl-tc-over" : "" },
+      { label: "Offene Fehler", value: String(r.openDefects), cls: r.openDefects > 0 ? "pl-tc-over" : "" },
+    ]);
+    cards.appendChild(qualityCard);
+
+    // Workflow card
+    const wfPct = r.workflowTotal > 0 ? Math.round((r.workflowCompleted / r.workflowTotal) * 100) : 0;
+    const wfCard = this.createReportCard("Workflow", [
+      { label: "Schritte gesamt", value: String(r.workflowTotal) },
+      { label: "Abgeschlossen", value: String(r.workflowCompleted) },
+      { label: "Fortschritt", value: `${wfPct}%` },
+    ]);
+    cards.appendChild(wfCard);
+
+    container.appendChild(cards);
+
+    // CSV export button
+    const exportRow = document.createElement("div");
+    exportRow.className = "mfg-actions";
+    const exportBtn = document.createElement("button");
+    exportBtn.className = "dialog-btn dialog-btn-primary";
+    exportBtn.textContent = "CSV Export";
+    exportBtn.addEventListener("click", async () => {
+      if (!this.reportProjectId) return;
+      try {
+        const csv = await ReportService.exportProjectCsv(this.reportProjectId);
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `projekt_${this.reportProjectId}_bericht.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        ToastContainer.show("success", "CSV exportiert");
+      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+    });
+    exportRow.appendChild(exportBtn);
+    container.appendChild(exportRow);
+  }
+
+  private createReportCard(title: string, rows: { label: string; value: string; cls?: string }[]): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "mfg-report-card";
+    const h = document.createElement("h4");
+    h.className = "mfg-report-card-title";
+    h.textContent = title;
+    card.appendChild(h);
+    for (const row of rows) {
+      const r = document.createElement("div");
+      r.className = "mfg-report-row";
+      const lbl = document.createElement("span");
+      lbl.className = "mfg-report-label";
+      lbl.textContent = row.label;
+      const val = document.createElement("span");
+      val.className = "mfg-report-value" + (row.cls ? ` ${row.cls}` : "");
+      val.textContent = row.value;
+      r.appendChild(lbl);
+      r.appendChild(val);
+      card.appendChild(r);
+    }
+    return card;
   }
 
   // ── Helpers ──────────────────────────────────────────────────────

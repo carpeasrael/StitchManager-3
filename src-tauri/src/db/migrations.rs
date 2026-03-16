@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 15;
+const CURRENT_VERSION: i32 = 16;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -103,6 +103,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 15 {
         apply_v15(conn)?;
+    }
+
+    if current < 16 {
+        apply_v16(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -960,6 +964,44 @@ fn apply_v15(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v16(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS quality_inspections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            workflow_step_id INTEGER REFERENCES workflow_steps(id) ON DELETE SET NULL,
+            inspector TEXT,
+            inspection_date TEXT NOT NULL DEFAULT (datetime('now')),
+            result TEXT NOT NULL DEFAULT 'pending',
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_quality_inspections_project_id ON quality_inspections(project_id);
+        CREATE INDEX IF NOT EXISTS idx_quality_inspections_result ON quality_inspections(result);
+
+        CREATE TABLE IF NOT EXISTS defect_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_id INTEGER NOT NULL REFERENCES quality_inspections(id) ON DELETE CASCADE,
+            description TEXT NOT NULL,
+            severity TEXT DEFAULT 'minor',
+            status TEXT DEFAULT 'open',
+            resolved_at TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_defect_records_inspection_id ON defect_records(inspection_id);
+        CREATE INDEX IF NOT EXISTS idx_defect_records_status ON defect_records(status);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (16, 'Add quality inspections and defect tracking tables');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -983,6 +1025,7 @@ mod tests {
             "collections",
             "custom_field_definitions",
             "custom_field_values",
+            "defect_records",
             "deliveries",
             "delivery_items",
             "embroidery_files",
@@ -1010,6 +1053,7 @@ mod tests {
             "project_details",
             "projects",
             "purchase_orders",
+            "quality_inspections",
             "schema_version",
             "settings",
             "step_definitions",
@@ -1033,7 +1077,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 15, "Schema version must be 15");
+        assert_eq!(version, 16, "Schema version must be 16");
     }
 
     #[test]
@@ -1056,22 +1100,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_fifteen() {
+    fn test_schema_version_is_sixteen() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 16);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 15",
+                "SELECT description FROM schema_version WHERE version = 16",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("workflow"), "v15 description should mention workflow");
+        assert!(desc.contains("quality"), "v16 description should mention quality");
     }
 
     #[test]
