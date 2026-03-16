@@ -230,7 +230,7 @@ export class FileList extends Component {
   }
 
   private createCard(
-    file: { id: number; name: string | null; filename: string; fileSizeBytes: number | null; aiAnalyzed: boolean; aiConfirmed: boolean },
+    file: { id: number; name: string | null; filename: string; fileSizeBytes: number | null; aiAnalyzed: boolean; aiConfirmed: boolean; fileType: string },
     index: number,
     selectedId: number | null,
     selectedIds: readonly number[],
@@ -275,6 +275,19 @@ export class FileList extends Component {
     nameEl.className = "file-card-name";
     nameEl.textContent = file.name || file.filename;
     info.appendChild(nameEl);
+
+    // File type badge (S7-04)
+    if (file.fileType && file.fileType !== "embroidery") {
+      const typeBadge = document.createElement("span");
+      const typeLabels: Record<string, string> = {
+        sewing_pattern: "Schnitt",
+        document: "Dok",
+        reference_image: "Bild",
+      };
+      typeBadge.className = `file-type-badge type-${file.fileType}`;
+      typeBadge.textContent = typeLabels[file.fileType] || file.fileType;
+      nameEl.appendChild(typeBadge);
+    }
 
     if (file.aiAnalyzed) {
       const badge = document.createElement("span");

@@ -351,6 +351,41 @@ pub fn load_print_settings(
     Ok(map)
 }
 
+/// Mark a file as recently printed.
+#[tauri::command]
+pub fn mark_as_printed(
+    db: State<'_, DbState>,
+    file_id: i64,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let key = format!("last_printed:{file_id}");
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value, updated_at) \
+         VALUES (?1, datetime('now'), datetime('now'))",
+        [&key],
+    )?;
+    Ok(())
+}
+
+/// Get recently printed file IDs (most recent first, up to limit).
+#[tauri::command]
+pub fn get_recently_printed(
+    db: State<'_, DbState>,
+    limit: Option<i64>,
+) -> Result<Vec<i64>, AppError> {
+    let conn = lock_db(&db)?;
+    let max = limit.unwrap_or(10);
+    let mut stmt = conn.prepare(
+        "SELECT CAST(REPLACE(key, 'last_printed:', '') AS INTEGER) AS file_id \
+         FROM settings WHERE key LIKE 'last_printed:%' \
+         ORDER BY value DESC LIMIT ?1"
+    )?;
+    let ids = stmt.query_map([max], |row| row.get::<_, i64>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

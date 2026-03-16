@@ -24,6 +24,16 @@ export async function loadPrintSettings(): Promise<Record<string, string>> {
   return invoke("load_print_settings");
 }
 
+export async function markAsPrinted(fileId: number): Promise<void> {
+  return invoke("mark_as_printed", { fileId });
+}
+
+export async function getRecentlyPrinted(
+  limit?: number
+): Promise<number[]> {
+  return invoke("get_recently_printed", { limit: limit ?? null });
+}
+
 export async function computeTiles(
   pageWidthMm: number,
   pageHeightMm: number,

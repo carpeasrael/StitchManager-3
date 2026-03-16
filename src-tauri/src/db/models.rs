@@ -284,4 +284,14 @@ pub struct SearchParams {
     pub language: Option<String>,
     /// File source filter
     pub file_source: Option<String>,
+    /// Category / garment type filter
+    pub category: Option<String>,
+    /// Author / designer filter
+    pub author: Option<String>,
+    /// Size range text match filter
+    pub size_range: Option<String>,
+    /// Sort field: filename, name, created_at, updated_at, author, category
+    pub sort_field: Option<String>,
+    /// Sort direction: asc or desc (default: asc)
+    pub sort_direction: Option<String>,
 }

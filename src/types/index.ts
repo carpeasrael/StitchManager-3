@@ -156,6 +156,11 @@ export interface SearchParams {
   skillLevel?: string;
   language?: string;
   fileSource?: string;
+  category?: string;
+  author?: string;
+  sizeRange?: string;
+  sortField?: string;
+  sortDirection?: string;
 }
 
 export interface SelectedFields {

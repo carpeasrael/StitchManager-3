@@ -237,6 +237,8 @@ pub fn run() {
             commands::print::get_printers,
             commands::print::print_pdf,
             commands::print::compute_tiles,
+            commands::print::mark_as_printed,
+            commands::print::get_recently_printed,
             commands::print::save_print_settings,
             commands::print::load_print_settings,
             commands::viewer::read_file_bytes,

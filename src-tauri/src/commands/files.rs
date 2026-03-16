@@ -225,7 +225,52 @@ fn build_query_conditions(
                 *param_idx += 1;
             }
         }
+        if let Some(ref category) = sp.category {
+            let trimmed = category.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.category LIKE '%' || ?{} || '%' ESCAPE '\\'", *param_idx));
+                params.push(Box::new(escape_like(trimmed)));
+                *param_idx += 1;
+            }
+        }
+        if let Some(ref author) = sp.author {
+            let trimmed = author.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.author LIKE '%' || ?{} || '%' ESCAPE '\\'", *param_idx));
+                params.push(Box::new(escape_like(trimmed)));
+                *param_idx += 1;
+            }
+        }
+        if let Some(ref size_range) = sp.size_range {
+            let trimmed = size_range.trim();
+            if !trimmed.is_empty() {
+                conditions.push(format!("e.size_range LIKE '%' || ?{} || '%' ESCAPE '\\'", *param_idx));
+                params.push(Box::new(escape_like(trimmed)));
+                *param_idx += 1;
+            }
+        }
     }
+}
+
+/// Build a safe ORDER BY clause from search params.
+fn build_order_clause(search_params: &Option<SearchParams>) -> String {
+    let allowed = [
+        "filename", "name", "created_at", "updated_at", "author", "category",
+        "stitch_count", "color_count", "file_type", "status",
+    ];
+    if let Some(sp) = search_params {
+        if let Some(ref field) = sp.sort_field {
+            let f = field.trim();
+            if allowed.contains(&f) {
+                let dir = match sp.sort_direction.as_deref() {
+                    Some("desc") => "DESC",
+                    _ => "ASC",
+                };
+                return format!("ORDER BY e.{f} {dir}");
+            }
+        }
+    }
+    "ORDER BY e.filename ASC".to_string()
 }
 
 /// Core query-building logic shared by the Tauri command and tests.
@@ -241,6 +286,8 @@ pub(crate) fn query_files_impl(
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut param_idx: usize = 1;
 
+    let order = build_order_clause(&search_params);
+
     build_query_conditions(
         conn, folder_id, search, format_filter, search_params,
         &mut conditions, &mut params, &mut param_idx,
@@ -253,7 +300,7 @@ pub(crate) fn query_files_impl(
     };
 
     let sql = format!(
-        "{FILE_SELECT_ALIASED}{where_clause} ORDER BY e.filename"
+        "{FILE_SELECT_ALIASED}{where_clause} {order}"
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -296,6 +343,8 @@ pub fn get_files_paginated(
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut param_idx: usize = 1;
 
+    let order = build_order_clause(&search_params);
+
     build_query_conditions(
         &conn, folder_id, search, format_filter, search_params,
         &mut conditions, &mut params, &mut param_idx,
@@ -315,7 +364,7 @@ pub fn get_files_paginated(
 
     // Paginated data query with LIMIT/OFFSET
     let data_sql = format!(
-        "{FILE_SELECT_ALIASED}{where_clause} ORDER BY e.filename LIMIT ?{param_idx} OFFSET ?{}",
+        "{FILE_SELECT_ALIASED}{where_clause} {order} LIMIT ?{param_idx} OFFSET ?{}",
         param_idx + 1
     );
     let mut data_params = params;

@@ -16,6 +16,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 export class PrintPreviewDialog {
   private static instance: PrintPreviewDialog | null = null;
 
+  private fileId = 0;
   private filePath = "";
   private fileName = "";
   private pdfDoc: PDFDocumentProxy | null = null;
@@ -44,7 +45,7 @@ export class PrintPreviewDialog {
 
   static async open(
     filePath: string,
-    _fileId: number,
+    fileId: number,
     fileName: string
   ): Promise<void> {
     if (PrintPreviewDialog.instance) {
@@ -52,7 +53,7 @@ export class PrintPreviewDialog {
     }
     const dialog = new PrintPreviewDialog();
     PrintPreviewDialog.instance = dialog;
-    await dialog.init(filePath, fileName);
+    await dialog.init(filePath, fileId, fileName);
   }
 
   static dismiss(): void {
@@ -64,8 +65,10 @@ export class PrintPreviewDialog {
 
   private async init(
     filePath: string,
+    fileId: number,
     fileName: string
   ): Promise<void> {
+    this.fileId = fileId;
     this.filePath = filePath;
     this.fileName = fileName;
 
@@ -634,6 +637,8 @@ export class PrintPreviewDialog {
         this.settings.orientation,
         this.settings.printerName
       ).catch(() => {});
+      // Track last printed
+      PrintService.markAsPrinted(this.fileId).catch(() => {});
       ToastContainer.show("success", `Druckauftrag gesendet (${sortedPages.length} Seiten)`);
       PrintPreviewDialog.dismiss();
     } catch (err) {
