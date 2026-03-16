@@ -22,6 +22,7 @@ import { ImageViewerDialog } from "./components/ImageViewerDialog";
 import { PrintPreviewDialog } from "./components/PrintPreviewDialog";
 import * as ProjectService from "./services/ProjectService";
 import { ProjectListDialog } from "./components/ProjectListDialog";
+import * as BackupService from "./services/BackupService";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -286,13 +287,14 @@ async function deleteSelectedFiles(): Promise<void> {
     if (!confirm(`${fileIds.length} Dateien wirklich loeschen?`)) return;
   }
 
+  // Soft-delete (move to trash) instead of hard delete
   let deleted = 0;
   for (const id of fileIds) {
     try {
-      await FileService.deleteFile(id);
+      await BackupService.softDeleteFile(id);
       deleted++;
     } catch (e) {
-      console.warn(`Failed to delete file ${id}:`, e);
+      console.warn(`Failed to soft-delete file ${id}:`, e);
     }
   }
 
@@ -301,9 +303,9 @@ async function deleteSelectedFiles(): Promise<void> {
   await reloadFilesAndCounts();
 
   if (deleted === fileIds.length) {
-    ToastContainer.show("success", deleted === 1 ? "Datei geloescht" : `${deleted} Dateien geloescht`);
+    ToastContainer.show("success", deleted === 1 ? "Datei in Papierkorb verschoben" : `${deleted} Dateien in Papierkorb verschoben`);
   } else if (deleted > 0) {
-    ToastContainer.show("info", `${deleted} von ${fileIds.length} Dateien geloescht`);
+    ToastContainer.show("info", `${deleted} von ${fileIds.length} Dateien in Papierkorb verschoben`);
   } else {
     ToastContainer.show("error", "Dateien konnten nicht geloescht werden");
   }
@@ -359,6 +361,68 @@ function initEventHandlers(): () => void {
         return;
       }
       await PrintPreviewDialog.open(file.filepath, fileId, file.name || file.filename);
+    }),
+
+    EventBus.on("toolbar:backup", async () => {
+      try {
+        const result = await BackupService.createBackup(false);
+        ToastContainer.show("success", `Backup erstellt: ${result.fileCount} Dateien (${(result.sizeBytes / 1024 / 1024).toFixed(1)} MB)`);
+      } catch (e) {
+        console.warn("Backup failed:", e);
+        ToastContainer.show("error", "Backup fehlgeschlagen");
+      }
+    }),
+
+    EventBus.on("toolbar:trash", async () => {
+      try {
+        const items = await BackupService.getTrash();
+        if (items.length === 0) {
+          ToastContainer.show("info", "Papierkorb ist leer");
+          return;
+        }
+        // Simple confirm-based restore/purge for each item
+        const action = confirm(
+          `${items.length} Dateien im Papierkorb.\n\nOK = Alle wiederherstellen\nAbbrechen = Papierkorb leeren`
+        );
+        if (action) {
+          for (const [id] of items) await BackupService.restoreFile(id);
+          ToastContainer.show("success", `${items.length} Dateien wiederhergestellt`);
+        } else {
+          if (confirm("Papierkorb wirklich endgueltig leeren?")) {
+            for (const [id] of items) await BackupService.purgeFile(id);
+            ToastContainer.show("success", "Papierkorb geleert");
+          }
+        }
+        EventBus.emit("file:refresh");
+      } catch (e) {
+        console.warn("Trash operation failed:", e);
+        ToastContainer.show("error", "Papierkorb-Aktion fehlgeschlagen");
+      }
+    }),
+
+    EventBus.on("toolbar:export-metadata", async () => {
+      const fileIds = appState.get("selectedFileIds");
+      const singleId = appState.get("selectedFileId");
+      const ids = fileIds.length > 0 ? fileIds : singleId ? [singleId] : [];
+      if (ids.length === 0) {
+        ToastContainer.show("info", "Keine Dateien ausgewaehlt");
+        return;
+      }
+      try {
+        const json = await BackupService.exportMetadataJson(ids);
+        // Download as file using blob
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "stichman_export.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        ToastContainer.show("success", `${ids.length} Dateien exportiert`);
+      } catch (e) {
+        console.warn("Export failed:", e);
+        ToastContainer.show("error", "Export fehlgeschlagen");
+      }
     }),
 
     EventBus.on("toolbar:show-projects", () => {
@@ -1091,6 +1155,9 @@ async function init(): Promise<void> {
   } catch {
     // USB detection not available — ignore
   }
+
+  // Auto-purge trash on startup (background, non-blocking)
+  BackupService.autoPurgeTrash().catch(() => {});
 
   const destroyThemeToggle = setupThemeToggle();
   const destroyShortcuts = initShortcuts();

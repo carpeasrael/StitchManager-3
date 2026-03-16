@@ -191,6 +191,24 @@ export class Toolbar extends Component {
             onClick: () => EventBus.emit("toolbar:print"),
           },
           {
+            className: "menu-item-backup",
+            icon: "\uD83D\uDCBE",
+            label: "Backup erstellen",
+            onClick: () => EventBus.emit("toolbar:backup"),
+          },
+          {
+            className: "menu-item-trash",
+            icon: "\uD83D\uDDD1",
+            label: "Papierkorb",
+            onClick: () => EventBus.emit("toolbar:trash"),
+          },
+          {
+            className: "menu-item-export",
+            icon: "\uD83D\uDCE4",
+            label: "Metadaten exportieren",
+            onClick: () => EventBus.emit("toolbar:export-metadata"),
+          },
+          {
             className: "menu-item-settings",
             icon: "\u2699",
             label: "Einstellungen",

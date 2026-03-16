@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod backup;
 pub mod batch;
 pub mod convert;
 pub mod edit;

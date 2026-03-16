@@ -22,6 +22,9 @@ fn build_query_conditions(
     params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
     param_idx: &mut usize,
 ) {
+    // Always exclude soft-deleted files from normal queries
+    conditions.push("e.deleted_at IS NULL".to_string());
+
     if let Some(fid) = folder_id {
         conditions.push(format!("e.folder_id = ?{}", *param_idx));
         params.push(Box::new(fid));
@@ -194,6 +197,9 @@ fn build_query_conditions(
                 params.push(Box::new(trimmed.to_string()));
                 *param_idx += 1;
             }
+        } else {
+            // Exclude archived files by default when no explicit status filter
+            conditions.push("e.status != 'archived'".to_string());
         }
         if let Some(ref skill_level) = sp.skill_level {
             let trimmed = skill_level.trim();

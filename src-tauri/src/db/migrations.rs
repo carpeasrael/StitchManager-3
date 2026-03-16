@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 12;
+const CURRENT_VERSION: i32 = 13;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -91,6 +91,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 12 {
         apply_v12(conn)?;
+    }
+
+    if current < 13 {
+        apply_v13(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -656,6 +660,24 @@ fn apply_v11(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v13(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE embroidery_files ADD COLUMN deleted_at TEXT;
+        CREATE INDEX IF NOT EXISTS idx_files_deleted_at ON embroidery_files(deleted_at);
+
+        ALTER TABLE projects ADD COLUMN deleted_at TEXT;
+        CREATE INDEX IF NOT EXISTS idx_projects_deleted_at ON projects(deleted_at);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (13, 'Add deleted_at column for soft delete / recycle bin');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 fn apply_v12(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
         "BEGIN TRANSACTION;
@@ -761,7 +783,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 12, "Schema version must be 12");
+        assert_eq!(version, 13, "Schema version must be 13");
     }
 
     #[test]
@@ -784,22 +806,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_twelve() {
+    fn test_schema_version_is_thirteen() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 12",
+                "SELECT description FROM schema_version WHERE version = 13",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add projects, project_details, collections, collection_items tables");
+        assert_eq!(desc, "Add deleted_at column for soft delete / recycle bin");
     }
 
     #[test]
