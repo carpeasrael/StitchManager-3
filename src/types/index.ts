@@ -378,6 +378,85 @@ export interface TimeEntry {
   recordedAt: string;
 }
 
+// Sprint D: Production Workflow
+
+export interface StepDefinition {
+  id: number;
+  name: string;
+  description: string | null;
+  defaultDurationMinutes: number | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface ProductStep {
+  id: number;
+  productId: number;
+  stepDefinitionId: number;
+  sortOrder: number;
+}
+
+export interface WorkflowStep {
+  id: number;
+  projectId: number;
+  stepDefinitionId: number;
+  status: string;
+  responsible: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  notes: string | null;
+  sortOrder: number;
+}
+
+// Sprint E: Procurement
+
+export interface PurchaseOrder {
+  id: number;
+  orderNumber: string | null;
+  supplierId: number;
+  status: string;
+  orderDate: string | null;
+  expectedDelivery: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrderItem {
+  id: number;
+  orderId: number;
+  materialId: number;
+  quantityOrdered: number;
+  quantityDelivered: number;
+  unitPrice: number | null;
+  notes: string | null;
+}
+
+export interface Delivery {
+  id: number;
+  orderId: number;
+  deliveryDate: string;
+  deliveryNote: string | null;
+  notes: string | null;
+}
+
+// Sprint F: License Management
+
+export interface LicenseRecord {
+  id: number;
+  name: string;
+  licenseType: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  maxUses: number | null;
+  currentUses: number;
+  commercialAllowed: boolean;
+  source: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PrinterInfo {
   name: string;
   displayName: string;

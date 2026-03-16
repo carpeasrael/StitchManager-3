@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 14;
+const CURRENT_VERSION: i32 = 15;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -99,6 +99,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 14 {
         apply_v14(conn)?;
+    }
+
+    if current < 15 {
+        apply_v15(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -840,6 +844,122 @@ fn apply_v14(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v15(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Sprint D: Production Workflow
+        CREATE TABLE IF NOT EXISTS step_definitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            default_duration_minutes REAL,
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS product_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            step_definition_id INTEGER NOT NULL REFERENCES step_definitions(id) ON DELETE CASCADE,
+            sort_order INTEGER DEFAULT 0,
+            UNIQUE(product_id, step_definition_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_product_steps_product_id ON product_steps(product_id);
+
+        CREATE TABLE IF NOT EXISTS workflow_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            step_definition_id INTEGER NOT NULL REFERENCES step_definitions(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            responsible TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            notes TEXT,
+            sort_order INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_steps_project_id ON workflow_steps(project_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_steps_status ON workflow_steps(status);
+
+        -- Sprint E: Procurement
+        CREATE TABLE IF NOT EXISTS purchase_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_number TEXT UNIQUE,
+            supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+            status TEXT NOT NULL DEFAULT 'draft',
+            order_date TEXT,
+            expected_delivery TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier_id ON purchase_orders(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status);
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_deleted_at ON purchase_orders(deleted_at);
+
+        CREATE TABLE IF NOT EXISTS order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            material_id INTEGER NOT NULL REFERENCES materials(id),
+            quantity_ordered REAL NOT NULL,
+            quantity_delivered REAL DEFAULT 0,
+            unit_price REAL,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+        CREATE INDEX IF NOT EXISTS idx_order_items_material_id ON order_items(material_id);
+
+        CREATE TABLE IF NOT EXISTS deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            delivery_date TEXT NOT NULL DEFAULT (datetime('now')),
+            delivery_note TEXT,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_deliveries_order_id ON deliveries(order_id);
+
+        CREATE TABLE IF NOT EXISTS delivery_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            delivery_id INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+            order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+            quantity_received REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_delivery_items_delivery_id ON delivery_items(delivery_id);
+
+        -- Sprint F: License Management
+        CREATE TABLE IF NOT EXISTS license_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            license_type TEXT DEFAULT 'personal',
+            valid_from TEXT,
+            valid_until TEXT,
+            max_uses INTEGER,
+            current_uses INTEGER DEFAULT 0,
+            commercial_allowed INTEGER DEFAULT 0,
+            source TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_license_records_deleted_at ON license_records(deleted_at);
+
+        CREATE TABLE IF NOT EXISTS license_file_links (
+            license_id INTEGER NOT NULL REFERENCES license_records(id) ON DELETE CASCADE,
+            file_id INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            PRIMARY KEY (license_id, file_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_license_file_links_file_id ON license_file_links(file_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (15, 'Add workflow, procurement, and license management tables');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -863,6 +983,8 @@ mod tests {
             "collections",
             "custom_field_definitions",
             "custom_field_values",
+            "deliveries",
+            "delivery_items",
             "embroidery_files",
             "file_attachments",
             "file_formats",
@@ -877,17 +999,24 @@ mod tests {
             "folders",
             "instruction_bookmarks",
             "instruction_notes",
+            "license_file_links",
+            "license_records",
             "machine_profiles",
             "material_inventory",
             "materials",
+            "order_items",
+            "product_steps",
             "products",
             "project_details",
             "projects",
+            "purchase_orders",
             "schema_version",
             "settings",
+            "step_definitions",
             "suppliers",
             "tags",
             "time_entries",
+            "workflow_steps",
         ];
 
         assert_eq!(tables, expected, "All tables must exist (including FTS5)");
@@ -904,7 +1033,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 14, "Schema version must be 14");
+        assert_eq!(version, 15, "Schema version must be 15");
     }
 
     #[test]
@@ -927,22 +1056,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_fourteen() {
+    fn test_schema_version_is_fifteen() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 14",
+                "SELECT description FROM schema_version WHERE version = 15",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("manufacturing"), "v14 description should mention manufacturing");
+        assert!(desc.contains("workflow"), "v15 description should mention workflow");
     }
 
     #[test]

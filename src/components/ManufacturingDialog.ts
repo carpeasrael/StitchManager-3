@@ -1,6 +1,7 @@
 import * as MfgService from "../services/ManufacturingService";
 import { ToastContainer } from "./Toast";
 import * as ProjectService from "../services/ProjectService";
+import * as ProcService from "../services/ProcurementService";
 import type {
   Supplier,
   Material,
@@ -9,9 +10,13 @@ import type {
   BillOfMaterial,
   Project,
   TimeEntry,
+  StepDefinition,
+  PurchaseOrder,
+  OrderItem,
+  LicenseRecord,
 } from "../types";
 
-type TabKey = "materials" | "suppliers" | "products" | "inventory" | "timetracking";
+type TabKey = "materials" | "suppliers" | "products" | "inventory" | "timetracking" | "workflow" | "orders" | "licenses";
 
 export class ManufacturingDialog {
   private static instance: ManufacturingDialog | null = null;
@@ -39,6 +44,19 @@ export class ManufacturingDialog {
   private ttSelectedProjectId: number | null = null;
   private timeEntries: TimeEntry[] = [];
   private selectedTimeEntry: TimeEntry | null = null;
+
+  // Workflow state
+  private stepDefs: StepDefinition[] = [];
+  private selectedStepDef: StepDefinition | null = null;
+
+  // Orders state
+  private orders: PurchaseOrder[] = [];
+  private selectedOrder: PurchaseOrder | null = null;
+  private orderItems: Map<number, OrderItem[]> = new Map();
+
+  // License state
+  private licenses: LicenseRecord[] = [];
+  private selectedLicense: LicenseRecord | null = null;
 
   static async open(): Promise<void> {
     if (ManufacturingDialog.instance) ManufacturingDialog.dismiss();
@@ -73,12 +91,15 @@ export class ManufacturingDialog {
   }
 
   private async loadAll(): Promise<void> {
-    [this.materials, this.suppliers, this.products, this.allProjects] =
+    [this.materials, this.suppliers, this.products, this.allProjects, this.stepDefs, this.orders, this.licenses] =
       await Promise.all([
         MfgService.getMaterials(),
         MfgService.getSuppliers(),
         MfgService.getProducts(),
         ProjectService.getProjects(),
+        MfgService.getStepDefs(),
+        ProcService.getOrders(),
+        MfgService.getLicenses(),
       ]);
     // Load inventory for all materials
     this.inventoryMap.clear();
@@ -132,6 +153,9 @@ export class ManufacturingDialog {
       { key: "products", label: "Produkte" },
       { key: "inventory", label: "Inventar" },
       { key: "timetracking", label: "Zeiterfassung" },
+      { key: "workflow", label: "Workflow" },
+      { key: "orders", label: "Bestellungen" },
+      { key: "licenses", label: "Lizenzen" },
     ];
     for (const t of tabs) {
       const btn = document.createElement("button");
@@ -202,6 +226,18 @@ export class ManufacturingDialog {
       case "timetracking":
         this.renderTimeTrackingDashboard(dashboard);
         this.renderTimeTrackingTab(content);
+        break;
+      case "workflow":
+        this.renderWorkflowDashboard(dashboard);
+        this.renderWorkflowTab(content);
+        break;
+      case "orders":
+        this.renderOrdersDashboard(dashboard);
+        this.renderOrdersTab(content);
+        break;
+      case "licenses":
+        this.renderLicensesDashboard(dashboard);
+        this.renderLicensesTab(content);
         break;
     }
   }
@@ -1201,6 +1237,471 @@ export class ManufacturingDialog {
     const h = Math.floor(minutes / 60);
     const m = Math.round(minutes % 60);
     return m > 0 ? `${h}h ${m}min` : `${h}h`;
+  }
+
+  // ── Workflow Tab ──────────────────────────────────────────────────
+
+  private renderWorkflowDashboard(container: HTMLElement): void {
+    this.addBadge(container, `Schrittvorlagen: ${this.stepDefs.length}`, "");
+    this.addCreateBtn(container, "Schritt", () => this.createStepDef());
+  }
+
+  private renderWorkflowTab(container: HTMLElement): void {
+    const listPane = document.createElement("div");
+    listPane.className = "mfg-list-pane";
+    this.renderStepDefList(listPane);
+    container.appendChild(listPane);
+
+    const detailPane = document.createElement("div");
+    detailPane.className = "mfg-detail-pane";
+    if (this.selectedStepDef) {
+      this.renderStepDefDetail(detailPane, this.selectedStepDef);
+    } else {
+      detailPane.textContent = "Schrittvorlage auswaehlen";
+    }
+    container.appendChild(detailPane);
+  }
+
+  private renderStepDefList(container: HTMLElement): void {
+    container.innerHTML = "";
+    if (this.stepDefs.length === 0) { container.textContent = "Keine Schrittvorlagen"; return; }
+    for (const sd of this.stepDefs) {
+      const item = document.createElement("div");
+      item.className = "mfg-item";
+      if (this.selectedStepDef?.id === sd.id) item.classList.add("selected");
+      const info = document.createElement("div");
+      info.className = "mfg-item-info";
+      const nameEl = document.createElement("span");
+      nameEl.className = "mfg-item-name";
+      nameEl.textContent = sd.name;
+      info.appendChild(nameEl);
+      if (sd.defaultDurationMinutes) {
+        const sub = document.createElement("span");
+        sub.className = "mfg-item-sub";
+        sub.textContent = `${sd.defaultDurationMinutes} min`;
+        info.appendChild(sub);
+      }
+      item.appendChild(info);
+      item.addEventListener("click", () => { this.selectedStepDef = sd; this.renderActiveTab(); });
+      container.appendChild(item);
+    }
+  }
+
+  private renderStepDefDetail(container: HTMLElement, sd: StepDefinition): void {
+    container.innerHTML = "";
+    const form = document.createElement("div");
+    form.className = "mfg-form";
+    this.addTextField(form, "Name", sd.name, async (v) => {
+      try {
+        const updated = await MfgService.updateStepDef(sd.id, v);
+        const idx = this.stepDefs.findIndex((x) => x.id === sd.id);
+        if (idx >= 0) this.stepDefs[idx] = updated;
+        this.selectedStepDef = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addTextArea(form, "Beschreibung", sd.description || "", async (v) => {
+      try {
+        const updated = await MfgService.updateStepDef(sd.id, undefined, v);
+        const idx = this.stepDefs.findIndex((x) => x.id === sd.id);
+        if (idx >= 0) this.stepDefs[idx] = updated;
+        this.selectedStepDef = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addNumberField(form, "Standarddauer (min)", sd.defaultDurationMinutes, async (v) => {
+      try {
+        const updated = await MfgService.updateStepDef(sd.id, undefined, undefined, v);
+        const idx = this.stepDefs.findIndex((x) => x.id === sd.id);
+        if (idx >= 0) this.stepDefs[idx] = updated;
+        this.selectedStepDef = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    container.appendChild(form);
+
+    const actions = document.createElement("div");
+    actions.className = "mfg-actions";
+    const delBtn = document.createElement("button");
+    delBtn.className = "dialog-btn dialog-btn-danger";
+    delBtn.textContent = "Vorlage loeschen";
+    delBtn.addEventListener("click", async () => {
+      if (!confirm(`Schrittvorlage "${sd.name}" wirklich loeschen?`)) return;
+      try {
+        await MfgService.deleteStepDef(sd.id);
+        this.selectedStepDef = null;
+        this.stepDefs = await MfgService.getStepDefs();
+        this.renderActiveTab();
+        ToastContainer.show("success", "Vorlage geloescht");
+      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+    });
+    actions.appendChild(delBtn);
+    container.appendChild(actions);
+  }
+
+  private async createStepDef(): Promise<void> {
+    try {
+      const sd = await MfgService.createStepDef({ name: "Neuer Schritt" });
+      this.stepDefs = await MfgService.getStepDefs();
+      this.selectedStepDef = this.stepDefs.find((x) => x.id === sd.id) || null;
+      this.renderActiveTab();
+      ToastContainer.show("success", "Schrittvorlage erstellt");
+    } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
+  }
+
+  // ── Orders Tab ───────────────────────────────────────────────────
+
+  private renderOrdersDashboard(container: HTMLElement): void {
+    const open = this.orders.filter((o) => o.status !== "delivered" && o.status !== "cancelled").length;
+    this.addBadge(container, `Gesamt: ${this.orders.length}`, "");
+    if (open > 0) this.addBadge(container, `Offen: ${open}`, "mfg-badge-warn");
+    this.addCreateBtn(container, "Bestellung", () => this.createOrder());
+  }
+
+  private renderOrdersTab(container: HTMLElement): void {
+    const listPane = document.createElement("div");
+    listPane.className = "mfg-list-pane";
+    this.renderOrderList(listPane);
+    container.appendChild(listPane);
+
+    const detailPane = document.createElement("div");
+    detailPane.className = "mfg-detail-pane";
+    if (this.selectedOrder) {
+      this.renderOrderDetail(detailPane, this.selectedOrder);
+    } else {
+      detailPane.textContent = "Bestellung auswaehlen";
+    }
+    container.appendChild(detailPane);
+  }
+
+  private renderOrderList(container: HTMLElement): void {
+    container.innerHTML = "";
+    if (this.orders.length === 0) { container.textContent = "Keine Bestellungen"; return; }
+    const statusLabels: Record<string, string> = {
+      draft: "Entwurf", ordered: "Bestellt", partially_delivered: "Teilgeliefert",
+      delivered: "Geliefert", cancelled: "Storniert",
+    };
+    for (const o of this.orders) {
+      const item = document.createElement("div");
+      item.className = "mfg-item";
+      if (this.selectedOrder?.id === o.id) item.classList.add("selected");
+      const info = document.createElement("div");
+      info.className = "mfg-item-info";
+      const nameEl = document.createElement("span");
+      nameEl.className = "mfg-item-name";
+      nameEl.textContent = o.orderNumber || `#${o.id}`;
+      info.appendChild(nameEl);
+      const sub = document.createElement("span");
+      sub.className = "mfg-item-sub";
+      const supplier = this.suppliers.find((s) => s.id === o.supplierId);
+      sub.textContent = `${supplier?.name || "?"} - ${statusLabels[o.status] || o.status}`;
+      info.appendChild(sub);
+      item.appendChild(info);
+      item.addEventListener("click", async () => {
+        try {
+          this.selectedOrder = o;
+          if (!this.orderItems.has(o.id)) {
+            this.orderItems.set(o.id, await ProcService.getOrderItems(o.id));
+          }
+          this.renderActiveTab();
+        } catch { ToastContainer.show("error", "Positionen konnten nicht geladen werden"); }
+      });
+      container.appendChild(item);
+    }
+  }
+
+  private renderOrderDetail(container: HTMLElement, o: PurchaseOrder): void {
+    container.innerHTML = "";
+    const form = document.createElement("div");
+    form.className = "mfg-form";
+
+    this.addTextField(form, "Bestellnummer", o.orderNumber || "", async (v) => {
+      try {
+        const updated = await ProcService.updateOrder(o.id, { orderNumber: v });
+        const idx = this.orders.findIndex((x) => x.id === o.id);
+        if (idx >= 0) this.orders[idx] = updated;
+        this.selectedOrder = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addSelectField(form, "Status", o.status, [
+      { value: "draft", label: "Entwurf" },
+      { value: "ordered", label: "Bestellt" },
+      { value: "partially_delivered", label: "Teilgeliefert" },
+      { value: "delivered", label: "Geliefert" },
+      { value: "cancelled", label: "Storniert" },
+    ], async (v) => {
+      try {
+        const updated = await ProcService.updateOrder(o.id, { status: v });
+        const idx = this.orders.findIndex((x) => x.id === o.id);
+        if (idx >= 0) this.orders[idx] = updated;
+        this.selectedOrder = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addTextField(form, "Bestelldatum", o.orderDate || "", async (v) => {
+      try { await ProcService.updateOrder(o.id, { orderDate: v }); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addTextField(form, "Erwartete Lieferung", o.expectedDelivery || "", async (v) => {
+      try { await ProcService.updateOrder(o.id, { expectedDelivery: v }); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    this.addTextArea(form, "Notizen", o.notes || "", async (v) => {
+      try { await ProcService.updateOrder(o.id, { notes: v }); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    });
+    container.appendChild(form);
+
+    // Order items
+    const itemsSection = document.createElement("div");
+    itemsSection.className = "mfg-bom-section";
+    const itemsTitle = document.createElement("h4");
+    itemsTitle.className = "mfg-section-title";
+    itemsTitle.textContent = "Positionen";
+    itemsSection.appendChild(itemsTitle);
+
+    const items = this.orderItems.get(o.id) || [];
+    if (items.length > 0) {
+      const table = document.createElement("table");
+      table.className = "mfg-bom-table";
+      const oThead = document.createElement("thead");
+      const oHeadRow = document.createElement("tr");
+      for (const h of ["Material", "Bestellt", "Geliefert", "Preis", ""]) {
+        const th = document.createElement("th"); th.textContent = h; oHeadRow.appendChild(th);
+      }
+      oThead.appendChild(oHeadRow);
+      table.appendChild(oThead);
+      const tbody = document.createElement("tbody");
+      for (const oi of items) {
+        const mat = this.materials.find((m) => m.id === oi.materialId);
+        const tr = document.createElement("tr");
+        const tdMat = document.createElement("td"); tdMat.textContent = mat?.name || "?";
+        const tdOrd = document.createElement("td"); tdOrd.textContent = String(oi.quantityOrdered);
+        const tdDel = document.createElement("td"); tdDel.textContent = String(oi.quantityDelivered);
+        const tdPrice = document.createElement("td"); tdPrice.textContent = oi.unitPrice != null ? oi.unitPrice.toFixed(2) : "-";
+        const tdAction = document.createElement("td");
+        const rmBtn = document.createElement("button");
+        rmBtn.className = "mfg-bom-remove";
+        rmBtn.textContent = "\u2716";
+        rmBtn.addEventListener("click", async () => {
+          try {
+            await ProcService.deleteOrderItem(oi.id);
+            this.orderItems.set(o.id, await ProcService.getOrderItems(o.id));
+            this.renderActiveTab();
+          } catch { ToastContainer.show("error", "Position konnte nicht entfernt werden"); }
+        });
+        tdAction.appendChild(rmBtn);
+        tr.appendChild(tdMat); tr.appendChild(tdOrd); tr.appendChild(tdDel); tr.appendChild(tdPrice); tr.appendChild(tdAction);
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      itemsSection.appendChild(table);
+    }
+
+    // Add item form
+    const addRow = document.createElement("div");
+    addRow.className = "mfg-bom-add";
+    const matSelect = document.createElement("select");
+    matSelect.className = "mfg-input";
+    const defOpt = document.createElement("option"); defOpt.value = ""; defOpt.textContent = "Material";
+    matSelect.appendChild(defOpt);
+    for (const m of this.materials) {
+      const opt = document.createElement("option"); opt.value = String(m.id); opt.textContent = m.name;
+      matSelect.appendChild(opt);
+    }
+    addRow.appendChild(matSelect);
+    const qtyInput = document.createElement("input"); qtyInput.type = "number"; qtyInput.className = "mfg-input mfg-input-sm"; qtyInput.placeholder = "Menge";
+    addRow.appendChild(qtyInput);
+    const priceInput = document.createElement("input"); priceInput.type = "number"; priceInput.className = "mfg-input mfg-input-sm"; priceInput.placeholder = "Preis";
+    addRow.appendChild(priceInput);
+    const addBtn = document.createElement("button");
+    addBtn.className = "dialog-btn dialog-btn-primary"; addBtn.textContent = "+";
+    addBtn.addEventListener("click", async () => {
+      const matId = Number(matSelect.value);
+      const qty = Number(qtyInput.value);
+      if (!matId || !qty || qty <= 0) { ToastContainer.show("error", "Material und Menge angeben"); return; }
+      try {
+        await ProcService.addOrderItem(o.id, matId, qty, priceInput.value ? Number(priceInput.value) : undefined);
+        this.orderItems.set(o.id, await ProcService.getOrderItems(o.id));
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Position hinzufuegen fehlgeschlagen"); }
+    });
+    addRow.appendChild(addBtn);
+    itemsSection.appendChild(addRow);
+    container.appendChild(itemsSection);
+
+    // Actions
+    const actions = document.createElement("div");
+    actions.className = "mfg-actions";
+    const delBtn = document.createElement("button");
+    delBtn.className = "dialog-btn dialog-btn-danger";
+    delBtn.textContent = "Bestellung loeschen";
+    delBtn.addEventListener("click", async () => {
+      if (!confirm("Bestellung wirklich loeschen?")) return;
+      try {
+        await ProcService.deleteOrder(o.id);
+        this.selectedOrder = null;
+        this.orders = await ProcService.getOrders();
+        this.renderActiveTab();
+        ToastContainer.show("success", "Bestellung geloescht");
+      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+    });
+    actions.appendChild(delBtn);
+    container.appendChild(actions);
+  }
+
+  private async createOrder(): Promise<void> {
+    if (this.suppliers.length === 0) {
+      ToastContainer.show("error", "Bitte zuerst einen Lieferanten anlegen");
+      return;
+    }
+    try {
+      const o = await ProcService.createOrder({ supplierId: this.suppliers[0].id });
+      this.orders = await ProcService.getOrders();
+      this.selectedOrder = this.orders.find((x) => x.id === o.id) || null;
+      this.renderActiveTab();
+      ToastContainer.show("success", "Bestellung erstellt");
+    } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
+  }
+
+  // ── Licenses Tab ─────────────────────────────────────────────────
+
+  private renderLicensesDashboard(container: HTMLElement): void {
+    this.addBadge(container, `Gesamt: ${this.licenses.length}`, "");
+    const now = new Date().toISOString();
+    const expiring = this.licenses.filter((l) => l.validUntil && l.validUntil >= now.slice(0, 10) && l.validUntil <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)).length;
+    const expired = this.licenses.filter((l) => l.validUntil && l.validUntil < now.slice(0, 10)).length;
+    if (expiring > 0) this.addBadge(container, `Bald ablaufend: ${expiring}`, "mfg-badge-warn");
+    if (expired > 0) this.addBadge(container, `Abgelaufen: ${expired}`, "mfg-badge-warn");
+    this.addCreateBtn(container, "Lizenz", () => this.createLicenseRecord());
+  }
+
+  private renderLicensesTab(container: HTMLElement): void {
+    const listPane = document.createElement("div");
+    listPane.className = "mfg-list-pane";
+    this.renderLicenseList(listPane);
+    container.appendChild(listPane);
+
+    const detailPane = document.createElement("div");
+    detailPane.className = "mfg-detail-pane";
+    if (this.selectedLicense) {
+      this.renderLicenseDetail(detailPane, this.selectedLicense);
+    } else {
+      detailPane.textContent = "Lizenz auswaehlen";
+    }
+    container.appendChild(detailPane);
+  }
+
+  private renderLicenseList(container: HTMLElement): void {
+    container.innerHTML = "";
+    if (this.licenses.length === 0) { container.textContent = "Keine Lizenzen"; return; }
+    const now = new Date().toISOString().slice(0, 10);
+    for (const l of this.licenses) {
+      const item = document.createElement("div");
+      item.className = "mfg-item";
+      if (this.selectedLicense?.id === l.id) item.classList.add("selected");
+
+      let statusCls = "mfg-stock-ok";
+      if (l.validUntil) {
+        if (l.validUntil < now) statusCls = "mfg-stock-low";
+        else if (l.validUntil <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)) statusCls = "mfg-stock-warn";
+      }
+      const dot = document.createElement("span");
+      dot.className = "mfg-stock-dot " + statusCls;
+      item.appendChild(dot);
+
+      const info = document.createElement("div");
+      info.className = "mfg-item-info";
+      const nameEl = document.createElement("span");
+      nameEl.className = "mfg-item-name";
+      nameEl.textContent = l.name;
+      info.appendChild(nameEl);
+      const sub = document.createElement("span");
+      sub.className = "mfg-item-sub";
+      sub.textContent = l.licenseType || "personal";
+      info.appendChild(sub);
+      item.appendChild(info);
+
+      item.addEventListener("click", () => { this.selectedLicense = l; this.renderActiveTab(); });
+      container.appendChild(item);
+    }
+  }
+
+  private renderLicenseDetail(container: HTMLElement, l: LicenseRecord): void {
+    container.innerHTML = "";
+    const form = document.createElement("div");
+    form.className = "mfg-form";
+
+    const updateLic = async (
+      name?: string, licenseType?: string, validFrom?: string, validUntil?: string,
+      maxUses?: number, commercialAllowed?: boolean, source?: string, notes?: string
+    ) => {
+      try {
+        const updated = await MfgService.updateLicense(l.id, name, licenseType, validFrom, validUntil, maxUses, commercialAllowed, source, notes);
+        const idx = this.licenses.findIndex((x) => x.id === l.id);
+        if (idx >= 0) this.licenses[idx] = updated;
+        this.selectedLicense = updated;
+        this.renderActiveTab();
+      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
+    };
+
+    this.addTextField(form, "Name", l.name, (v) => updateLic(v));
+    this.addSelectField(form, "Lizenztyp", l.licenseType || "personal", [
+      { value: "personal", label: "Persoenlich" },
+      { value: "commercial", label: "Kommerziell" },
+      { value: "educational", label: "Bildung" },
+      { value: "open", label: "Offen/Frei" },
+    ], (v) => updateLic(undefined, v));
+    this.addTextField(form, "Gueltig ab", l.validFrom || "", (v) => updateLic(undefined, undefined, v));
+    this.addTextField(form, "Gueltig bis", l.validUntil || "", (v) => updateLic(undefined, undefined, undefined, v));
+    this.addNumberField(form, "Max. Verwendungen", l.maxUses, (v) => updateLic(undefined, undefined, undefined, undefined, v != null ? Math.round(v) : undefined));
+    this.addSelectField(form, "Kommerziell erlaubt", l.commercialAllowed ? "1" : "0", [
+      { value: "0", label: "Nein" },
+      { value: "1", label: "Ja" },
+    ], (v) => updateLic(undefined, undefined, undefined, undefined, undefined, v === "1"));
+    this.addTextField(form, "Quelle", l.source || "", (v) => updateLic(undefined, undefined, undefined, undefined, undefined, undefined, v));
+    this.addTextArea(form, "Notizen", l.notes || "", (v) => updateLic(undefined, undefined, undefined, undefined, undefined, undefined, undefined, v));
+
+    // Usage info
+    const usageEl = document.createElement("div");
+    usageEl.className = "mfg-field";
+    const usageLbl = document.createElement("label");
+    usageLbl.className = "mfg-label";
+    usageLbl.textContent = "Verwendungen";
+    const usageVal = document.createElement("span");
+    usageVal.className = "mfg-readonly-value";
+    usageVal.textContent = l.maxUses != null ? `${l.currentUses} / ${l.maxUses}` : `${l.currentUses}`;
+    usageEl.appendChild(usageLbl);
+    usageEl.appendChild(usageVal);
+    form.appendChild(usageEl);
+
+    container.appendChild(form);
+
+    const actions = document.createElement("div");
+    actions.className = "mfg-actions";
+    const delBtn = document.createElement("button");
+    delBtn.className = "dialog-btn dialog-btn-danger";
+    delBtn.textContent = "Lizenz loeschen";
+    delBtn.addEventListener("click", async () => {
+      if (!confirm(`Lizenz "${l.name}" wirklich loeschen?`)) return;
+      try {
+        await MfgService.deleteLicense(l.id);
+        this.selectedLicense = null;
+        this.licenses = await MfgService.getLicenses();
+        this.renderActiveTab();
+        ToastContainer.show("success", "Lizenz geloescht");
+      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+    });
+    actions.appendChild(delBtn);
+    container.appendChild(actions);
+  }
+
+  private async createLicenseRecord(): Promise<void> {
+    try {
+      const l = await MfgService.createLicense({ name: "Neue Lizenz" });
+      this.licenses = await MfgService.getLicenses();
+      this.selectedLicense = this.licenses.find((x) => x.id === l.id) || null;
+      this.renderActiveTab();
+      ToastContainer.show("success", "Lizenz erstellt");
+    } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────

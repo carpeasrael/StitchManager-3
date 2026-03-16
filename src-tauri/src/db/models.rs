@@ -330,6 +330,108 @@ pub struct TimeEntry {
     pub recorded_at: String,
 }
 
+// Sprint D: Production Workflow
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepDefinition {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub default_duration_minutes: Option<f64>,
+    pub sort_order: i32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductStep {
+    pub id: i64,
+    pub product_id: i64,
+    pub step_definition_id: i64,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowStep {
+    pub id: i64,
+    pub project_id: i64,
+    pub step_definition_id: i64,
+    pub status: String,
+    pub responsible: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub notes: Option<String>,
+    pub sort_order: i32,
+}
+
+// Sprint E: Procurement
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurchaseOrder {
+    pub id: i64,
+    pub order_number: Option<String>,
+    pub supplier_id: i64,
+    pub status: String,
+    pub order_date: Option<String>,
+    pub expected_delivery: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderItem {
+    pub id: i64,
+    pub order_id: i64,
+    pub material_id: i64,
+    pub quantity_ordered: f64,
+    pub quantity_delivered: f64,
+    pub unit_price: Option<f64>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Delivery {
+    pub id: i64,
+    pub order_id: i64,
+    pub delivery_date: String,
+    pub delivery_note: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryItem {
+    pub id: i64,
+    pub delivery_id: i64,
+    pub order_item_id: i64,
+    pub quantity_received: f64,
+}
+
+// Sprint F: License Management
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LicenseRecord {
+    pub id: i64,
+    pub name: String,
+    pub license_type: Option<String>,
+    pub valid_from: Option<String>,
+    pub valid_until: Option<String>,
+    pub max_uses: Option<i32>,
+    pub current_uses: i32,
+    pub commercial_allowed: bool,
+    pub source: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchParams {

@@ -14,6 +14,7 @@ pub mod transfer;
 pub mod print;
 pub mod projects;
 pub mod manufacturing;
+pub mod procurement;
 pub mod versions;
 pub mod viewer;
 

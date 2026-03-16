@@ -837,6 +837,471 @@ fn row_to_time_entry(row: &rusqlite::Row) -> rusqlite::Result<TimeEntry> {
     })
 }
 
+// ── Step Definitions ───────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepDefCreate {
+    pub name: String,
+    pub description: Option<String>,
+    pub default_duration_minutes: Option<f64>,
+    pub sort_order: Option<i32>,
+}
+
+#[tauri::command]
+pub fn create_step_def(
+    db: State<'_, DbState>,
+    step: StepDefCreate,
+) -> Result<crate::db::models::StepDefinition, AppError> {
+    let name = step.name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::Validation("Schrittname darf nicht leer sein".into()));
+    }
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "INSERT INTO step_definitions (name, description, default_duration_minutes, sort_order) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![name, step.description, step.default_duration_minutes, step.sort_order.unwrap_or(0)],
+    )?;
+    let id = conn.last_insert_rowid();
+    conn.query_row(
+        "SELECT id, name, description, default_duration_minutes, sort_order, created_at FROM step_definitions WHERE id = ?1",
+        [id], row_to_step_def,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn get_step_defs(db: State<'_, DbState>) -> Result<Vec<crate::db::models::StepDefinition>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, description, default_duration_minutes, sort_order, created_at FROM step_definitions ORDER BY sort_order, name"
+    )?;
+    let defs = stmt.query_map([], row_to_step_def)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(defs)
+}
+
+#[tauri::command]
+pub fn update_step_def(
+    db: State<'_, DbState>,
+    step_id: i64,
+    name: Option<String>,
+    description: Option<String>,
+    default_duration_minutes: Option<f64>,
+    sort_order: Option<i32>,
+) -> Result<crate::db::models::StepDefinition, AppError> {
+    let conn = lock_db(&db)?;
+    let mut sets: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(n) = &name {
+        let trimmed = n.trim();
+        if trimmed.is_empty() { return Err(AppError::Validation("Schrittname darf nicht leer sein".into())); }
+        params.push(Box::new(trimmed.to_string())); sets.push(format!("name = ?{}", params.len()));
+    }
+    if let Some(v) = &description { params.push(Box::new(v.clone())); sets.push(format!("description = ?{}", params.len())); }
+    if let Some(v) = default_duration_minutes { params.push(Box::new(v)); sets.push(format!("default_duration_minutes = ?{}", params.len())); }
+    if let Some(v) = sort_order { params.push(Box::new(v)); sets.push(format!("sort_order = ?{}", params.len())); }
+
+    if sets.is_empty() {
+        return conn.query_row(
+            "SELECT id, name, description, default_duration_minutes, sort_order, created_at FROM step_definitions WHERE id = ?1",
+            [step_id], row_to_step_def,
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Schritt {step_id} nicht gefunden")),
+            _ => AppError::Database(e),
+        });
+    }
+
+    params.push(Box::new(step_id));
+    let sql = format!("UPDATE step_definitions SET {} WHERE id = ?{}", sets.join(", "), params.len());
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let changes = conn.execute(&sql, param_refs.as_slice())?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Schritt {step_id} nicht gefunden"))); }
+
+    conn.query_row(
+        "SELECT id, name, description, default_duration_minutes, sort_order, created_at FROM step_definitions WHERE id = ?1",
+        [step_id], row_to_step_def,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn delete_step_def(db: State<'_, DbState>, step_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let changes = conn.execute("DELETE FROM step_definitions WHERE id = ?1", [step_id])?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Schritt {step_id} nicht gefunden"))); }
+    Ok(())
+}
+
+fn row_to_step_def(row: &rusqlite::Row) -> rusqlite::Result<crate::db::models::StepDefinition> {
+    Ok(crate::db::models::StepDefinition {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        default_duration_minutes: row.get(3)?,
+        sort_order: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
+// ── Product Steps ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn set_product_steps(
+    db: State<'_, DbState>,
+    product_id: i64,
+    step_def_ids: Vec<i64>,
+) -> Result<Vec<crate::db::models::ProductStep>, AppError> {
+    let conn = lock_db(&db)?;
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM product_steps WHERE product_id = ?1", [product_id])?;
+    for (i, sid) in step_def_ids.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO product_steps (product_id, step_definition_id, sort_order) VALUES (?1, ?2, ?3)",
+            rusqlite::params![product_id, sid, i as i32],
+        )?;
+    }
+    tx.commit()?;
+    get_product_steps_inner(&conn, product_id)
+}
+
+#[tauri::command]
+pub fn get_product_steps(
+    db: State<'_, DbState>,
+    product_id: i64,
+) -> Result<Vec<crate::db::models::ProductStep>, AppError> {
+    let conn = lock_db(&db)?;
+    get_product_steps_inner(&conn, product_id)
+}
+
+fn get_product_steps_inner(conn: &rusqlite::Connection, product_id: i64) -> Result<Vec<crate::db::models::ProductStep>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, product_id, step_definition_id, sort_order FROM product_steps WHERE product_id = ?1 ORDER BY sort_order"
+    )?;
+    let steps = stmt.query_map([product_id], |row| {
+        Ok(crate::db::models::ProductStep {
+            id: row.get(0)?,
+            product_id: row.get(1)?,
+            step_definition_id: row.get(2)?,
+            sort_order: row.get(3)?,
+        })
+    })?.collect::<Result<Vec<_>, _>>()?;
+    Ok(steps)
+}
+
+// ── Workflow Steps ─────────────────────────────────────────────────
+
+const VALID_WF_STATUSES: &[&str] = &["pending", "in_progress", "completed", "skipped"];
+
+#[tauri::command]
+pub fn create_workflow_steps_from_product(
+    db: State<'_, DbState>,
+    project_id: i64,
+    product_id: i64,
+) -> Result<Vec<crate::db::models::WorkflowStep>, AppError> {
+    let conn = lock_db(&db)?;
+    let product_steps = get_product_steps_inner(&conn, product_id)?;
+    let tx = conn.unchecked_transaction()?;
+    for ps in &product_steps {
+        tx.execute(
+            "INSERT INTO workflow_steps (project_id, step_definition_id, sort_order) VALUES (?1, ?2, ?3)",
+            rusqlite::params![project_id, ps.step_definition_id, ps.sort_order],
+        )?;
+    }
+    tx.commit()?;
+    get_workflow_steps_inner(&conn, project_id)
+}
+
+#[tauri::command]
+pub fn get_workflow_steps(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<crate::db::models::WorkflowStep>, AppError> {
+    let conn = lock_db(&db)?;
+    get_workflow_steps_inner(&conn, project_id)
+}
+
+fn get_workflow_steps_inner(conn: &rusqlite::Connection, project_id: i64) -> Result<Vec<crate::db::models::WorkflowStep>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, step_definition_id, status, responsible, started_at, completed_at, notes, sort_order \
+         FROM workflow_steps WHERE project_id = ?1 ORDER BY sort_order"
+    )?;
+    let steps = stmt.query_map([project_id], |row| {
+        Ok(crate::db::models::WorkflowStep {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            step_definition_id: row.get(2)?,
+            status: row.get(3)?,
+            responsible: row.get(4)?,
+            started_at: row.get(5)?,
+            completed_at: row.get(6)?,
+            notes: row.get(7)?,
+            sort_order: row.get(8)?,
+        })
+    })?.collect::<Result<Vec<_>, _>>()?;
+    Ok(steps)
+}
+
+#[tauri::command]
+pub fn update_workflow_step(
+    db: State<'_, DbState>,
+    step_id: i64,
+    status: Option<String>,
+    responsible: Option<String>,
+    notes: Option<String>,
+) -> Result<crate::db::models::WorkflowStep, AppError> {
+    let conn = lock_db(&db)?;
+    let mut sets: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(s) = &status {
+        if !VALID_WF_STATUSES.contains(&s.as_str()) {
+            return Err(AppError::Validation(format!("Ungueltiger Workflowstatus: {s}")));
+        }
+        params.push(Box::new(s.clone())); sets.push(format!("status = ?{}", params.len()));
+        if s == "in_progress" {
+            sets.push("started_at = COALESCE(started_at, datetime('now'))".to_string());
+            sets.push("completed_at = NULL".to_string());
+        } else if s == "completed" {
+            sets.push("completed_at = datetime('now')".to_string());
+        } else if s == "pending" {
+            sets.push("started_at = NULL".to_string());
+            sets.push("completed_at = NULL".to_string());
+        }
+    }
+    if let Some(v) = &responsible { params.push(Box::new(v.clone())); sets.push(format!("responsible = ?{}", params.len())); }
+    if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
+
+    if sets.is_empty() {
+        return conn.query_row(
+            "SELECT id, project_id, step_definition_id, status, responsible, started_at, completed_at, notes, sort_order \
+             FROM workflow_steps WHERE id = ?1",
+            [step_id], |row| {
+                Ok(crate::db::models::WorkflowStep {
+                    id: row.get(0)?, project_id: row.get(1)?, step_definition_id: row.get(2)?,
+                    status: row.get(3)?, responsible: row.get(4)?, started_at: row.get(5)?,
+                    completed_at: row.get(6)?, notes: row.get(7)?, sort_order: row.get(8)?,
+                })
+            },
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Workflowschritt {step_id} nicht gefunden")),
+            _ => AppError::Database(e),
+        });
+    }
+
+    params.push(Box::new(step_id));
+    let sql = format!("UPDATE workflow_steps SET {} WHERE id = ?{}", sets.join(", "), params.len());
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let changes = conn.execute(&sql, param_refs.as_slice())?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Workflowschritt {step_id} nicht gefunden"))); }
+
+    conn.query_row(
+        "SELECT id, project_id, step_definition_id, status, responsible, started_at, completed_at, notes, sort_order \
+         FROM workflow_steps WHERE id = ?1",
+        [step_id], |row| {
+            Ok(crate::db::models::WorkflowStep {
+                id: row.get(0)?, project_id: row.get(1)?, step_definition_id: row.get(2)?,
+                status: row.get(3)?, responsible: row.get(4)?, started_at: row.get(5)?,
+                completed_at: row.get(6)?, notes: row.get(7)?, sort_order: row.get(8)?,
+            })
+        },
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn delete_workflow_step(db: State<'_, DbState>, step_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let changes = conn.execute("DELETE FROM workflow_steps WHERE id = ?1", [step_id])?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Workflowschritt {step_id} nicht gefunden"))); }
+    Ok(())
+}
+
+// ── License Management ─────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LicenseCreate {
+    pub name: String,
+    pub license_type: Option<String>,
+    pub valid_from: Option<String>,
+    pub valid_until: Option<String>,
+    pub max_uses: Option<i32>,
+    pub commercial_allowed: Option<bool>,
+    pub source: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[tauri::command]
+pub fn create_license(
+    db: State<'_, DbState>,
+    license: LicenseCreate,
+) -> Result<crate::db::models::LicenseRecord, AppError> {
+    let name = license.name.trim().to_string();
+    if name.is_empty() { return Err(AppError::Validation("Lizenzname darf nicht leer sein".into())); }
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "INSERT INTO license_records (name, license_type, valid_from, valid_until, max_uses, commercial_allowed, source, notes) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![name, license.license_type, license.valid_from, license.valid_until,
+            license.max_uses, license.commercial_allowed.unwrap_or(false) as i32, license.source, license.notes],
+    )?;
+    let id = conn.last_insert_rowid();
+    conn.query_row(
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+         FROM license_records WHERE id = ?1",
+        [id], row_to_license,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn get_licenses(db: State<'_, DbState>) -> Result<Vec<crate::db::models::LicenseRecord>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+         FROM license_records WHERE deleted_at IS NULL ORDER BY name"
+    )?;
+    let records = stmt.query_map([], row_to_license)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(records)
+}
+
+#[tauri::command]
+pub fn get_license(db: State<'_, DbState>, license_id: i64) -> Result<crate::db::models::LicenseRecord, AppError> {
+    let conn = lock_db(&db)?;
+    conn.query_row(
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+         FROM license_records WHERE id = ?1 AND deleted_at IS NULL",
+        [license_id], row_to_license,
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Lizenz {license_id} nicht gefunden")),
+        _ => AppError::Database(e),
+    })
+}
+
+#[tauri::command]
+pub fn update_license(
+    db: State<'_, DbState>,
+    license_id: i64,
+    name: Option<String>,
+    license_type: Option<String>,
+    valid_from: Option<String>,
+    valid_until: Option<String>,
+    max_uses: Option<i32>,
+    commercial_allowed: Option<bool>,
+    source: Option<String>,
+    notes: Option<String>,
+) -> Result<crate::db::models::LicenseRecord, AppError> {
+    let conn = lock_db(&db)?;
+    let mut sets: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(n) = &name {
+        let t = n.trim();
+        if t.is_empty() { return Err(AppError::Validation("Lizenzname darf nicht leer sein".into())); }
+        params.push(Box::new(t.to_string())); sets.push(format!("name = ?{}", params.len()));
+    }
+    if let Some(v) = &license_type { params.push(Box::new(v.clone())); sets.push(format!("license_type = ?{}", params.len())); }
+    if let Some(v) = &valid_from { params.push(Box::new(v.clone())); sets.push(format!("valid_from = ?{}", params.len())); }
+    if let Some(v) = &valid_until { params.push(Box::new(v.clone())); sets.push(format!("valid_until = ?{}", params.len())); }
+    if let Some(v) = max_uses { params.push(Box::new(v)); sets.push(format!("max_uses = ?{}", params.len())); }
+    if let Some(v) = commercial_allowed { params.push(Box::new(v as i32)); sets.push(format!("commercial_allowed = ?{}", params.len())); }
+    if let Some(v) = &source { params.push(Box::new(v.clone())); sets.push(format!("source = ?{}", params.len())); }
+    if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
+
+    if sets.is_empty() {
+        return conn.query_row(
+            "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+             FROM license_records WHERE id = ?1",
+            [license_id], row_to_license,
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Lizenz {license_id} nicht gefunden")),
+            _ => AppError::Database(e),
+        });
+    }
+
+    sets.push("updated_at = datetime('now')".to_string());
+    params.push(Box::new(license_id));
+    let sql = format!("UPDATE license_records SET {} WHERE id = ?{} AND deleted_at IS NULL", sets.join(", "), params.len());
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let changes = conn.execute(&sql, param_refs.as_slice())?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Lizenz {license_id} nicht gefunden"))); }
+
+    conn.query_row(
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+         FROM license_records WHERE id = ?1",
+        [license_id], row_to_license,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn delete_license(db: State<'_, DbState>, license_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let changes = conn.execute(
+        "UPDATE license_records SET deleted_at = datetime('now') WHERE id = ?1 AND deleted_at IS NULL",
+        [license_id],
+    )?;
+    if changes == 0 { return Err(AppError::NotFound(format!("Lizenz {license_id} nicht gefunden"))); }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn link_license_to_file(db: State<'_, DbState>, license_id: i64, file_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "INSERT OR IGNORE INTO license_file_links (license_id, file_id) VALUES (?1, ?2)",
+        rusqlite::params![license_id, file_id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn unlink_license_from_file(db: State<'_, DbState>, license_id: i64, file_id: i64) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "DELETE FROM license_file_links WHERE license_id = ?1 AND file_id = ?2",
+        rusqlite::params![license_id, file_id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_file_licenses(db: State<'_, DbState>, file_id: i64) -> Result<Vec<crate::db::models::LicenseRecord>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT l.id, l.name, l.license_type, l.valid_from, l.valid_until, l.max_uses, l.current_uses, l.commercial_allowed, l.source, l.notes, l.created_at, l.updated_at \
+         FROM license_records l JOIN license_file_links lf ON lf.license_id = l.id WHERE lf.file_id = ?1 AND l.deleted_at IS NULL ORDER BY l.name"
+    )?;
+    let records = stmt.query_map([file_id], row_to_license)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(records)
+}
+
+#[tauri::command]
+pub fn get_expiring_licenses(db: State<'_, DbState>, days_ahead: Option<i32>) -> Result<Vec<crate::db::models::LicenseRecord>, AppError> {
+    let days = days_ahead.unwrap_or(30);
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, source, notes, created_at, updated_at \
+         FROM license_records WHERE deleted_at IS NULL AND valid_until IS NOT NULL AND valid_until <= datetime('now', ?1) AND valid_until >= datetime('now') ORDER BY valid_until"
+    )?;
+    let threshold = format!("+{days} days");
+    let records = stmt.query_map([&threshold], row_to_license)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(records)
+}
+
+fn row_to_license(row: &rusqlite::Row) -> rusqlite::Result<crate::db::models::LicenseRecord> {
+    Ok(crate::db::models::LicenseRecord {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        license_type: row.get(2)?,
+        valid_from: row.get(3)?,
+        valid_until: row.get(4)?,
+        max_uses: row.get(5)?,
+        current_uses: row.get(6)?,
+        commercial_allowed: row.get::<_, i32>(7)? != 0,
+        source: row.get(8)?,
+        notes: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::db::migrations::init_database_in_memory;

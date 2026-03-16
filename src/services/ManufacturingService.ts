@@ -6,6 +6,10 @@ import type {
   Product,
   BillOfMaterial,
   TimeEntry,
+  StepDefinition,
+  ProductStep,
+  WorkflowStep,
+  LicenseRecord,
 } from "../types/index";
 
 // ── Suppliers ──────────────────────────────────────────────────────────────
@@ -201,4 +205,123 @@ export async function updateTimeEntry(
 
 export async function deleteTimeEntry(entryId: number): Promise<void> {
   return invoke("delete_time_entry", { entryId });
+}
+
+// ── Step Definitions ───────────────────────────────────────────────
+
+export async function createStepDef(step: {
+  name: string;
+  description?: string;
+  defaultDurationMinutes?: number;
+  sortOrder?: number;
+}): Promise<StepDefinition> {
+  return invoke("create_step_def", { step });
+}
+
+export async function getStepDefs(): Promise<StepDefinition[]> {
+  return invoke("get_step_defs");
+}
+
+export async function updateStepDef(
+  stepId: number,
+  name?: string,
+  description?: string,
+  defaultDurationMinutes?: number,
+  sortOrder?: number
+): Promise<StepDefinition> {
+  return invoke("update_step_def", { stepId, name, description, defaultDurationMinutes, sortOrder });
+}
+
+export async function deleteStepDef(stepId: number): Promise<void> {
+  return invoke("delete_step_def", { stepId });
+}
+
+// ── Product Steps ──────────────────────────────────────────────────
+
+export async function setProductSteps(productId: number, stepDefIds: number[]): Promise<ProductStep[]> {
+  return invoke("set_product_steps", { productId, stepDefIds });
+}
+
+export async function getProductSteps(productId: number): Promise<ProductStep[]> {
+  return invoke("get_product_steps", { productId });
+}
+
+// ── Workflow Steps ─────────────────────────────────────────────────
+
+export async function createWorkflowStepsFromProduct(projectId: number, productId: number): Promise<WorkflowStep[]> {
+  return invoke("create_workflow_steps_from_product", { projectId, productId });
+}
+
+export async function getWorkflowSteps(projectId: number): Promise<WorkflowStep[]> {
+  return invoke("get_workflow_steps", { projectId });
+}
+
+export async function updateWorkflowStep(
+  stepId: number,
+  status?: string,
+  responsible?: string,
+  notes?: string
+): Promise<WorkflowStep> {
+  return invoke("update_workflow_step", { stepId, status, responsible, notes });
+}
+
+export async function deleteWorkflowStep(stepId: number): Promise<void> {
+  return invoke("delete_workflow_step", { stepId });
+}
+
+// ── License Management ─────────────────────────────────────────────
+
+export async function createLicense(license: {
+  name: string;
+  licenseType?: string;
+  validFrom?: string;
+  validUntil?: string;
+  maxUses?: number;
+  commercialAllowed?: boolean;
+  source?: string;
+  notes?: string;
+}): Promise<LicenseRecord> {
+  return invoke("create_license", { license });
+}
+
+export async function getLicenses(): Promise<LicenseRecord[]> {
+  return invoke("get_licenses");
+}
+
+export async function getLicense(licenseId: number): Promise<LicenseRecord> {
+  return invoke("get_license", { licenseId });
+}
+
+export async function updateLicense(
+  licenseId: number,
+  name?: string,
+  licenseType?: string,
+  validFrom?: string,
+  validUntil?: string,
+  maxUses?: number,
+  commercialAllowed?: boolean,
+  source?: string,
+  notes?: string
+): Promise<LicenseRecord> {
+  return invoke("update_license", { licenseId, name, licenseType, validFrom, validUntil, maxUses, commercialAllowed, source, notes });
+}
+
+export async function deleteLicense(licenseId: number): Promise<void> {
+  return invoke("delete_license", { licenseId });
+}
+
+export async function linkLicenseToFile(licenseId: number, fileId: number): Promise<void> {
+  return invoke("link_license_to_file", { licenseId, fileId });
+}
+
+export async function unlinkLicenseFromFile(licenseId: number, fileId: number): Promise<void> {
+  return invoke("unlink_license_from_file", { licenseId, fileId });
+}
+
+export async function getFileLicenses(fileId: number): Promise<LicenseRecord[]> {
+  return invoke("get_file_licenses", { fileId });
+}
+
+export async function getExpiringLicenses(daysAhead?: number): Promise<LicenseRecord[]> {
+  return invoke("get_expiring_licenses", { daysAhead });
 }
