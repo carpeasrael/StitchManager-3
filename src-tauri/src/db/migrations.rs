@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 17;
+const CURRENT_VERSION: i32 = 18;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -111,6 +111,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 17 {
         apply_v17(conn)?;
+    }
+
+    if current < 18 {
+        apply_v18(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1067,6 +1071,47 @@ fn apply_v17(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v18(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Material consumptions: actual usage per project/material/step
+        CREATE TABLE IF NOT EXISTS material_consumptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            quantity REAL NOT NULL,
+            unit TEXT,
+            step_name TEXT,
+            recorded_by TEXT,
+            notes TEXT,
+            recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_material_consumptions_project_id ON material_consumptions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_material_consumptions_material_id ON material_consumptions(material_id);
+
+        -- Inventory transactions: audit log for all automated stock changes
+        CREATE TABLE IF NOT EXISTS inventory_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+            transaction_type TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_inventory_transactions_material_id ON inventory_transactions(material_id);
+        CREATE INDEX IF NOT EXISTS idx_inventory_transactions_project_id ON inventory_transactions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_inventory_transactions_type ON inventory_transactions(transaction_type);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (18, 'Add material consumption tracking and inventory transaction audit log');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1108,9 +1153,11 @@ mod tests {
             "folders",
             "instruction_bookmarks",
             "instruction_notes",
+            "inventory_transactions",
             "license_file_links",
             "license_records",
             "machine_profiles",
+            "material_consumptions",
             "material_inventory",
             "materials",
             "order_items",
@@ -1145,7 +1192,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 17, "Schema version must be 17");
+        assert_eq!(version, 18, "Schema version must be 17");
     }
 
     #[test]
@@ -1168,22 +1215,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_seventeen() {
+    fn test_schema_version_is_eighteen() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, 18);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 17",
+                "SELECT description FROM schema_version WHERE version = 18",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("cost"), "v17 description should mention cost");
+        assert!(desc.contains("consumption"), "v18 description should mention consumption");
     }
 
     #[test]

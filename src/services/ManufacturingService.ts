@@ -3,6 +3,8 @@ import type {
   Supplier,
   Material,
   MaterialInventory,
+  MaterialConsumption,
+  NachkalkulationLine,
   Product,
   BillOfMaterial,
   TimeEntry,
@@ -382,4 +384,42 @@ export async function updateDefect(
 
 export async function deleteDefect(defectId: number): Promise<void> {
   return invoke("delete_defect", { defectId });
+}
+
+// ── Inventory Automation ──────────────────────────────────────────────────
+
+export async function reserveMaterialsForProject(projectId: number): Promise<void> {
+  return invoke("reserve_materials_for_project", { projectId });
+}
+
+export async function releaseProjectReservations(projectId: number): Promise<void> {
+  return invoke("release_project_reservations", { projectId });
+}
+
+// ── Material Consumption ──────────────────────────────────────────────────
+
+export async function recordConsumption(
+  projectId: number,
+  materialId: number,
+  quantity: number,
+  unit?: string,
+  stepName?: string,
+  recordedBy?: string,
+  notes?: string
+): Promise<MaterialConsumption> {
+  return invoke("record_consumption", { projectId, materialId, quantity, unit, stepName, recordedBy, notes });
+}
+
+export async function getConsumptions(projectId: number): Promise<MaterialConsumption[]> {
+  return invoke("get_consumptions", { projectId });
+}
+
+export async function deleteConsumption(consumptionId: number): Promise<void> {
+  return invoke("delete_consumption", { consumptionId });
+}
+
+// ── Nachkalkulation ───────────────────────────────────────────────────────
+
+export async function getNachkalkulation(projectId: number): Promise<NachkalkulationLine[]> {
+  return invoke("get_nachkalkulation", { projectId });
 }

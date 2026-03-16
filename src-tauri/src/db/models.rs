@@ -295,6 +295,46 @@ pub struct MaterialInventory {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MaterialConsumption {
+    pub id: i64,
+    pub project_id: i64,
+    pub material_id: i64,
+    pub quantity: f64,
+    pub unit: Option<String>,
+    pub step_name: Option<String>,
+    pub recorded_by: Option<String>,
+    pub notes: Option<String>,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryTransaction {
+    pub id: i64,
+    pub material_id: i64,
+    pub project_id: Option<i64>,
+    pub transaction_type: String,
+    pub quantity: f64,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NachkalkulationLine {
+    pub material_id: i64,
+    pub material_name: String,
+    pub unit: Option<String>,
+    pub planned_quantity: f64,
+    pub actual_quantity: f64,
+    pub difference: f64,
+    pub planned_cost: f64,
+    pub actual_cost: f64,
+    pub cost_difference: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Product {
     pub id: i64,
     pub product_number: Option<String>,

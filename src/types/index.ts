@@ -347,6 +347,30 @@ export interface MaterialInventory {
   updatedAt: string;
 }
 
+export interface MaterialConsumption {
+  id: number;
+  projectId: number;
+  materialId: number;
+  quantity: number;
+  unit: string | null;
+  stepName: string | null;
+  recordedBy: string | null;
+  notes: string | null;
+  recordedAt: string;
+}
+
+export interface NachkalkulationLine {
+  materialId: number;
+  materialName: string;
+  unit: string | null;
+  plannedQuantity: number;
+  actualQuantity: number;
+  difference: number;
+  plannedCost: number;
+  actualCost: number;
+  costDifference: number;
+}
+
 export interface Product {
   id: number;
   productNumber: string | null;

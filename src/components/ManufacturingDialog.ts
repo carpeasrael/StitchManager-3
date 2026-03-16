@@ -993,6 +993,104 @@ export class ManufacturingDialog {
     }
     table.appendChild(tbody);
     container.appendChild(table);
+
+    // Materialverbrauch erfassen section
+    const consumeSection = document.createElement("div");
+    consumeSection.className = "mfg-form-section";
+    consumeSection.style.marginTop = "var(--spacing-4)";
+
+    const consumeTitle = document.createElement("h4");
+    consumeTitle.className = "mfg-form-section-title";
+    consumeTitle.textContent = "Materialverbrauch erfassen";
+    consumeSection.appendChild(consumeTitle);
+
+    const consumeForm = document.createElement("div");
+    consumeForm.style.display = "flex";
+    consumeForm.style.gap = "8px";
+    consumeForm.style.flexWrap = "wrap";
+    consumeForm.style.alignItems = "flex-end";
+
+    // Project selector
+    const projSel = document.createElement("select");
+    projSel.className = "mfg-input";
+    projSel.style.minWidth = "150px";
+    const projEmpty = document.createElement("option");
+    projEmpty.value = "";
+    projEmpty.textContent = "Projekt";
+    projSel.appendChild(projEmpty);
+    for (const p of this.allProjects) {
+      const opt = document.createElement("option");
+      opt.value = String(p.id);
+      opt.textContent = p.name;
+      projSel.appendChild(opt);
+    }
+    consumeForm.appendChild(projSel);
+
+    // Material selector
+    const matSel = document.createElement("select");
+    matSel.className = "mfg-input";
+    matSel.style.minWidth = "150px";
+    const matEmpty = document.createElement("option");
+    matEmpty.value = "";
+    matEmpty.textContent = "Material";
+    matSel.appendChild(matEmpty);
+    for (const m of this.materials) {
+      const opt = document.createElement("option");
+      opt.value = String(m.id);
+      opt.textContent = m.name;
+      matSel.appendChild(opt);
+    }
+    consumeForm.appendChild(matSel);
+
+    // Quantity
+    const qtyInput = document.createElement("input");
+    qtyInput.className = "mfg-input";
+    qtyInput.type = "number";
+    qtyInput.step = "0.01";
+    qtyInput.placeholder = "Menge";
+    qtyInput.style.width = "80px";
+    consumeForm.appendChild(qtyInput);
+
+    // Step name
+    const stepInput = document.createElement("input");
+    stepInput.className = "mfg-input";
+    stepInput.placeholder = "Arbeitsschritt";
+    stepInput.style.width = "120px";
+    consumeForm.appendChild(stepInput);
+
+    // Record button
+    const consumeBtn = document.createElement("button");
+    consumeBtn.className = "dialog-btn dialog-btn-primary";
+    consumeBtn.textContent = "Erfassen";
+    consumeBtn.addEventListener("click", async () => {
+      const pid = projSel.value ? Number(projSel.value) : null;
+      const mid = matSel.value ? Number(matSel.value) : null;
+      const qty = parseFloat(qtyInput.value);
+      if (!pid || !mid || isNaN(qty) || qty <= 0) {
+        ToastContainer.show("error", "Projekt, Material und positive Menge erforderlich");
+        return;
+      }
+      try {
+        await MfgService.recordConsumption(pid, mid, qty, undefined, stepInput.value || undefined);
+        ToastContainer.show("success", "Verbrauch erfasst");
+        // Refresh inventory
+        try {
+          for (const m of this.materials) {
+            try {
+              const inv = await MfgService.getInventory(m.id);
+              this.inventoryMap.set(m.id, inv);
+            } catch { /* no inventory record */ }
+          }
+        } catch { /* ignore */ }
+        this.renderActiveTab();
+      } catch {
+        ToastContainer.show("error", "Verbrauch konnte nicht erfasst werden");
+      }
+    });
+    consumeForm.appendChild(consumeBtn);
+
+    consumeSection.appendChild(consumeForm);
+    container.appendChild(consumeSection);
   }
 
   // ── Time Tracking Tab ─────────────────────────────────────────────
@@ -2105,6 +2203,107 @@ export class ManufacturingDialog {
     exportRow.appendChild(ratesBtn);
 
     container.appendChild(exportRow);
+
+    // Nachkalkulation section
+    if (this.reportProjectId) {
+      const nachkalkSection = document.createElement("div");
+      nachkalkSection.style.marginTop = "var(--spacing-3)";
+
+      const nachkalkBtn = document.createElement("button");
+      nachkalkBtn.className = "dialog-btn";
+      nachkalkBtn.textContent = "Nachkalkulation laden";
+      nachkalkBtn.addEventListener("click", async () => {
+        if (!this.reportProjectId) return;
+        try {
+          const lines = await MfgService.getNachkalkulation(this.reportProjectId);
+          nachkalkBtn.style.display = "none";
+          this.renderNachkalkulationTable(nachkalkSection, lines);
+        } catch {
+          ToastContainer.show("error", "Nachkalkulation fehlgeschlagen");
+        }
+      });
+      nachkalkSection.appendChild(nachkalkBtn);
+      container.appendChild(nachkalkSection);
+    }
+  }
+
+  private renderNachkalkulationTable(container: HTMLElement, lines: import("../types/index").NachkalkulationLine[]): void {
+    if (lines.length === 0) {
+      const hint = document.createElement("div");
+      hint.className = "mfg-tt-hint";
+      hint.textContent = "Keine Daten fuer Nachkalkulation (keine BOM oder Verbraeuche)";
+      container.appendChild(hint);
+      return;
+    }
+
+    const card = document.createElement("div");
+    card.className = "mfg-report-card mfg-kalkulation-card";
+
+    const h = document.createElement("h4");
+    h.className = "mfg-report-card-title";
+    h.textContent = "Nachkalkulation: Soll vs Ist";
+    card.appendChild(h);
+
+    const table = document.createElement("table");
+    table.className = "mfg-inv-table";
+    table.style.fontSize = "var(--font-size-caption)";
+    table.innerHTML =
+      "<thead><tr>" +
+      "<th>Material</th><th>Einheit</th><th>Soll</th><th>Ist</th><th>Diff</th>" +
+      "<th>Soll-Kosten</th><th>Ist-Kosten</th><th>Kosten-Diff</th>" +
+      "</tr></thead>";
+
+    const tbody = document.createElement("tbody");
+    let totalPlannedCost = 0;
+    let totalActualCost = 0;
+
+    for (const line of lines) {
+      totalPlannedCost += line.plannedCost;
+      totalActualCost += line.actualCost;
+
+      const tr = document.createElement("tr");
+      if (line.difference > 0) tr.className = "mfg-inv-low";
+
+      const cells = [
+        line.materialName,
+        line.unit || "-",
+        line.plannedQuantity.toFixed(2),
+        line.actualQuantity.toFixed(2),
+        (line.difference >= 0 ? "+" : "") + line.difference.toFixed(2),
+        line.plannedCost.toFixed(2) + " EUR",
+        line.actualCost.toFixed(2) + " EUR",
+        (line.costDifference >= 0 ? "+" : "") + line.costDifference.toFixed(2) + " EUR",
+      ];
+      for (const c of cells) {
+        const td = document.createElement("td");
+        td.textContent = c;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+
+    // Total row
+    const totalDiff = totalActualCost - totalPlannedCost;
+    const tfoot = document.createElement("tfoot");
+    const totalRow = document.createElement("tr");
+    totalRow.style.fontWeight = "600";
+    const totalCells = [
+      "Gesamt", "", "", "", "",
+      totalPlannedCost.toFixed(2) + " EUR",
+      totalActualCost.toFixed(2) + " EUR",
+      (totalDiff >= 0 ? "+" : "") + totalDiff.toFixed(2) + " EUR",
+    ];
+    for (const c of totalCells) {
+      const td = document.createElement("td");
+      td.textContent = c;
+      totalRow.appendChild(td);
+    }
+    tfoot.appendChild(totalRow);
+
+    table.appendChild(tbody);
+    table.appendChild(tfoot);
+    card.appendChild(table);
+    container.appendChild(card);
   }
 
   private createKalkulationCard(cb: CostBreakdown): HTMLElement {

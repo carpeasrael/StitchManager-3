@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use tauri::State;
 
-use crate::db::models::{BillOfMaterial, Material, MaterialInventory, Product, Supplier, TimeEntry};
+use crate::db::models::{BillOfMaterial, Material, MaterialConsumption, MaterialInventory, NachkalkulationLine, Product, Supplier, TimeEntry};
 use crate::error::{lock_db, AppError};
 use crate::DbState;
 
@@ -440,6 +440,421 @@ fn row_to_inventory(row: &rusqlite::Row) -> rusqlite::Result<MaterialInventory> 
         location: row.get(4)?,
         updated_at: row.get(5)?,
     })
+}
+
+fn row_to_consumption(row: &rusqlite::Row) -> rusqlite::Result<MaterialConsumption> {
+    Ok(MaterialConsumption {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        material_id: row.get(2)?,
+        quantity: row.get(3)?,
+        unit: row.get(4)?,
+        step_name: row.get(5)?,
+        recorded_by: row.get(6)?,
+        notes: row.get(7)?,
+        recorded_at: row.get(8)?,
+    })
+}
+
+// ── Inventory Automation ──────────────────────────────────────────────────
+
+/// Reserve materials for a project based on its BOM (called on approval).
+/// Computes BOM requirements from products linked via workflow_steps → product_steps.
+pub fn reserve_materials_for_project_inner(conn: &rusqlite::Connection, project_id: i64) -> Result<Vec<(i64, f64)>, AppError> {
+    conn.execute_batch("SAVEPOINT reserve_materials")?;
+
+    let result = (|| -> Result<Vec<(i64, f64)>, AppError> {
+        let quantity: i64 = conn.query_row(
+            "SELECT COALESCE(quantity, 1) FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+            [project_id],
+            |row| row.get(0),
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Projekt {project_id} nicht gefunden")),
+            _ => AppError::Database(e),
+        })?;
+        let qty = (quantity.max(1)) as f64;
+
+        // Release any existing reservations first (idempotent re-approval)
+        release_project_reservations_inner(conn, project_id)?;
+
+        // Get BOM materials for all products linked to this project
+        let mut stmt = conn.prepare(
+            "SELECT b.material_id, SUM(b.quantity) \
+             FROM bill_of_materials b \
+             WHERE b.product_id IN ( \
+                 SELECT DISTINCT ps.product_id FROM product_steps ps \
+                 JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
+                 WHERE ws.project_id = ?1 \
+             ) \
+             GROUP BY b.material_id"
+        )?;
+
+        let reservations: Vec<(i64, f64)> = stmt.query_map([project_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        for (material_id, bom_qty) in &reservations {
+            let reserve_qty = bom_qty * qty;
+
+            // Ensure inventory record exists
+            let exists: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM material_inventory WHERE material_id = ?1",
+                [material_id], |row| row.get(0),
+            )?;
+            if !exists {
+                conn.execute(
+                    "INSERT INTO material_inventory (material_id, total_stock, reserved_stock) VALUES (?1, 0, 0)",
+                    [material_id],
+                )?;
+            }
+
+            // Add to reserved_stock
+            conn.execute(
+                "UPDATE material_inventory SET reserved_stock = reserved_stock + ?1, updated_at = datetime('now') WHERE material_id = ?2",
+                rusqlite::params![reserve_qty, material_id],
+            )?;
+
+            // Log transaction
+            conn.execute(
+                "INSERT INTO inventory_transactions (material_id, project_id, transaction_type, quantity, notes) \
+                 VALUES (?1, ?2, 'reserve', ?3, 'Auto-Reservierung bei Projektfreigabe')",
+                rusqlite::params![material_id, project_id, reserve_qty],
+            )?;
+        }
+
+        Ok(reservations)
+    })();
+
+    match &result {
+        Ok(_) => conn.execute_batch("RELEASE reserve_materials")?,
+        Err(_) => conn.execute_batch("ROLLBACK TO reserve_materials")?,
+    }
+    result
+}
+
+#[tauri::command]
+pub fn reserve_materials_for_project(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    reserve_materials_for_project_inner(&conn, project_id)?;
+    Ok(())
+}
+
+/// Release remaining reserved stock for a project (called on completion/archive).
+pub fn release_project_reservations_inner(conn: &rusqlite::Connection, project_id: i64) -> Result<(), AppError> {
+    conn.execute_batch("SAVEPOINT release_reservations")?;
+
+    let result = (|| -> Result<(), AppError> {
+        let mut stmt = conn.prepare(
+            "SELECT material_id, SUM(CASE WHEN transaction_type = 'reserve' THEN quantity \
+                                          WHEN transaction_type = 'consume' THEN -quantity \
+                                          WHEN transaction_type = 'release' THEN -quantity \
+                                          WHEN transaction_type = 'reverse' THEN quantity \
+                                          ELSE 0 END) as net_reserved \
+             FROM inventory_transactions \
+             WHERE project_id = ?1 AND transaction_type IN ('reserve', 'consume', 'release', 'reverse') \
+             GROUP BY material_id \
+             HAVING net_reserved > 0"
+        )?;
+
+        let releases: Vec<(i64, f64)> = stmt.query_map([project_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        for (material_id, release_qty) in &releases {
+            conn.execute(
+                "UPDATE material_inventory SET reserved_stock = MAX(0, reserved_stock - ?1), updated_at = datetime('now') WHERE material_id = ?2",
+                rusqlite::params![release_qty, material_id],
+            )?;
+            conn.execute(
+                "INSERT INTO inventory_transactions (material_id, project_id, transaction_type, quantity, notes) \
+                 VALUES (?1, ?2, 'release', ?3, 'Freigabe bei Projektabschluss')",
+                rusqlite::params![material_id, project_id, release_qty],
+            )?;
+        }
+        Ok(())
+    })();
+
+    match &result {
+        Ok(_) => conn.execute_batch("RELEASE release_reservations")?,
+        Err(_) => conn.execute_batch("ROLLBACK TO release_reservations")?,
+    }
+    result
+}
+
+#[tauri::command]
+pub fn release_project_reservations(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    release_project_reservations_inner(&conn, project_id)?;
+    Ok(())
+}
+
+// ── Material Consumption ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn record_consumption(
+    db: State<'_, DbState>,
+    project_id: i64,
+    material_id: i64,
+    quantity: f64,
+    unit: Option<String>,
+    step_name: Option<String>,
+    recorded_by: Option<String>,
+    notes: Option<String>,
+) -> Result<MaterialConsumption, AppError> {
+    if quantity <= 0.0 {
+        return Err(AppError::Validation("Verbrauchsmenge muss positiv sein".into()));
+    }
+    let conn = lock_db(&db)?;
+
+    // Validate project and material exist
+    let project_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        [project_id], |row| row.get(0),
+    )?;
+    if !project_exists {
+        return Err(AppError::NotFound(format!("Projekt {project_id} nicht gefunden")));
+    }
+    let material_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM materials WHERE id = ?1 AND deleted_at IS NULL",
+        [material_id], |row| row.get(0),
+    )?;
+    if !material_exists {
+        return Err(AppError::NotFound(format!("Material {material_id} nicht gefunden")));
+    }
+
+    conn.execute_batch("SAVEPOINT record_consume")?;
+
+    let result = (|| -> Result<i64, AppError> {
+        // Insert consumption record
+        conn.execute(
+            "INSERT INTO material_consumptions (project_id, material_id, quantity, unit, step_name, recorded_by, notes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![project_id, material_id, quantity, unit, step_name, recorded_by, notes],
+        )?;
+        let id = conn.last_insert_rowid();
+
+        // Ensure inventory record exists
+        let inv_exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM material_inventory WHERE material_id = ?1",
+            [material_id], |row| row.get(0),
+        )?;
+        if !inv_exists {
+            conn.execute(
+                "INSERT INTO material_inventory (material_id, total_stock, reserved_stock) VALUES (?1, 0, 0)",
+                [material_id],
+            )?;
+        }
+
+        // Reduce total_stock
+        conn.execute(
+            "UPDATE material_inventory SET total_stock = MAX(0, total_stock - ?1), updated_at = datetime('now') WHERE material_id = ?2",
+            rusqlite::params![quantity, material_id],
+        )?;
+
+        // Reduce reserved_stock (consume from reservation if any exists for this project)
+        let net_reserved: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN transaction_type = 'reserve' THEN quantity \
+                                       WHEN transaction_type = 'consume' THEN -quantity \
+                                       WHEN transaction_type = 'release' THEN -quantity \
+                                       WHEN transaction_type = 'reverse' THEN quantity \
+                                       ELSE 0 END), 0) \
+             FROM inventory_transactions \
+             WHERE project_id = ?1 AND material_id = ?2",
+            rusqlite::params![project_id, material_id],
+            |row| row.get(0),
+        )?;
+        let reserved_reduction = quantity.min(net_reserved.max(0.0));
+        if reserved_reduction > 0.0 {
+            conn.execute(
+                "UPDATE material_inventory SET reserved_stock = MAX(0, reserved_stock - ?1), updated_at = datetime('now') WHERE material_id = ?2",
+                rusqlite::params![reserved_reduction, material_id],
+            )?;
+        }
+
+        // Log transaction
+        conn.execute(
+            "INSERT INTO inventory_transactions (material_id, project_id, transaction_type, quantity, notes) \
+             VALUES (?1, ?2, 'consume', ?3, ?4)",
+            rusqlite::params![material_id, project_id, quantity, notes],
+        )?;
+
+        Ok(id)
+    })();
+
+    match &result {
+        Ok(_) => conn.execute_batch("RELEASE record_consume")?,
+        Err(_) => conn.execute_batch("ROLLBACK TO record_consume")?,
+    }
+    let id = result?;
+
+    conn.query_row(
+        "SELECT id, project_id, material_id, quantity, unit, step_name, recorded_by, notes, recorded_at \
+         FROM material_consumptions WHERE id = ?1",
+        [id],
+        row_to_consumption,
+    ).map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn get_consumptions(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<MaterialConsumption>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, material_id, quantity, unit, step_name, recorded_by, notes, recorded_at \
+         FROM material_consumptions WHERE project_id = ?1 ORDER BY recorded_at DESC"
+    )?;
+    let entries = stmt.query_map([project_id], row_to_consumption)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn delete_consumption(
+    db: State<'_, DbState>,
+    consumption_id: i64,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+
+    // Get consumption details before starting savepoint
+    let (project_id, material_id, quantity): (i64, i64, f64) = conn.query_row(
+        "SELECT project_id, material_id, quantity FROM material_consumptions WHERE id = ?1",
+        [consumption_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Verbrauch {consumption_id} nicht gefunden")),
+        _ => AppError::Database(e),
+    })?;
+
+    conn.execute_batch("SAVEPOINT delete_consume")?;
+
+    let result = (|| -> Result<(), AppError> {
+        // Determine how much of the original consumption was drawn from reserved stock.
+        let net_reserved_before: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN transaction_type = 'reserve' THEN quantity \
+                                       WHEN transaction_type = 'consume' THEN -quantity \
+                                       WHEN transaction_type = 'release' THEN -quantity \
+                                       WHEN transaction_type = 'reverse' THEN quantity \
+                                       ELSE 0 END), 0) \
+             FROM inventory_transactions \
+             WHERE project_id = ?1 AND material_id = ?2",
+            rusqlite::params![project_id, material_id],
+            |row| row.get(0),
+        )?;
+
+        let total_reserved: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(quantity), 0) FROM inventory_transactions \
+             WHERE project_id = ?1 AND material_id = ?2 AND transaction_type = 'reserve'",
+            rusqlite::params![project_id, material_id],
+            |row| row.get(0),
+        )?;
+
+        let reserved_restore = quantity.min((total_reserved - net_reserved_before).max(0.0));
+
+        conn.execute("DELETE FROM material_consumptions WHERE id = ?1", [consumption_id])?;
+
+        conn.execute(
+            "UPDATE material_inventory SET total_stock = total_stock + ?1, \
+             reserved_stock = reserved_stock + ?2, \
+             updated_at = datetime('now') WHERE material_id = ?3",
+            rusqlite::params![quantity, reserved_restore, material_id],
+        )?;
+
+        conn.execute(
+            "INSERT INTO inventory_transactions (material_id, project_id, transaction_type, quantity, notes) \
+             VALUES (?1, ?2, 'reverse', ?3, 'Verbrauch storniert')",
+            rusqlite::params![material_id, project_id, quantity],
+        )?;
+
+        Ok(())
+    })();
+
+    match &result {
+        Ok(_) => conn.execute_batch("RELEASE delete_consume")?,
+        Err(_) => conn.execute_batch("ROLLBACK TO delete_consume")?,
+    }
+    result
+}
+
+// ── Nachkalkulation ───────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_nachkalkulation(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<NachkalkulationLine>, AppError> {
+    let conn = lock_db(&db)?;
+
+    let quantity: i64 = conn.query_row(
+        "SELECT COALESCE(quantity, 1) FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        [project_id],
+        |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Projekt {project_id} nicht gefunden")),
+        _ => AppError::Database(e),
+    })?;
+    let qty = (quantity.max(1)) as f64;
+
+    // Get planned quantities from BOM and actual from consumptions
+    let mut stmt = conn.prepare(
+        "SELECT m.id, m.name, m.unit, \
+             COALESCE(planned.total_qty, 0) * ?2 as planned_qty, \
+             COALESCE(actual.total_qty, 0) as actual_qty, \
+             COALESCE(m.net_price, 0) as net_price, \
+             COALESCE(m.waste_factor, 0) as waste_factor \
+         FROM materials m \
+         LEFT JOIN ( \
+             SELECT b.material_id, SUM(b.quantity) as total_qty \
+             FROM bill_of_materials b \
+             WHERE b.product_id IN ( \
+                 SELECT DISTINCT ps.product_id FROM product_steps ps \
+                 JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
+                 WHERE ws.project_id = ?1 \
+             ) GROUP BY b.material_id \
+         ) planned ON planned.material_id = m.id \
+         LEFT JOIN ( \
+             SELECT material_id, SUM(quantity) as total_qty \
+             FROM material_consumptions \
+             WHERE project_id = ?1 \
+             GROUP BY material_id \
+         ) actual ON actual.material_id = m.id \
+         WHERE m.deleted_at IS NULL AND (planned.total_qty > 0 OR actual.total_qty > 0) \
+         ORDER BY m.name"
+    )?;
+
+    let lines = stmt.query_map(rusqlite::params![project_id, qty], |row| {
+        let material_id: i64 = row.get(0)?;
+        let material_name: String = row.get(1)?;
+        let unit: Option<String> = row.get(2)?;
+        let planned_quantity: f64 = row.get(3)?;
+        let actual_quantity: f64 = row.get(4)?;
+        let net_price: f64 = row.get(5)?;
+        let waste_factor: f64 = row.get(6)?;
+        let difference = actual_quantity - planned_quantity;
+        let planned_cost = planned_quantity * net_price * (1.0 + waste_factor);
+        let actual_cost = actual_quantity * net_price;
+        let cost_difference = actual_cost - planned_cost;
+
+        Ok(NachkalkulationLine {
+            material_id,
+            material_name,
+            unit,
+            planned_quantity,
+            actual_quantity,
+            difference,
+            planned_cost,
+            actual_cost,
+            cost_difference,
+        })
+    })?.collect::<Result<Vec<_>, _>>()?;
+
+    Ok(lines)
 }
 
 // ── Products ───────────────────────────────────────────────────────────────
@@ -1653,5 +2068,93 @@ mod tests {
             "SELECT priority FROM projects WHERE id = ?1", [pid], |row| row.get(0),
         ).unwrap();
         assert_eq!(priority, "high");
+    }
+
+    #[test]
+    fn test_reservation_and_consumption_lifecycle() {
+        let conn = init_database_in_memory().unwrap();
+
+        // Setup: project, product, material, BOM, workflow
+        conn.execute("INSERT INTO projects (name, status, quantity) VALUES ('Test', 'in_progress', 2)", []).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO products (name, status) VALUES ('Tasche', 'active')", []).unwrap();
+        let prod_id = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO materials (name, net_price, waste_factor) VALUES ('Stoff', 10.0, 0.05)", []).unwrap();
+        let mat_id = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO bill_of_materials (product_id, material_id, quantity) VALUES (?1, ?2, 3.0)",
+            rusqlite::params![prod_id, mat_id]).unwrap();
+
+        conn.execute("INSERT INTO step_definitions (name) VALUES ('Naehen')", []).unwrap();
+        let step_id = conn.last_insert_rowid();
+        conn.execute("INSERT INTO product_steps (product_id, step_definition_id) VALUES (?1, ?2)",
+            rusqlite::params![prod_id, step_id]).unwrap();
+        conn.execute("INSERT INTO workflow_steps (project_id, step_definition_id, status) VALUES (?1, ?2, 'pending')",
+            rusqlite::params![pid, step_id]).unwrap();
+
+        // Initial inventory: 20 units
+        conn.execute("INSERT INTO material_inventory (material_id, total_stock, reserved_stock) VALUES (?1, 20.0, 0.0)",
+            [mat_id]).unwrap();
+
+        // 1. Reserve: qty=2, BOM=3.0 → reserve 6.0
+        super::reserve_materials_for_project_inner(&conn, pid).unwrap();
+        let reserved: f64 = conn.query_row(
+            "SELECT reserved_stock FROM material_inventory WHERE material_id = ?1", [mat_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(reserved, 6.0);
+
+        // Verify transaction logged
+        let tx_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM inventory_transactions WHERE project_id = ?1 AND transaction_type = 'reserve'",
+            [pid], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(tx_count, 1);
+
+        // 2. Consume 4.0 units
+        conn.execute(
+            "INSERT INTO material_consumptions (project_id, material_id, quantity) VALUES (?1, ?2, 4.0)",
+            rusqlite::params![pid, mat_id],
+        ).unwrap();
+        // Simulate stock reduction (normally done by record_consumption command)
+        conn.execute(
+            "UPDATE material_inventory SET total_stock = total_stock - 4.0, reserved_stock = MAX(0, reserved_stock - 4.0) WHERE material_id = ?1",
+            [mat_id],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO inventory_transactions (material_id, project_id, transaction_type, quantity) VALUES (?1, ?2, 'consume', 4.0)",
+            rusqlite::params![mat_id, pid],
+        ).unwrap();
+
+        let (total, reserved): (f64, f64) = conn.query_row(
+            "SELECT total_stock, reserved_stock FROM material_inventory WHERE material_id = ?1", [mat_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(total, 16.0); // 20 - 4
+        assert_eq!(reserved, 2.0); // 6 - 4
+
+        // 3. Release remaining reservations
+        super::release_project_reservations_inner(&conn, pid).unwrap();
+        let reserved_after: f64 = conn.query_row(
+            "SELECT reserved_stock FROM material_inventory WHERE material_id = ?1", [mat_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(reserved_after, 0.0); // 2 - 2 = 0
+
+        // 4. Nachkalkulation — verify data via SQL (command requires Tauri State)
+        let (planned, actual): (f64, f64) = conn.query_row(
+            "SELECT \
+                 COALESCE((SELECT SUM(b.quantity) FROM bill_of_materials b \
+                     WHERE b.product_id IN (SELECT DISTINCT ps.product_id FROM product_steps ps \
+                         JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
+                         WHERE ws.project_id = ?1) \
+                     AND b.material_id = ?2), 0) * 2, \
+                 COALESCE((SELECT SUM(c.quantity) FROM material_consumptions c \
+                     WHERE c.project_id = ?1 AND c.material_id = ?2), 0)",
+            rusqlite::params![pid, mat_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(planned, 6.0); // BOM 3.0 × qty 2
+        assert_eq!(actual, 4.0);   // consumed 4.0
     }
 }
