@@ -1,6 +1,8 @@
 import * as ProjectService from "../services/ProjectService";
+import * as MfgService from "../services/ManufacturingService";
+import * as SettingsService from "../services/SettingsService";
 import { ToastContainer } from "./Toast";
-import type { Project, ProjectDetail } from "../types";
+import type { Project, ProjectDetail, TimeEntry } from "../types";
 
 export class ProjectListDialog {
   private static instance: ProjectListDialog | null = null;
@@ -9,8 +11,11 @@ export class ProjectListDialog {
   private projects: Project[] = [];
   private selectedProject: Project | null = null;
   private details: ProjectDetail[] = [];
+  private timeEntries: TimeEntry[] = [];
   private statusFilter = "";
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private fieldIdCounter = 0;
+  private laborRate = 25.0;
 
   static async open(): Promise<void> {
     if (ProjectListDialog.instance) {
@@ -30,6 +35,15 @@ export class ProjectListDialog {
 
   private async init(): Promise<void> {
     await this.loadProjects();
+    // Load labor rate from settings
+    try {
+      const settings = await SettingsService.getAllSettings();
+      if (settings.labor_rate_per_hour) {
+        this.laborRate = Number(settings.labor_rate_per_hour) || 25.0;
+      }
+    } catch {
+      // use default
+    }
     this.overlay = this.buildUI();
     document.body.appendChild(this.overlay);
 
@@ -43,6 +57,10 @@ export class ProjectListDialog {
     this.projects = await ProjectService.getProjects(
       this.statusFilter || undefined
     );
+  }
+
+  private nextFieldId(): string {
+    return `pl-f-${++this.fieldIdCounter}`;
   }
 
   private buildUI(): HTMLElement {
@@ -77,14 +95,19 @@ export class ProjectListDialog {
     filter.value = this.statusFilter;
     filter.addEventListener("change", async () => {
       this.statusFilter = filter.value;
-      await this.loadProjects();
-      this.renderList();
+      try {
+        await this.loadProjects();
+        this.renderList();
+      } catch {
+        ToastContainer.show("error", "Projekte konnten nicht geladen werden");
+      }
     });
     header.appendChild(filter);
 
     const closeBtn = document.createElement("button");
     closeBtn.className = "dv-close-btn";
     closeBtn.textContent = "\u00D7";
+    closeBtn.setAttribute("aria-label", "Schliessen");
     closeBtn.addEventListener("click", () => ProjectListDialog.dismiss());
     header.appendChild(closeBtn);
 
@@ -179,7 +202,18 @@ export class ProjectListDialog {
 
   private async selectProject(project: Project): Promise<void> {
     this.selectedProject = project;
-    this.details = await ProjectService.getProjectDetails(project.id);
+    this.details = [];
+    this.timeEntries = [];
+    try {
+      const [details, timeEntries] = await Promise.all([
+        ProjectService.getProjectDetails(project.id),
+        MfgService.getTimeEntries(project.id).catch(() => [] as TimeEntry[]),
+      ]);
+      this.details = details;
+      this.timeEntries = timeEntries;
+    } catch {
+      ToastContainer.show("error", "Projektdaten konnten nicht geladen werden");
+    }
     this.renderList();
     this.renderDetail();
   }
@@ -193,20 +227,27 @@ export class ProjectListDialog {
 
     // Name
     const nameGroup = this.createField("Name", p.name, async (val) => {
-      await ProjectService.updateProject(p.id, { name: val });
-      await this.loadProjects();
-      this.selectedProject = this.projects.find((pr) => pr.id === p.id) || null;
-      this.renderList();
+      try {
+        await ProjectService.updateProject(p.id, { name: val });
+        await this.loadProjects();
+        this.selectedProject = this.projects.find((pr) => pr.id === p.id) || null;
+        this.renderList();
+      } catch {
+        ToastContainer.show("error", "Name konnte nicht gespeichert werden");
+      }
     });
     pane.appendChild(nameGroup);
 
     // Status
+    const statusId = this.nextFieldId();
     const statusGroup = document.createElement("div");
     statusGroup.className = "pl-field";
     const statusLabel = document.createElement("label");
     statusLabel.className = "pp-setting-label";
     statusLabel.textContent = "Status";
+    statusLabel.htmlFor = statusId;
     const statusSelect = document.createElement("select");
+    statusSelect.id = statusId;
     statusSelect.className = "pp-setting-select";
     statusSelect.innerHTML =
       '<option value="not_started">Nicht begonnen</option>' +
@@ -216,22 +257,29 @@ export class ProjectListDialog {
       '<option value="archived">Archiviert</option>';
     statusSelect.value = p.status;
     statusSelect.addEventListener("change", async () => {
-      await ProjectService.updateProject(p.id, { status: statusSelect.value });
-      await this.loadProjects();
-      this.selectedProject = this.projects.find((pr) => pr.id === p.id) || null;
-      this.renderList();
+      try {
+        await ProjectService.updateProject(p.id, { status: statusSelect.value });
+        await this.loadProjects();
+        this.selectedProject = this.projects.find((pr) => pr.id === p.id) || null;
+        this.renderList();
+      } catch {
+        ToastContainer.show("error", "Status konnte nicht gespeichert werden");
+      }
     });
     statusGroup.appendChild(statusLabel);
     statusGroup.appendChild(statusSelect);
     pane.appendChild(statusGroup);
 
     // Notes
+    const notesId = this.nextFieldId();
     const notesGroup = document.createElement("div");
     notesGroup.className = "pl-field";
     const notesLabel = document.createElement("label");
     notesLabel.className = "pp-setting-label";
     notesLabel.textContent = "Notizen";
+    notesLabel.htmlFor = notesId;
     const notesArea = document.createElement("textarea");
+    notesArea.id = notesId;
     notesArea.className = "dv-note-text";
     notesArea.value = p.notes || "";
     notesArea.rows = 4;
@@ -239,8 +287,12 @@ export class ProjectListDialog {
     notesSave.className = "dv-btn";
     notesSave.textContent = "Speichern";
     notesSave.addEventListener("click", async () => {
-      await ProjectService.updateProject(p.id, { notes: notesArea.value });
-      ToastContainer.show("success", "Notizen gespeichert");
+      try {
+        await ProjectService.updateProject(p.id, { notes: notesArea.value });
+        ToastContainer.show("success", "Notizen gespeichert");
+      } catch {
+        ToastContainer.show("error", "Notizen konnten nicht gespeichert werden");
+      }
     });
     notesGroup.appendChild(notesLabel);
     notesGroup.appendChild(notesArea);
@@ -266,12 +318,104 @@ export class ProjectListDialog {
         field.label,
         existing?.value || "",
         async (val) => {
-          await ProjectService.setProjectDetails(p.id, [
-            { key: field.key, value: val || null },
-          ]);
+          try {
+            await ProjectService.setProjectDetails(p.id, [
+              { key: field.key, value: val || null },
+            ]);
+          } catch {
+            ToastContainer.show("error", "Detail konnte nicht gespeichert werden");
+          }
         }
       );
       pane.appendChild(fieldGroup);
+    }
+
+    // Time & Cost section
+    if (this.timeEntries.length > 0) {
+      const tcHeader = document.createElement("h4");
+      tcHeader.className = "pp-settings-title";
+      tcHeader.textContent = "Zeit & Kosten";
+      pane.appendChild(tcHeader);
+
+      const tcTable = document.createElement("table");
+      tcTable.className = "pl-tc-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const h of ["Schritt", "Geplant", "Tatsaechlich", "Differenz"]) {
+        const th = document.createElement("th");
+        th.textContent = h;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      tcTable.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      let totalPlanned = 0;
+      let totalActual = 0;
+      for (const e of this.timeEntries) {
+        const planned = e.plannedMinutes ?? 0;
+        const actual = e.actualMinutes ?? 0;
+        const diff = actual - planned;
+        totalPlanned += planned;
+        totalActual += actual;
+
+        const tr = document.createElement("tr");
+        const tdStep = document.createElement("td");
+        tdStep.textContent = e.stepName;
+        const tdPlanned = document.createElement("td");
+        tdPlanned.textContent = this.fmtMinutes(planned);
+        const tdActual = document.createElement("td");
+        tdActual.textContent = this.fmtMinutes(actual);
+        const tdDiff = document.createElement("td");
+        tdDiff.className = diff > 0 ? "pl-tc-over" : diff < 0 ? "pl-tc-under" : "";
+        tdDiff.textContent =
+          diff > 0
+            ? `+${this.fmtMinutes(diff)}`
+            : diff < 0
+              ? `-${this.fmtMinutes(Math.abs(diff))}`
+              : "-";
+        tr.appendChild(tdStep);
+        tr.appendChild(tdPlanned);
+        tr.appendChild(tdActual);
+        tr.appendChild(tdDiff);
+        tbody.appendChild(tr);
+      }
+
+      // Totals row
+      const totalDiff = totalActual - totalPlanned;
+      const tfoot = document.createElement("tfoot");
+      const totalRow = document.createElement("tr");
+      const tdLabel = document.createElement("td");
+      tdLabel.textContent = "Gesamt";
+      const tdTotalP = document.createElement("td");
+      tdTotalP.textContent = this.fmtMinutes(totalPlanned);
+      const tdTotalA = document.createElement("td");
+      tdTotalA.textContent = this.fmtMinutes(totalActual);
+      const tdTotalD = document.createElement("td");
+      tdTotalD.className =
+        totalDiff > 0 ? "pl-tc-over" : totalDiff < 0 ? "pl-tc-under" : "";
+      tdTotalD.textContent =
+        totalDiff > 0
+          ? `+${this.fmtMinutes(totalDiff)}`
+          : totalDiff < 0
+            ? `-${this.fmtMinutes(Math.abs(totalDiff))}`
+            : "-";
+      totalRow.appendChild(tdLabel);
+      totalRow.appendChild(tdTotalP);
+      totalRow.appendChild(tdTotalA);
+      totalRow.appendChild(tdTotalD);
+      tfoot.appendChild(totalRow);
+
+      tcTable.appendChild(tbody);
+      tcTable.appendChild(tfoot);
+      pane.appendChild(tcTable);
+
+      // Labor cost estimate
+      const laborCost = (totalActual / 60) * this.laborRate;
+      const costInfo = document.createElement("div");
+      costInfo.className = "pl-tc-cost";
+      costInfo.textContent = `Arbeitskosten (${this.laborRate.toFixed(2)} EUR/h): ${laborCost.toFixed(2)} EUR`;
+      pane.appendChild(costInfo);
     }
 
     // Actions
@@ -282,10 +426,14 @@ export class ProjectListDialog {
     dupBtn.className = "dv-btn";
     dupBtn.textContent = "Duplizieren";
     dupBtn.addEventListener("click", async () => {
-      await ProjectService.duplicateProject(p.id);
-      await this.loadProjects();
-      this.renderList();
-      ToastContainer.show("success", "Projekt dupliziert");
+      try {
+        await ProjectService.duplicateProject(p.id);
+        await this.loadProjects();
+        this.renderList();
+        ToastContainer.show("success", "Projekt dupliziert");
+      } catch {
+        ToastContainer.show("error", "Duplizieren fehlgeschlagen");
+      }
     });
     actions.appendChild(dupBtn);
 
@@ -294,12 +442,16 @@ export class ProjectListDialog {
     delBtn.textContent = "Loeschen";
     delBtn.addEventListener("click", async () => {
       if (!confirm(`Projekt "${p.name}" wirklich loeschen?`)) return;
-      await ProjectService.deleteProject(p.id);
-      this.selectedProject = null;
-      await this.loadProjects();
-      this.renderList();
-      const detailP = this.overlay?.querySelector<HTMLElement>('[data-id="pl-detail"]');
-      if (detailP) detailP.textContent = "Projekt auswaehlen";
+      try {
+        await ProjectService.deleteProject(p.id);
+        this.selectedProject = null;
+        await this.loadProjects();
+        this.renderList();
+        const detailP = this.overlay?.querySelector<HTMLElement>('[data-id="pl-detail"]');
+        if (detailP) detailP.textContent = "Projekt auswaehlen";
+      } catch {
+        ToastContainer.show("error", "Loeschen fehlgeschlagen");
+      }
     });
     actions.appendChild(delBtn);
 
@@ -311,18 +463,28 @@ export class ProjectListDialog {
     value: string,
     onSave: (val: string) => Promise<void>
   ): HTMLElement {
+    const id = this.nextFieldId();
     const group = document.createElement("div");
     group.className = "pl-field";
     const lbl = document.createElement("label");
     lbl.className = "pp-setting-label";
     lbl.textContent = label;
+    lbl.htmlFor = id;
     const input = document.createElement("input");
+    input.id = id;
     input.className = "pp-setting-input";
     input.value = value;
     input.addEventListener("change", () => onSave(input.value));
     group.appendChild(lbl);
     group.appendChild(input);
     return group;
+  }
+
+  private fmtMinutes(minutes: number): string {
+    if (minutes < 60) return `${Math.round(minutes)}min`;
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return m > 0 ? `${h}h ${m}min` : `${h}h`;
   }
 
   private close(): void {

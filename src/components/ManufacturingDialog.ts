@@ -1,14 +1,17 @@
 import * as MfgService from "../services/ManufacturingService";
 import { ToastContainer } from "./Toast";
+import * as ProjectService from "../services/ProjectService";
 import type {
   Supplier,
   Material,
   MaterialInventory,
   Product,
   BillOfMaterial,
+  Project,
+  TimeEntry,
 } from "../types";
 
-type TabKey = "materials" | "suppliers" | "products" | "inventory";
+type TabKey = "materials" | "suppliers" | "products" | "inventory" | "timetracking";
 
 export class ManufacturingDialog {
   private static instance: ManufacturingDialog | null = null;
@@ -30,6 +33,12 @@ export class ManufacturingDialog {
   private selectedSupplier: Supplier | null = null;
   private selectedProduct: Product | null = null;
   private fieldIdCounter = 0;
+
+  // Time tracking state
+  private allProjects: Project[] = [];
+  private ttSelectedProjectId: number | null = null;
+  private timeEntries: TimeEntry[] = [];
+  private selectedTimeEntry: TimeEntry | null = null;
 
   static async open(): Promise<void> {
     if (ManufacturingDialog.instance) ManufacturingDialog.dismiss();
@@ -64,11 +73,13 @@ export class ManufacturingDialog {
   }
 
   private async loadAll(): Promise<void> {
-    [this.materials, this.suppliers, this.products] = await Promise.all([
-      MfgService.getMaterials(),
-      MfgService.getSuppliers(),
-      MfgService.getProducts(),
-    ]);
+    [this.materials, this.suppliers, this.products, this.allProjects] =
+      await Promise.all([
+        MfgService.getMaterials(),
+        MfgService.getSuppliers(),
+        MfgService.getProducts(),
+        ProjectService.getProjects(),
+      ]);
     // Load inventory for all materials
     this.inventoryMap.clear();
     await Promise.all(
@@ -106,6 +117,7 @@ export class ManufacturingDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dv-close-btn";
     closeBtn.textContent = "\u00D7";
+    closeBtn.setAttribute("aria-label", "Schliessen");
     closeBtn.addEventListener("click", () => ManufacturingDialog.dismiss());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -119,6 +131,7 @@ export class ManufacturingDialog {
       { key: "suppliers", label: "Lieferanten" },
       { key: "products", label: "Produkte" },
       { key: "inventory", label: "Inventar" },
+      { key: "timetracking", label: "Zeiterfassung" },
     ];
     for (const t of tabs) {
       const btn = document.createElement("button");
@@ -185,6 +198,10 @@ export class ManufacturingDialog {
       case "inventory":
         this.renderInventoryDashboard(dashboard);
         this.renderInventoryTab(content);
+        break;
+      case "timetracking":
+        this.renderTimeTrackingDashboard(dashboard);
+        this.renderTimeTrackingTab(content);
         break;
     }
   }
@@ -912,6 +929,278 @@ export class ManufacturingDialog {
     }
     table.appendChild(tbody);
     container.appendChild(table);
+  }
+
+  // ── Time Tracking Tab ─────────────────────────────────────────────
+
+  private renderTimeTrackingDashboard(container: HTMLElement): void {
+    let totalPlanned = 0;
+    let totalActual = 0;
+    for (const e of this.timeEntries) {
+      totalPlanned += e.plannedMinutes ?? 0;
+      totalActual += e.actualMinutes ?? 0;
+    }
+    this.addBadge(container, `Eintraege: ${this.timeEntries.length}`, "");
+    if (this.timeEntries.length > 0) {
+      this.addBadge(
+        container,
+        `Geplant: ${this.fmtHours(totalPlanned)}`,
+        ""
+      );
+      this.addBadge(
+        container,
+        `Tatsaechlich: ${this.fmtHours(totalActual)}`,
+        totalActual > totalPlanned && totalPlanned > 0 ? "mfg-badge-warn" : ""
+      );
+    }
+    this.addCreateBtn(container, "Zeiteintrag", () => this.createTimeEntry());
+  }
+
+  private renderTimeTrackingTab(container: HTMLElement): void {
+    // Project selector at top
+    const selectorRow = document.createElement("div");
+    selectorRow.className = "mfg-tt-selector";
+    const selectorLabel = document.createElement("label");
+    selectorLabel.className = "mfg-label";
+    selectorLabel.textContent = "Projekt:";
+    selectorRow.appendChild(selectorLabel);
+
+    const projectSelect = document.createElement("select");
+    projectSelect.className = "mfg-input";
+    const emptyOpt = document.createElement("option");
+    emptyOpt.value = "";
+    emptyOpt.textContent = "Projekt waehlen";
+    projectSelect.appendChild(emptyOpt);
+    for (const p of this.allProjects) {
+      const opt = document.createElement("option");
+      opt.value = String(p.id);
+      opt.textContent = p.name;
+      if (this.ttSelectedProjectId === p.id) opt.selected = true;
+      projectSelect.appendChild(opt);
+    }
+    projectSelect.addEventListener("change", async () => {
+      const id = projectSelect.value ? Number(projectSelect.value) : null;
+      this.ttSelectedProjectId = id;
+      this.selectedTimeEntry = null;
+      if (id) {
+        try {
+          this.timeEntries = await MfgService.getTimeEntries(id);
+        } catch {
+          this.timeEntries = [];
+          ToastContainer.show("error", "Zeiteintraege konnten nicht geladen werden");
+        }
+      } else {
+        this.timeEntries = [];
+      }
+      this.renderActiveTab();
+    });
+    selectorRow.appendChild(projectSelect);
+    container.insertBefore(selectorRow, container.firstChild);
+
+    if (!this.ttSelectedProjectId) {
+      const hint = document.createElement("div");
+      hint.className = "mfg-tt-hint";
+      hint.textContent = "Projekt auswaehlen, um Zeiteintraege anzuzeigen";
+      container.appendChild(hint);
+      return;
+    }
+
+    // List + detail layout
+    const listPane = document.createElement("div");
+    listPane.className = "mfg-list-pane";
+    this.renderTimeEntryList(listPane);
+    container.appendChild(listPane);
+
+    const detailPane = document.createElement("div");
+    detailPane.className = "mfg-detail-pane";
+    if (this.selectedTimeEntry) {
+      this.renderTimeEntryDetail(detailPane, this.selectedTimeEntry);
+    } else {
+      detailPane.textContent = "Eintrag auswaehlen";
+    }
+    container.appendChild(detailPane);
+  }
+
+  private renderTimeEntryList(container: HTMLElement): void {
+    container.innerHTML = "";
+    if (this.timeEntries.length === 0) {
+      container.textContent = "Keine Zeiteintraege";
+      return;
+    }
+    for (const e of this.timeEntries) {
+      const item = document.createElement("div");
+      item.className = "mfg-item";
+      if (this.selectedTimeEntry?.id === e.id) item.classList.add("selected");
+
+      const info = document.createElement("div");
+      info.className = "mfg-item-info";
+      const nameEl = document.createElement("span");
+      nameEl.className = "mfg-item-name";
+      nameEl.textContent = e.stepName;
+      info.appendChild(nameEl);
+
+      const sub = document.createElement("span");
+      sub.className = "mfg-item-sub";
+      const planned = e.plannedMinutes ?? 0;
+      const actual = e.actualMinutes ?? 0;
+      sub.textContent = `${this.fmtHours(planned)} geplant / ${this.fmtHours(actual)} tatsaechlich`;
+      info.appendChild(sub);
+
+      if (e.worker) {
+        const workerEl = document.createElement("span");
+        workerEl.className = "mfg-item-sub";
+        workerEl.textContent = e.worker;
+        info.appendChild(workerEl);
+      }
+
+      // Progress bar
+      if (planned > 0) {
+        const bar = document.createElement("div");
+        bar.className = "mfg-tt-bar";
+        const pctRaw = Math.round((actual / planned) * 100);
+        bar.title = `${pctRaw}% (${this.fmtHours(actual)} / ${this.fmtHours(planned)})`;
+        const fill = document.createElement("div");
+        fill.className = "mfg-tt-bar-fill";
+        const pct = Math.min(pctRaw, 100);
+        fill.style.width = pct + "%";
+        if (actual > planned) fill.classList.add("mfg-tt-bar-over");
+        bar.appendChild(fill);
+        info.appendChild(bar);
+      }
+
+      item.appendChild(info);
+      item.addEventListener("click", () => {
+        this.selectedTimeEntry = e;
+        this.renderActiveTab();
+      });
+      container.appendChild(item);
+    }
+  }
+
+  private renderTimeEntryDetail(container: HTMLElement, e: TimeEntry): void {
+    container.innerHTML = "";
+    const form = document.createElement("div");
+    form.className = "mfg-form";
+
+    this.addTextField(form, "Arbeitsschritt", e.stepName, (v) =>
+      this.updateTimeEntry(e.id, { stepName: v })
+    );
+    this.addNumberField(form, "Geplante Minuten", e.plannedMinutes, (v) =>
+      this.updateTimeEntry(e.id, { plannedMinutes: v })
+    );
+    this.addNumberField(form, "Tatsaechliche Minuten", e.actualMinutes, (v) =>
+      this.updateTimeEntry(e.id, { actualMinutes: v })
+    );
+    this.addTextField(form, "Mitarbeiter", e.worker || "", (v) =>
+      this.updateTimeEntry(e.id, { worker: v })
+    );
+    this.addTextField(form, "Maschine", e.machine || "", (v) =>
+      this.updateTimeEntry(e.id, { machine: v })
+    );
+
+    // Summary
+    const planned = e.plannedMinutes ?? 0;
+    const actual = e.actualMinutes ?? 0;
+    const diff = actual - planned;
+    if (planned > 0 || actual > 0) {
+      const summary = document.createElement("div");
+      summary.className = "mfg-tt-summary";
+      const diffLabel = document.createElement("span");
+      diffLabel.className =
+        "mfg-tt-diff" + (diff > 0 ? " mfg-tt-diff-over" : " mfg-tt-diff-under");
+      diffLabel.textContent =
+        diff > 0
+          ? `+${this.fmtHours(diff)} ueber Plan`
+          : diff < 0
+            ? `${this.fmtHours(Math.abs(diff))} unter Plan`
+            : "Im Plan";
+      summary.appendChild(diffLabel);
+      form.appendChild(summary);
+    }
+
+    container.appendChild(form);
+
+    // Actions
+    const actions = document.createElement("div");
+    actions.className = "mfg-actions";
+    const delBtn = document.createElement("button");
+    delBtn.className = "dialog-btn dialog-btn-danger";
+    delBtn.textContent = "Eintrag loeschen";
+    delBtn.addEventListener("click", async () => {
+      if (!confirm(`Zeiteintrag "${e.stepName}" wirklich loeschen?`)) return;
+      try {
+        await MfgService.deleteTimeEntry(e.id);
+        this.selectedTimeEntry = null;
+        if (this.ttSelectedProjectId) {
+          this.timeEntries = await MfgService.getTimeEntries(
+            this.ttSelectedProjectId
+          );
+        }
+        this.renderActiveTab();
+        ToastContainer.show("success", "Zeiteintrag geloescht");
+      } catch {
+        ToastContainer.show("error", "Loeschen fehlgeschlagen");
+      }
+    });
+    actions.appendChild(delBtn);
+    container.appendChild(actions);
+  }
+
+  private async createTimeEntry(): Promise<void> {
+    if (!this.ttSelectedProjectId) {
+      ToastContainer.show("error", "Bitte zuerst ein Projekt waehlen");
+      return;
+    }
+    try {
+      const entry = await MfgService.createTimeEntry({
+        projectId: this.ttSelectedProjectId,
+        stepName: "Neuer Arbeitsschritt",
+      });
+      this.timeEntries = await MfgService.getTimeEntries(
+        this.ttSelectedProjectId
+      );
+      this.selectedTimeEntry =
+        this.timeEntries.find((x) => x.id === entry.id) || null;
+      this.renderActiveTab();
+      ToastContainer.show("success", "Zeiteintrag erstellt");
+    } catch {
+      ToastContainer.show("error", "Erstellen fehlgeschlagen");
+    }
+  }
+
+  private async updateTimeEntry(
+    id: number,
+    update: {
+      stepName?: string;
+      plannedMinutes?: number;
+      actualMinutes?: number;
+      worker?: string;
+      machine?: string;
+    }
+  ): Promise<void> {
+    try {
+      const updated = await MfgService.updateTimeEntry(
+        id,
+        update.stepName,
+        update.plannedMinutes,
+        update.actualMinutes,
+        update.worker,
+        update.machine
+      );
+      const idx = this.timeEntries.findIndex((x) => x.id === id);
+      if (idx >= 0) this.timeEntries[idx] = updated;
+      this.selectedTimeEntry = updated;
+      this.renderActiveTab();
+    } catch {
+      ToastContainer.show("error", "Speichern fehlgeschlagen");
+    }
+  }
+
+  private fmtHours(minutes: number): string {
+    if (minutes < 60) return `${Math.round(minutes)}min`;
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    return m > 0 ? `${h}h ${m}min` : `${h}h`;
   }
 
   // ── Helpers ──────────────────────────────────────────────────────
