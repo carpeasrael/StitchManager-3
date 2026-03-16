@@ -199,8 +199,14 @@ export class Toolbar extends Component {
           {
             className: "menu-item-trash",
             icon: "\uD83D\uDDD1",
-            label: "Papierkorb",
+            label: "Papierkorb (Wiederherstellen)",
             onClick: () => EventBus.emit("toolbar:trash"),
+          },
+          {
+            className: "menu-item-purge",
+            icon: "\u2716",
+            label: "Papierkorb leeren",
+            onClick: () => EventBus.emit("toolbar:purge-trash"),
           },
           {
             className: "menu-item-export",

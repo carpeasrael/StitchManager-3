@@ -469,7 +469,7 @@ pub fn get_recent_files(
 ) -> Result<Vec<EmbroideryFile>, AppError> {
     let conn = lock_db(&db)?;
     let lim = limit.unwrap_or(20);
-    let sql = format!("{FILE_SELECT} ORDER BY updated_at DESC LIMIT ?1");
+    let sql = format!("{FILE_SELECT} WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?1");
     let mut stmt = conn.prepare(&sql)?;
     let files = stmt
         .query_map([lim], |row| row_to_file(row))?
@@ -482,7 +482,7 @@ pub fn get_favorite_files(
     db: State<'_, DbState>,
 ) -> Result<Vec<EmbroideryFile>, AppError> {
     let conn = lock_db(&db)?;
-    let sql = format!("{FILE_SELECT} WHERE is_favorite = 1 ORDER BY updated_at DESC");
+    let sql = format!("{FILE_SELECT} WHERE is_favorite = 1 AND deleted_at IS NULL ORDER BY updated_at DESC");
     let mut stmt = conn.prepare(&sql)?;
     let files = stmt
         .query_map([], |row| row_to_file(row))?
@@ -518,14 +518,19 @@ pub fn get_library_stats(
 ) -> Result<LibraryStats, AppError> {
     let conn = lock_db(&db)?;
 
-    let total_files: i64 = conn.query_row("SELECT COUNT(*) FROM embroidery_files", [], |r| r.get(0))?;
+    let total_files: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL", [], |r| r.get(0)
+    )?;
     let total_folders: i64 = conn.query_row("SELECT COUNT(*) FROM folders", [], |r| r.get(0))?;
     let total_stitches: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(stitch_count), 0) FROM embroidery_files", [], |r| r.get(0)
+        "SELECT COALESCE(SUM(stitch_count), 0) FROM embroidery_files WHERE deleted_at IS NULL", [], |r| r.get(0)
     )?;
 
     let mut stmt = conn.prepare(
-        "SELECT ff.format, COUNT(*) FROM file_formats ff GROUP BY ff.format ORDER BY COUNT(*) DESC"
+        "SELECT ff.format, COUNT(*) FROM file_formats ff \
+         JOIN embroidery_files e ON e.id = ff.file_id \
+         WHERE e.deleted_at IS NULL \
+         GROUP BY ff.format ORDER BY COUNT(*) DESC"
     )?;
     let format_counts: std::collections::HashMap<String, i64> = stmt
         .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?

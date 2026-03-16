@@ -44,6 +44,9 @@ export class DocumentViewer {
   // Event handlers stored for cleanup
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
+  private panMouseDown: ((e: MouseEvent) => void) | null = null;
+  private panMouseMove: ((e: MouseEvent) => void) | null = null;
+  private panMouseUp: (() => void) | null = null;
 
   static async open(
     filePath: string,
@@ -337,17 +340,14 @@ export class DocumentViewer {
       passive: false,
     });
 
-    // Pan
-    this.canvasContainer.addEventListener("mousedown", (e: MouseEvent) =>
-      this.onMouseDown(e)
-    );
-    this.canvasContainer.addEventListener("mousemove", (e: MouseEvent) =>
-      this.onMouseMove(e)
-    );
-    this.canvasContainer.addEventListener("mouseup", () => this.onMouseUp());
-    this.canvasContainer.addEventListener("mouseleave", () =>
-      this.onMouseUp()
-    );
+    // Pan — store handlers for cleanup
+    this.panMouseDown = (e: MouseEvent) => this.onMouseDown(e);
+    this.panMouseMove = (e: MouseEvent) => this.onMouseMove(e);
+    this.panMouseUp = () => this.onMouseUp();
+    this.canvasContainer.addEventListener("mousedown", this.panMouseDown);
+    this.canvasContainer.addEventListener("mousemove", this.panMouseMove);
+    this.canvasContainer.addEventListener("mouseup", this.panMouseUp);
+    this.canvasContainer.addEventListener("mouseleave", this.panMouseUp);
 
     contentWrapper.appendChild(this.canvasContainer);
 
@@ -441,7 +441,7 @@ export class DocumentViewer {
       this.pdfDoc.getPage(this.currentPage).then((page) => {
         const scale = this.getEffectiveScale(page);
         zoomLabel.textContent = `${Math.round(scale * 100)}%`;
-      });
+      }).catch(() => {});
     }
   }
 
@@ -877,6 +877,17 @@ export class DocumentViewer {
       this.canvasContainer.removeEventListener("wheel", this.wheelHandler);
       this.wheelHandler = null;
     }
+    if (this.canvasContainer) {
+      if (this.panMouseDown) this.canvasContainer.removeEventListener("mousedown", this.panMouseDown);
+      if (this.panMouseMove) this.canvasContainer.removeEventListener("mousemove", this.panMouseMove);
+      if (this.panMouseUp) {
+        this.canvasContainer.removeEventListener("mouseup", this.panMouseUp);
+        this.canvasContainer.removeEventListener("mouseleave", this.panMouseUp);
+      }
+    }
+    this.panMouseDown = null;
+    this.panMouseMove = null;
+    this.panMouseUp = null;
     if (this.pdfDoc) {
       this.pdfDoc.destroy();
       this.pdfDoc = null;

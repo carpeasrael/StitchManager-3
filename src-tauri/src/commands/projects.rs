@@ -69,7 +69,7 @@ pub fn get_projects(
 ) -> Result<Vec<Project>, AppError> {
     let conn = lock_db(&db)?;
     let mut sql = "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects".to_string();
-    let mut conditions: Vec<String> = Vec::new();
+    let mut conditions: Vec<String> = vec!["deleted_at IS NULL".to_string()];
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(status) = &status_filter {
@@ -102,7 +102,7 @@ pub fn get_project(
 ) -> Result<Project, AppError> {
     let conn = lock_db(&db)?;
     conn.query_row(
-        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1",
+        "SELECT id, name, pattern_file_id, status, notes, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
         row_to_project,
     ).map_err(|e| match e {
@@ -155,7 +155,7 @@ pub fn update_project(
     sets.push("updated_at = datetime('now')".to_string());
     params.push(Box::new(project_id));
     let sql = format!(
-        "UPDATE projects SET {} WHERE id = ?{}",
+        "UPDATE projects SET {} WHERE id = ?{} AND deleted_at IS NULL",
         sets.join(", "),
         params.len()
     );
@@ -179,7 +179,7 @@ pub fn delete_project(
     project_id: i64,
 ) -> Result<(), AppError> {
     let conn = lock_db(&db)?;
-    let changes = conn.execute("DELETE FROM projects WHERE id = ?1", [project_id])?;
+    let changes = conn.execute("DELETE FROM projects WHERE id = ?1 AND deleted_at IS NULL", [project_id])?;
     if changes == 0 {
         return Err(AppError::NotFound(format!("Projekt {project_id} nicht gefunden")));
     }
@@ -363,7 +363,7 @@ pub fn add_to_collection(
         return Err(AppError::NotFound(format!("Sammlung {collection_id} nicht gefunden")));
     }
     let file_exists: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1", [file_id], |row| row.get(0),
+        "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL", [file_id], |row| row.get(0),
     )?;
     if !file_exists {
         return Err(AppError::NotFound(format!("Datei {file_id} nicht gefunden")));
@@ -396,7 +396,9 @@ pub fn get_collection_files(
 ) -> Result<Vec<i64>, AppError> {
     let conn = lock_db(&db)?;
     let mut stmt = conn.prepare(
-        "SELECT file_id FROM collection_items WHERE collection_id = ?1"
+        "SELECT ci.file_id FROM collection_items ci \
+         JOIN embroidery_files e ON e.id = ci.file_id \
+         WHERE ci.collection_id = ?1 AND e.deleted_at IS NULL"
     )?;
     let ids = stmt
         .query_map([collection_id], |row| row.get::<_, i64>(0))?

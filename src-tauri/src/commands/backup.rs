@@ -69,21 +69,25 @@ pub async fn create_backup(
     if include_files {
         let conn = lock_db(&db)?;
         let mut stmt = conn.prepare(
-            "SELECT filepath FROM embroidery_files WHERE filepath IS NOT NULL AND filepath != ''"
+            "SELECT id, filepath FROM embroidery_files \
+             WHERE filepath IS NOT NULL AND filepath != '' AND deleted_at IS NULL"
         )?;
-        let paths: Vec<String> = stmt.query_map([], |row| row.get::<_, String>(0))?
+        let files: Vec<(i64, String)> = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?
             .filter_map(|r| r.ok())
             .collect();
         drop(stmt);
         drop(conn);
 
-        for filepath in &paths {
+        for (id, filepath) in &files {
             let path = Path::new(filepath);
             if path.exists() && path.is_file() {
                 if let Ok(data) = std::fs::read(path) {
-                    let entry_name = format!("files/{}", path.file_name()
+                    // Use ID prefix to avoid filename collisions across directories
+                    let basename = path.file_name()
                         .and_then(|n| n.to_str())
-                        .unwrap_or("unknown"));
+                        .unwrap_or("unknown");
+                    let entry_name = format!("files/{id}_{basename}");
                     if zip.start_file(&entry_name, options).is_ok() {
                         let _ = zip.write_all(&data);
                         file_count += 1;
@@ -196,7 +200,16 @@ pub async fn restore_backup(
         }
     }
 
-    Ok("Backup erfolgreich wiederhergestellt. Bitte App neu starten.".into())
+    // Force app restart to pick up the restored database.
+    // The old rusqlite::Connection in DbState is now detached from the new file.
+    // Exiting cleanly is the safest approach.
+    log::info!("Backup restored successfully, requesting app exit for DB reconnection");
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        app_handle.exit(0);
+    });
+
+    Ok("Backup erfolgreich wiederhergestellt. App wird neu gestartet\u{2026}".into())
 }
 
 /// Check for missing files in the database.
@@ -713,12 +726,21 @@ pub fn import_library(
             if exists { continue; }
         }
 
-        // Find or create a folder for the file
-        let folder_id: i64 = conn.query_row(
+        // Find or create a default folder for imported files
+        let folder_id: i64 = match conn.query_row(
             "SELECT id FROM folders LIMIT 1",
             [],
-            |row| row.get(0),
-        ).unwrap_or(1);
+            |row| row.get::<_, i64>(0),
+        ) {
+            Ok(id) => id,
+            Err(_) => {
+                conn.execute(
+                    "INSERT INTO folders (name, path) VALUES ('Importiert', ?1)",
+                    [root],
+                )?;
+                conn.last_insert_rowid()
+            }
+        };
 
         conn.execute(
             "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, unique_id, file_type, status) \

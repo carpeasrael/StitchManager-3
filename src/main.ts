@@ -380,23 +380,36 @@ function initEventHandlers(): () => void {
           ToastContainer.show("info", "Papierkorb ist leer");
           return;
         }
-        // Simple confirm-based restore/purge for each item
-        const action = confirm(
-          `${items.length} Dateien im Papierkorb.\n\nOK = Alle wiederherstellen\nAbbrechen = Papierkorb leeren`
+        // Show info and offer restore only. Purge is a separate toolbar action.
+        const restoreAll = confirm(
+          `${items.length} Dateien im Papierkorb.\n\nAlle wiederherstellen?`
         );
-        if (action) {
+        if (restoreAll) {
           for (const [id] of items) await BackupService.restoreFile(id);
           ToastContainer.show("success", `${items.length} Dateien wiederhergestellt`);
-        } else {
-          if (confirm("Papierkorb wirklich endgueltig leeren?")) {
-            for (const [id] of items) await BackupService.purgeFile(id);
-            ToastContainer.show("success", "Papierkorb geleert");
-          }
         }
         EventBus.emit("file:refresh");
       } catch (e) {
         console.warn("Trash operation failed:", e);
         ToastContainer.show("error", "Papierkorb-Aktion fehlgeschlagen");
+      }
+    }),
+
+    EventBus.on("toolbar:purge-trash", async () => {
+      try {
+        const items = await BackupService.getTrash();
+        if (items.length === 0) {
+          ToastContainer.show("info", "Papierkorb ist leer");
+          return;
+        }
+        if (confirm(`${items.length} Dateien endgueltig loeschen?\n\nDiese Aktion kann nicht rueckgaengig gemacht werden.`)) {
+          for (const [id] of items) await BackupService.purgeFile(id);
+          ToastContainer.show("success", "Papierkorb geleert");
+          EventBus.emit("file:refresh");
+        }
+      } catch (e) {
+        console.warn("Purge failed:", e);
+        ToastContainer.show("error", "Papierkorb leeren fehlgeschlagen");
       }
     }),
 
