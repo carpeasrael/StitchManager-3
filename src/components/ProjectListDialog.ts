@@ -3,6 +3,7 @@ import * as MfgService from "../services/ManufacturingService";
 import * as ReportService from "../services/ReportService";
 import * as SettingsService from "../services/SettingsService";
 import { ToastContainer } from "./Toast";
+import { trapFocus } from "../utils/focus-trap";
 import type { Project, ProjectDetail, TimeEntry } from "../types";
 
 export class ProjectListDialog {
@@ -15,6 +16,7 @@ export class ProjectListDialog {
   private timeEntries: TimeEntry[] = [];
   private statusFilter = "";
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
   private fieldIdCounter = 0;
   private laborRate = 25.0;
 
@@ -47,6 +49,8 @@ export class ProjectListDialog {
     }
     this.overlay = this.buildUI();
     document.body.appendChild(this.overlay);
+    const dialog = this.overlay.querySelector<HTMLElement>(".dialog") || this.overlay;
+    this.releaseFocusTrap = trapFocus(dialog);
 
     this.keyHandler = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.stopImmediatePropagation(); ProjectListDialog.dismiss(); }
@@ -529,6 +533,10 @@ export class ProjectListDialog {
   }
 
   private close(): void {
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
+    }
     if (this.keyHandler) {
       document.removeEventListener("keydown", this.keyHandler);
       this.keyHandler = null;

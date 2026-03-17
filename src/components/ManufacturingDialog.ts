@@ -1,5 +1,6 @@
 import * as MfgService from "../services/ManufacturingService";
 import { ToastContainer } from "./Toast";
+import { trapFocus } from "../utils/focus-trap";
 import * as ProjectService from "../services/ProjectService";
 import * as ProcService from "../services/ProcurementService";
 import * as ReportService from "../services/ReportService";
@@ -29,6 +30,7 @@ export class ManufacturingDialog {
 
   private overlay: HTMLElement | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
 
   private activeTab: TabKey = "materials";
 
@@ -99,6 +101,8 @@ export class ManufacturingDialog {
     }
     this.overlay = this.buildUI();
     document.body.appendChild(this.overlay);
+    const dialog = this.overlay.querySelector<HTMLElement>(".dialog") || this.overlay;
+    this.releaseFocusTrap = trapFocus(dialog);
     this.keyHandler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopImmediatePropagation();
@@ -2942,6 +2946,10 @@ export class ManufacturingDialog {
   }
 
   private close(): void {
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
+    }
     if (this.keyHandler) {
       document.removeEventListener("keydown", this.keyHandler);
       this.keyHandler = null;
