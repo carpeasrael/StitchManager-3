@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: asset: https://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self' blob:; worker-src 'self' blob:"
+      "csp": "default-src 'self'; img-src 'self' data: asset: https://asset.localhost blob:; style-src 'self' 'unsafe-inline'; script-src 'self' blob:; worker-src 'self' blob:; form-action 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
