@@ -311,6 +311,7 @@ pub fn run() {
             commands::manufacturing::get_defects,
             commands::manufacturing::update_defect,
             commands::manufacturing::delete_defect,
+            commands::audit::get_audit_log,
             commands::reports::get_project_report,
             commands::reports::export_project_csv,
             commands::reports::list_cost_rates,

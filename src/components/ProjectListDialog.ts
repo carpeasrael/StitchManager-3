@@ -1,5 +1,6 @@
 import * as ProjectService from "../services/ProjectService";
 import * as MfgService from "../services/ManufacturingService";
+import * as ReportService from "../services/ReportService";
 import * as SettingsService from "../services/SettingsService";
 import { ToastContainer } from "./Toast";
 import type { Project, ProjectDetail, TimeEntry } from "../types";
@@ -456,6 +457,46 @@ export class ProjectListDialog {
     actions.appendChild(delBtn);
 
     pane.appendChild(actions);
+
+    // Audit history
+    const auditSection = document.createElement("div");
+    auditSection.style.marginTop = "12px";
+    const auditBtn = document.createElement("button");
+    auditBtn.className = "dv-btn";
+    auditBtn.style.fontSize = "0.85em";
+    auditBtn.textContent = "Aenderungshistorie";
+    auditBtn.addEventListener("click", async () => {
+      auditBtn.style.display = "none";
+      try {
+        const entries = await ReportService.getAuditLog("project", p.id);
+        if (entries.length === 0) {
+          const hint = document.createElement("div");
+          hint.style.fontSize = "0.85em";
+          hint.style.opacity = "0.6";
+          hint.textContent = "Keine Aenderungen protokolliert";
+          auditSection.appendChild(hint);
+          return;
+        }
+        const table = document.createElement("table");
+        table.className = "pl-tc-table";
+        table.style.fontSize = "0.85em";
+        table.innerHTML = "<thead><tr><th>Feld</th><th>Alt</th><th>Neu</th><th>Datum</th></tr></thead>";
+        const tbody = document.createElement("tbody");
+        for (const e of entries) {
+          const tr = document.createElement("tr");
+          for (const cell of [e.fieldName, e.oldValue || "-", e.newValue || "-", e.changedAt.substring(0, 16)]) {
+            const td = document.createElement("td");
+            td.textContent = cell;
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        auditSection.appendChild(table);
+      } catch { ToastContainer.show("error", "Historie konnte nicht geladen werden"); }
+    });
+    auditSection.appendChild(auditBtn);
+    pane.appendChild(auditSection);
   }
 
   private createField(

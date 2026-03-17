@@ -537,6 +537,17 @@ export interface DefectRecord {
   createdAt: string;
 }
 
+export interface AuditLogEntry {
+  id: number;
+  entityType: string;
+  entityId: number;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changedBy: string | null;
+  changedAt: string;
+}
+
 export interface CostRate {
   id: number;
   rateType: string;

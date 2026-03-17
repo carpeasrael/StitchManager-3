@@ -595,6 +595,21 @@ pub struct ProjectReport {
     pub cost_breakdown: Option<CostBreakdown>,
 }
 
+// Audit Trail
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogEntry {
+    pub id: i64,
+    pub entity_type: String,
+    pub entity_id: i64,
+    pub field_name: String,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+    pub changed_by: Option<String>,
+    pub changed_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchParams {

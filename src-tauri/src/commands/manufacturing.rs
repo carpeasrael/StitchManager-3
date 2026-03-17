@@ -268,6 +268,17 @@ pub fn update_material(
     update: MaterialUpdate,
 ) -> Result<Material, AppError> {
     let conn = lock_db(&db)?;
+
+    // Capture old values for audit
+    let old_vals: (String, String, String, String, String, String) = conn.query_row(
+        "SELECT COALESCE(name,''), COALESCE(material_number,''), COALESCE(net_price,0), \
+         COALESCE(waste_factor,0), COALESCE(min_stock,0), COALESCE(unit,'') \
+         FROM materials WHERE id = ?1 AND deleted_at IS NULL",
+        [material_id],
+        |row| Ok((row.get(0)?, row.get::<_,f64>(2)?.to_string(), row.get::<_,f64>(3)?.to_string(),
+                   row.get::<_,f64>(4)?.to_string(), row.get::<_,String>(1)?, row.get(5)?)),
+    ).unwrap_or_default();
+
     let mut sets: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -319,6 +330,13 @@ pub fn update_material(
     if changes == 0 {
         return Err(AppError::NotFound(format!("Material {material_id} nicht gefunden")));
     }
+
+    // Audit logging for material changes
+    if let Some(v) = &update.name { let _ = crate::commands::audit::log_change(&conn, "material", material_id, "name", Some(&old_vals.0), Some(v)); }
+    if let Some(v) = update.net_price { let _ = crate::commands::audit::log_change(&conn, "material", material_id, "net_price", Some(&old_vals.1), Some(&v.to_string())); }
+    if let Some(v) = update.waste_factor { let _ = crate::commands::audit::log_change(&conn, "material", material_id, "waste_factor", Some(&old_vals.2), Some(&v.to_string())); }
+    if let Some(v) = update.min_stock { let _ = crate::commands::audit::log_change(&conn, "material", material_id, "min_stock", Some(&old_vals.3), Some(&v.to_string())); }
+
     conn.query_row(
         "SELECT id, material_number, name, material_type, unit, supplier_id, net_price, waste_factor, min_stock, reorder_time_days, notes, created_at, updated_at \
          FROM materials WHERE id = ?1 AND deleted_at IS NULL",
@@ -1739,6 +1757,13 @@ pub fn update_license(
     notes: Option<String>,
 ) -> Result<crate::db::models::LicenseRecord, AppError> {
     let conn = lock_db(&db)?;
+
+    // Capture old values for audit
+    let (old_name_val, old_commercial): (String, String) = conn.query_row(
+        "SELECT COALESCE(name,''), CAST(COALESCE(commercial_allowed,0) AS TEXT) FROM license_records WHERE id = ?1 AND deleted_at IS NULL",
+        [license_id], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap_or_default();
+
     let mut sets: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -1775,6 +1800,10 @@ pub fn update_license(
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let changes = conn.execute(&sql, param_refs.as_slice())?;
     if changes == 0 { return Err(AppError::NotFound(format!("Lizenz {license_id} nicht gefunden"))); }
+
+    // Audit logging for license changes
+    if let Some(v) = &name { let _ = crate::commands::audit::log_change(&conn, "license", license_id, "name", Some(&old_name_val), Some(v)); }
+    if let Some(v) = commercial_allowed { let _ = crate::commands::audit::log_change(&conn, "license", license_id, "commercial_allowed", Some(&old_commercial), Some(&(v as i32).to_string())); }
 
     conn.query_row(
         "SELECT id, name, license_type, valid_from, valid_until, max_uses, current_uses, commercial_allowed, cost_per_piece, cost_per_series, cost_flat, source, notes, created_at, updated_at \

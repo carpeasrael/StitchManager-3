@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 20;
+const CURRENT_VERSION: i32 = 21;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -123,6 +123,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 20 {
         apply_v20(conn)?;
+    }
+
+    if current < 21 {
+        apply_v21(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1166,6 +1170,31 @@ fn apply_v20(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v21(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER NOT NULL,
+            field_name TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            changed_by TEXT,
+            changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_changed_at ON audit_log(changed_at);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (21, 'Add audit_log table for change history traceability');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1184,6 +1213,7 @@ mod tests {
 
         let expected = vec![
             "ai_analysis_results",
+            "audit_log",
             "bill_of_materials",
             "collection_items",
             "collections",
@@ -1247,7 +1277,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 20, "Schema version must be 17");
+        assert_eq!(version, 21, "Schema version must be 17");
     }
 
     #[test]
@@ -1270,22 +1300,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_twenty() {
+    fn test_schema_version_is_twentyone() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 20);
+        assert_eq!(version, 21);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 20",
+                "SELECT description FROM schema_version WHERE version = 21",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("variant"), "v20 description should mention variant");
+        assert!(desc.contains("audit"), "v21 description should mention audit");
     }
 
     #[test]

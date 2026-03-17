@@ -106,6 +106,13 @@ pub fn update_order(
     update: OrderUpdate,
 ) -> Result<PurchaseOrder, AppError> {
     let conn = lock_db(&db)?;
+
+    // Capture old values for audit
+    let old_status: String = conn.query_row(
+        "SELECT COALESCE(status, 'draft') FROM purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+        [order_id], |row| row.get(0),
+    ).unwrap_or_default();
+
     let mut sets: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -143,6 +150,11 @@ pub fn update_order(
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let changes = conn.execute(&sql, param_refs.as_slice())?;
     if changes == 0 { return Err(AppError::NotFound(format!("Bestellung {order_id} nicht gefunden"))); }
+
+    // Audit logging for order status changes
+    if let Some(v) = &update.status {
+        let _ = crate::commands::audit::log_change(&conn, "order", order_id, "status", Some(&old_status), Some(v));
+    }
 
     conn.query_row(
         "SELECT id, order_number, supplier_id, project_id, status, order_date, expected_delivery, shipping_cost, notes, created_at, updated_at \

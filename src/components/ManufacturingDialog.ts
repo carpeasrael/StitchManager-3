@@ -474,6 +474,8 @@ export class ManufacturingDialog {
     });
     actions.appendChild(delBtn);
     container.appendChild(actions);
+
+    this.renderAuditHistory(container, "material", m.id);
   }
 
   private async createMaterial(): Promise<void> {
@@ -1786,6 +1788,8 @@ export class ManufacturingDialog {
     });
     actions.appendChild(delBtn);
     container.appendChild(actions);
+
+    this.renderAuditHistory(container, "order", o.id);
   }
 
   private async createOrder(): Promise<void> {
@@ -1932,6 +1936,8 @@ export class ManufacturingDialog {
     });
     actions.appendChild(delBtn);
     container.appendChild(actions);
+
+    this.renderAuditHistory(container, "license", l.id);
   }
 
   private async createLicenseRecord(): Promise<void> {
@@ -2680,6 +2686,46 @@ export class ManufacturingDialog {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────
+
+  private renderAuditHistory(container: HTMLElement, entityType: string, entityId: number): void {
+    const section = document.createElement("div");
+    section.className = "mfg-bom-section";
+    const toggle = document.createElement("button");
+    toggle.className = "dialog-btn";
+    toggle.style.fontSize = "var(--font-size-caption)";
+    toggle.textContent = "Aenderungshistorie";
+    toggle.addEventListener("click", async () => {
+      toggle.style.display = "none";
+      try {
+        const entries = await ReportService.getAuditLog(entityType, entityId);
+        if (entries.length === 0) {
+          const hint = document.createElement("div");
+          hint.className = "mfg-item-sub";
+          hint.textContent = "Keine Aenderungen protokolliert";
+          section.appendChild(hint);
+          return;
+        }
+        const table = document.createElement("table");
+        table.className = "mfg-bom-table";
+        table.style.fontSize = "var(--font-size-caption)";
+        table.innerHTML = "<thead><tr><th>Feld</th><th>Alt</th><th>Neu</th><th>Datum</th></tr></thead>";
+        const tbody = document.createElement("tbody");
+        for (const e of entries) {
+          const tr = document.createElement("tr");
+          for (const cell of [e.fieldName, e.oldValue || "-", e.newValue || "-", e.changedAt.substring(0, 16)]) {
+            const td = document.createElement("td");
+            td.textContent = cell;
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        section.appendChild(table);
+      } catch { ToastContainer.show("error", "Historie konnte nicht geladen werden"); }
+    });
+    section.appendChild(toggle);
+    container.appendChild(section);
+  }
 
   private addBadge(container: HTMLElement, text: string, cls: string): void {
     const badge = document.createElement("span");

@@ -161,11 +161,13 @@ pub fn update_project(
 ) -> Result<Project, AppError> {
     let conn = lock_db(&db)?;
 
-    // Capture current state for detecting approval/status transitions
-    let (old_approval, old_status): (String, String) = conn.query_row(
-        "SELECT COALESCE(approval_status, 'draft'), status FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+    // Capture current state for detecting transitions and audit logging
+    let (old_name, old_status, old_approval, old_priority, old_customer, old_order_number, old_deadline, old_responsible): (String, String, String, String, String, String, String, String) = conn.query_row(
+        "SELECT COALESCE(name,''), status, COALESCE(approval_status,'draft'), COALESCE(priority,'normal'), \
+         COALESCE(customer,''), COALESCE(order_number,''), COALESCE(deadline,''), COALESCE(responsible_person,'') \
+         FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         [project_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
     ).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Projekt {project_id} nicht gefunden")),
         _ => AppError::Database(e),
@@ -222,6 +224,23 @@ pub fn update_project(
     let changes = conn.execute(&sql, param_refs.as_slice())?;
     if changes == 0 {
         return Err(AppError::NotFound(format!("Projekt {project_id} nicht gefunden")));
+    }
+
+    // Audit logging
+    let audit_fields: Vec<(&str, &str, Option<&str>)> = vec![
+        ("name", &old_name, update.name.as_deref()),
+        ("status", &old_status, update.status.as_deref()),
+        ("approval_status", &old_approval, update.approval_status.as_deref()),
+        ("priority", &old_priority, update.priority.as_deref()),
+        ("customer", &old_customer, update.customer.as_deref()),
+        ("order_number", &old_order_number, update.order_number.as_deref()),
+        ("deadline", &old_deadline, update.deadline.as_deref()),
+        ("responsible_person", &old_responsible, update.responsible_person.as_deref()),
+    ];
+    for (field, old, new_opt) in &audit_fields {
+        if let Some(new_val) = new_opt {
+            let _ = crate::commands::audit::log_change(&conn, "project", project_id, field, Some(old), Some(new_val));
+        }
     }
 
     // Auto-reservation: if approval_status changed to 'approved'

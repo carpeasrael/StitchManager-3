@@ -91,3 +91,12 @@ export async function getProjectLicenses(
 ): Promise<import("../types/index").LicenseRecord[]> {
   return invoke("get_project_licenses", { projectId });
 }
+
+// Audit Trail
+
+export async function getAuditLog(
+  entityType: string,
+  entityId: number
+): Promise<import("../types/index").AuditLogEntry[]> {
+  return invoke("get_audit_log", { entityType, entityId });
+}
