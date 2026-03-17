@@ -1,5 +1,6 @@
 import { EventBus } from "../state/EventBus";
 import { trapFocus } from "../utils/focus-trap";
+import { escapeHtml } from "../utils/escape";
 import type { ImportProgress } from "../types/index";
 
 function formatTime(ms: number): string {
@@ -54,7 +55,7 @@ export class BatchDialog {
     // Header
     const header = document.createElement("div");
     header.className = "dialog-header";
-    header.innerHTML = `<span class="dialog-title">${this.escapeHtml(this.operation)}</span>`;
+    header.innerHTML = `<span class="dialog-title">${escapeHtml(this.operation)}</span>`;
     dialog.appendChild(header);
 
     // Body
@@ -275,9 +276,4 @@ export class BatchDialog {
     }
   }
 
-  private escapeHtml(text: string): string {
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
-  }
 }
