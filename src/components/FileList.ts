@@ -1,5 +1,6 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import { getFormatLabel, formatSize } from "../utils/format";
 import * as FileService from "../services/FileService";
@@ -42,6 +43,11 @@ export class FileList extends Component {
     );
     this.subscribe(
       appState.on("selectedFileIds", () => this.updateSelection())
+    );
+    this.subscribe(
+      EventBus.on("filelist:scroll-to-index", (index: unknown) => {
+        this.scrollToIndex(index as number);
+      })
     );
     this.loadFiles();
   }
@@ -337,6 +343,20 @@ export class FileList extends Component {
       const isMultiSelected = selectedIds.includes(file.id);
       const isSingleSelected = file.id === selectedId && selectedIds.length === 0;
       card.classList.toggle("selected", isMultiSelected || isSingleSelected);
+    }
+  }
+
+  private scrollToIndex(index: number): void {
+    if (!this.scrollContainer) return;
+    const containerHeight = this.scrollContainer.clientHeight;
+    const itemTop = index * CARD_HEIGHT;
+    const itemBottom = itemTop + CARD_HEIGHT;
+    const scrollTop = this.scrollContainer.scrollTop;
+
+    if (itemTop < scrollTop) {
+      this.scrollContainer.scrollTop = itemTop;
+    } else if (itemBottom > scrollTop + containerHeight) {
+      this.scrollContainer.scrollTop = itemBottom - containerHeight;
     }
   }
 

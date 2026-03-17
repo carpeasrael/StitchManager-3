@@ -1010,6 +1010,7 @@ function navigateFile(direction: number): void {
 
   appState.set("selectedFileIds", []);
   appState.set("selectedFileId", files[newIndex].id);
+  EventBus.emit("filelist:scroll-to-index", newIndex);
 }
 
 interface AppInstances {
