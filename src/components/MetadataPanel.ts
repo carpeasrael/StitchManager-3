@@ -78,6 +78,19 @@ export class MetadataPanel extends Component {
   private async onSelectionChanged(force: boolean): Promise<void> {
     const fileId = appState.get("selectedFileId");
     if (!force && fileId !== null && fileId === this.currentFile?.id) return;
+
+    // Guard: warn if there are unsaved changes before switching
+    if (this.dirty && this.currentFile && fileId !== this.currentFile.id) {
+      const discard = confirm(
+        "Ungespeicherte Aenderungen vorhanden. Verwerfen?"
+      );
+      if (!discard) {
+        // Revert selection to current file
+        appState.set("selectedFileId", this.currentFile.id);
+        return;
+      }
+    }
+
     if (fileId === null) {
       this.currentFile = null;
       this.currentTags = [];
