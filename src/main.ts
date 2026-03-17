@@ -447,6 +447,11 @@ function initEventHandlers(): () => void {
       ManufacturingDialog.open();
     }),
 
+    EventBus.on("pattern:upload", async () => {
+      const { PatternUploadDialog } = await import("./components/PatternUploadDialog");
+      PatternUploadDialog.open();
+    }),
+
     EventBus.on("collection:selected", async (data) => {
       const { collectionId } = data as { collectionId: number; collectionName: string };
       try {

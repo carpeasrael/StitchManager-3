@@ -681,6 +681,10 @@ pub fn update_file(
         && updates.file_source.is_none()
         && updates.purchase_link.is_none()
         && updates.status.is_none()
+        && updates.author.is_none()
+        && updates.instructions_html.is_none()
+        && updates.pattern_date.is_none()
+        && updates.rating.is_none()
     {
         return Err(AppError::Validation(
             "Mindestens ein Feld muss aktualisiert werden".into(),
@@ -757,6 +761,36 @@ pub fn update_file(
         set_clauses.push(format!("status = ?{idx}"));
         params.push(Box::new(status.clone()));
         idx += 1;
+    }
+    if let Some(ref author) = updates.author {
+        set_clauses.push(format!("author = ?{idx}"));
+        params.push(Box::new(author.clone()));
+        idx += 1;
+    }
+    if let Some(ref instructions_html) = updates.instructions_html {
+        if instructions_html.len() > 100 * 1024 {
+            return Err(AppError::Validation("Anleitung ist zu lang (max. 100 KB)".into()));
+        }
+        set_clauses.push(format!("instructions_html = ?{idx}"));
+        params.push(Box::new(sanitize_html(instructions_html)));
+        idx += 1;
+    }
+    if let Some(ref pattern_date) = updates.pattern_date {
+        set_clauses.push(format!("pattern_date = ?{idx}"));
+        params.push(Box::new(pattern_date.clone()));
+        idx += 1;
+    }
+    if let Some(rating) = updates.rating {
+        if rating == 0 {
+            // 0 = clear rating (set to NULL)
+            set_clauses.push(format!("rating = NULL"));
+        } else if rating >= 1 && rating <= 5 {
+            set_clauses.push(format!("rating = ?{idx}"));
+            params.push(Box::new(rating));
+            idx += 1;
+        } else {
+            return Err(AppError::Validation(format!("Bewertung muss zwischen 1 und 5 liegen: {rating}")));
+        }
     }
 
     set_clauses.push(format!("updated_at = datetime('now')"));
@@ -1047,6 +1081,203 @@ pub fn generate_qr_code(unique_id: String) -> Result<Vec<u8>, AppError> {
     })?;
 
     Ok(buf.into_inner())
+}
+
+// ── Sewing Pattern Upload (#119) ─────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternMetadata {
+    pub name: Option<String>,
+    pub license: Option<String>,
+    pub designer: Option<String>,
+    pub source: Option<String>,
+    pub description: Option<String>,
+    pub instructions_html: Option<String>,
+    pub pattern_date: Option<String>,
+    pub skill_level: Option<String>,
+    pub rating: Option<i32>,
+}
+
+const PATTERN_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg", "bmp"];
+
+/// Basic HTML sanitization: strip script/style tags.
+fn sanitize_html(html: &str) -> String {
+    let mut result = html.to_string();
+    // Remove <script>...</script> blocks
+    while let Some(start) = result.to_lowercase().find("<script") {
+        if let Some(end) = result.to_lowercase()[start..].find("</script>") {
+            result.replace_range(start..start + end + 9, "");
+        } else {
+            result.truncate(start);
+            break;
+        }
+    }
+    // Remove <style>...</style> blocks
+    while let Some(start) = result.to_lowercase().find("<style") {
+        if let Some(end) = result.to_lowercase()[start..].find("</style>") {
+            result.replace_range(start..start + end + 8, "");
+        } else {
+            result.truncate(start);
+            break;
+        }
+    }
+    result
+}
+
+#[tauri::command]
+pub fn upload_sewing_pattern(
+    db: State<'_, DbState>,
+    source_path: String,
+    collection_id: Option<i64>,
+    metadata: PatternMetadata,
+) -> Result<EmbroideryFile, AppError> {
+    super::validate_no_traversal(&source_path)?;
+
+    let src = std::path::Path::new(&source_path);
+    if !src.exists() {
+        return Err(AppError::NotFound(format!("Datei nicht gefunden: {source_path}")));
+    }
+
+    // Validate extension
+    let ext = src.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+    if !PATTERN_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Nicht unterstuetztes Dateiformat: .{ext}. Erlaubt: PDF, PNG, JPG, BMP"
+        )));
+    }
+
+    // Validate file size (100 MB limit)
+    let file_size = std::fs::metadata(src)?.len();
+    if file_size > 100 * 1024 * 1024 {
+        return Err(AppError::Validation("Datei ist groesser als 100 MB".into()));
+    }
+
+    // Validate instructions_html length (100 KB limit)
+    if let Some(ref html) = metadata.instructions_html {
+        if html.len() > 100 * 1024 {
+            return Err(AppError::Validation("Anleitung ist zu lang (max. 100 KB)".into()));
+        }
+    }
+
+    // Validate rating
+    if let Some(r) = metadata.rating {
+        if r < 1 || r > 5 {
+            return Err(AppError::Validation(format!("Bewertung muss zwischen 1 und 5 liegen: {r}")));
+        }
+    }
+
+    // Validate skill_level
+    if let Some(ref sl) = metadata.skill_level {
+        if !sl.is_empty() {
+            let valid = ["beginner", "easy", "intermediate", "advanced", "expert"];
+            if !valid.contains(&sl.as_str()) {
+                return Err(AppError::Validation(format!("Ungueltiges Schwierigkeitslevel: {sl}")));
+            }
+        }
+    }
+
+    let filename = src.file_name().and_then(|n| n.to_str()).unwrap_or("pattern").to_string();
+    let stem = std::path::Path::new(&filename).file_stem().and_then(|s| s.to_str()).unwrap_or("pattern");
+    let display_name = metadata.name.as_deref().unwrap_or(stem).to_string();
+
+    let conn = lock_db(&db)?;
+
+    // Resolve library_root
+    let library_root: String = conn
+        .query_row("SELECT value FROM settings WHERE key = 'library_root'", [], |row| row.get(0))
+        .map_err(|_| AppError::Validation("library_root ist nicht konfiguriert".into()))?;
+
+    let base_dir = if library_root.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(&library_root[2..])
+        } else {
+            std::path::PathBuf::from(&library_root)
+        }
+    } else {
+        std::path::PathBuf::from(&library_root)
+    };
+
+    let pattern_dir = base_dir.join(".schnittmuster");
+    std::fs::create_dir_all(&pattern_dir)?;
+
+    // Ensure folder record exists
+    let folder_path = pattern_dir.to_string_lossy().to_string();
+    let folder_id: i64 = match conn.query_row(
+        "SELECT id FROM folders WHERE path = ?1",
+        [&folder_path],
+        |row| row.get(0),
+    ) {
+        Ok(id) => id,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            conn.execute(
+                "INSERT INTO folders (name, path) VALUES ('Schnittmuster', ?1)",
+                [&folder_path],
+            )?;
+            conn.last_insert_rowid()
+        }
+        Err(e) => return Err(AppError::Database(e)),
+    };
+
+    // Deduplicate filename
+    let mut dest = pattern_dir.join(&filename);
+    if dest.exists() {
+        let ext_str = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+        for i in 1..=100_000 {
+            let candidate = if ext_str.is_empty() {
+                format!("{stem}_{i}")
+            } else {
+                format!("{stem}_{i}.{ext_str}")
+            };
+            dest = pattern_dir.join(&candidate);
+            if !dest.exists() { break; }
+        }
+    }
+
+    // Copy file
+    std::fs::copy(src, &dest)?;
+    let dest_path = dest.to_string_lossy().to_string();
+
+    // Generate unique_id
+    let unique_id = crate::db::migrations::generate_unique_id();
+
+    // Insert DB record
+    conn.execute(
+        "INSERT INTO embroidery_files (folder_id, filename, filepath, name, file_type, status, unique_id, \
+         description, license, author, file_source, skill_level, \
+         instructions_html, pattern_date, rating, file_size_bytes) \
+         VALUES (?1, ?2, ?3, ?4, 'sewing_pattern', 'none', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        rusqlite::params![
+            folder_id,
+            dest.file_name().and_then(|n| n.to_str()).unwrap_or(&filename),
+            dest_path,
+            display_name,
+            unique_id,
+            metadata.description,
+            metadata.license,
+            metadata.designer,    // -> author column
+            metadata.source,      // -> file_source column
+            metadata.skill_level,
+            metadata.instructions_html.as_deref().map(sanitize_html),
+            metadata.pattern_date,
+            metadata.rating,
+            file_size as i64,
+        ],
+    )?;
+    let file_id = conn.last_insert_rowid();
+
+    // Link to collection if requested
+    if let Some(cid) = collection_id {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO collection_items (collection_id, file_id) VALUES (?1, ?2)",
+            rusqlite::params![cid, file_id],
+        );
+    }
+
+    // Return the created record
+    let sql = format!("{} WHERE id = ?1 AND deleted_at IS NULL", crate::db::queries::FILE_SELECT);
+    conn.query_row(&sql, [file_id], crate::db::queries::row_to_file)
+        .map_err(AppError::Database)
 }
 
 /// Attach a file to an embroidery file entry.

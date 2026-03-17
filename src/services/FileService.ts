@@ -127,6 +127,28 @@ export async function getAttachments(
   return invoke<FileAttachment[]>("get_attachments", { fileId });
 }
 
+export async function uploadSewingPattern(
+  sourcePath: string,
+  collectionId: number | null,
+  metadata: {
+    name?: string;
+    license?: string;
+    designer?: string;
+    source?: string;
+    description?: string;
+    instructionsHtml?: string;
+    patternDate?: string;
+    skillLevel?: string;
+    rating?: number;
+  }
+): Promise<EmbroideryFile> {
+  return invoke<EmbroideryFile>("upload_sewing_pattern", {
+    sourcePath,
+    collectionId,
+    metadata,
+  });
+}
+
 export async function attachFile(
   fileId: number,
   sourcePath: string,

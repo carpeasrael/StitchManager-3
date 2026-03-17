@@ -737,6 +737,9 @@ mod tests {
             ai_confirmed: false,
             created_at: String::new(),
             updated_at: String::new(),
+            instructions_html: None,
+            pattern_date: None,
+            rating: None,
         };
 
         assert_eq!(
@@ -795,6 +798,9 @@ mod tests {
             ai_confirmed: false,
             created_at: String::new(),
             updated_at: String::new(),
+            instructions_html: None,
+            pattern_date: None,
+            rating: None,
         };
 
         assert_eq!(
@@ -845,6 +851,9 @@ mod tests {
             ai_confirmed: false,
             created_at: String::new(),
             updated_at: String::new(),
+            instructions_html: None,
+            pattern_date: None,
+            rating: None,
         };
 
         let result = apply_pattern("{theme}/{name}", &file);
@@ -895,6 +904,9 @@ mod tests {
             ai_confirmed: false,
             created_at: String::new(),
             updated_at: String::new(),
+            instructions_html: None,
+            pattern_date: None,
+            rating: None,
         };
 
         let pattern = "{theme}/{name}";

@@ -48,6 +48,9 @@ export interface EmbroideryFile {
   aiConfirmed: boolean;
   createdAt: string;
   updatedAt: string;
+  instructionsHtml: string | null;
+  patternDate: string | null;
+  rating: number | null;
 }
 
 export interface FileFormat {
@@ -105,6 +108,10 @@ export interface FileUpdate {
   fileSource?: string;
   purchaseLink?: string;
   status?: string;
+  author?: string;
+  instructionsHtml?: string;
+  patternDate?: string;
+  rating?: number;
 }
 
 export interface StitchSegment {

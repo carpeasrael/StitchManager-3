@@ -37,6 +37,10 @@ interface FormSnapshot {
   fileSource: string;
   purchaseLink: string;
   status: string;
+  author: string;
+  instructionsHtml: string;
+  patternDate: string;
+  rating: string;
 }
 
 export class MetadataPanel extends Component {
@@ -139,6 +143,10 @@ export class MetadataPanel extends Component {
       fileSource: file.fileSource || "",
       purchaseLink: file.purchaseLink || "",
       status: file.status || "none",
+      author: file.author || "",
+      instructionsHtml: file.instructionsHtml || "",
+      patternDate: file.patternDate || "",
+      rating: file.rating != null ? String(file.rating) : "0",
     };
   }
 
@@ -160,7 +168,11 @@ export class MetadataPanel extends Component {
       current.formatType !== this.snapshot.formatType ||
       current.fileSource !== this.snapshot.fileSource ||
       current.purchaseLink !== this.snapshot.purchaseLink ||
-      current.status !== this.snapshot.status;
+      current.status !== this.snapshot.status ||
+      current.author !== this.snapshot.author ||
+      current.instructionsHtml !== this.snapshot.instructionsHtml ||
+      current.patternDate !== this.snapshot.patternDate ||
+      current.rating !== this.snapshot.rating;
 
     // Check custom fields for changes
     if (!dirty) {
@@ -203,6 +215,16 @@ export class MetadataPanel extends Component {
       fileSource: getValue("fileSource"),
       purchaseLink: getValue("purchaseLink"),
       status: getValue("status"),
+      author: getValue("author"),
+      patternDate: getValue("patternDate"),
+      rating: (() => {
+        const ratingEl = this.el.querySelector<HTMLElement>(".star-rating");
+        return ratingEl?.dataset.rating || "";
+      })(),
+      instructionsHtml: (() => {
+        const editor = this.el.querySelector<HTMLElement>('[data-field="instructionsHtml"]');
+        return editor ? editor.innerHTML.trim() : "";
+      })(),
     };
   }
 
@@ -442,6 +464,8 @@ export class MetadataPanel extends Component {
       sewingSection.appendChild(sewingHeader);
       const sewingForm = document.createElement("div");
       sewingForm.className = "metadata-form";
+      this.addFormField(sewingForm, "Designer", "author", file.author || "", "text");
+      this.addFormField(sewingForm, "Datum", "patternDate", file.patternDate || "", "date");
       this.addFormField(sewingForm, "Größen", "sizeRange", file.sizeRange || "", "text");
       this.addSelectField(sewingForm, "Schwierigkeit", "skillLevel", file.skillLevel || "", [
         { value: "", label: "-- Auswählen --" },
@@ -451,10 +475,87 @@ export class MetadataPanel extends Component {
         { value: "advanced", label: "Fortgeschritten" },
         { value: "expert", label: "Experte" },
       ]);
+
+      // Star rating
+      const ratingRow = document.createElement("div");
+      ratingRow.className = "metadata-field";
+      const ratingLabel = document.createElement("label");
+      ratingLabel.className = "metadata-label";
+      ratingLabel.textContent = "Bewertung";
+      ratingRow.appendChild(ratingLabel);
+      const starContainer = document.createElement("div");
+      starContainer.className = "star-rating";
+      starContainer.setAttribute("role", "radiogroup");
+      starContainer.setAttribute("aria-label", "Bewertung");
+      starContainer.dataset.rating = file.rating != null ? String(file.rating) : "0";
+      for (let i = 1; i <= 5; i++) {
+        const star = document.createElement("span");
+        star.className = "star" + (file.rating != null && i <= file.rating ? " filled" : "");
+        star.textContent = "\u2605";
+        star.dataset.value = String(i);
+        star.addEventListener("mouseenter", () => {
+          starContainer.querySelectorAll(".star").forEach((s) => {
+            (s as HTMLElement).classList.toggle("hover-fill", Number((s as HTMLElement).dataset.value) <= i);
+          });
+        });
+        star.addEventListener("mouseleave", () => {
+          starContainer.querySelectorAll(".star").forEach((s) => (s as HTMLElement).classList.remove("hover-fill"));
+        });
+        star.addEventListener("click", () => {
+          const current = Number(starContainer.dataset.rating) || 0;
+          const newRating = current === i ? 0 : i;
+          starContainer.dataset.rating = String(newRating);
+          starContainer.querySelectorAll(".star").forEach((s) => {
+            (s as HTMLElement).classList.toggle("filled", Number((s as HTMLElement).dataset.value) <= newRating);
+          });
+          this.checkDirty();
+        });
+        starContainer.appendChild(star);
+      }
+      ratingRow.appendChild(starContainer);
+      sewingForm.appendChild(ratingRow);
+
       this.addFormField(sewingForm, "Sprache", "language", file.language || "", "text");
       this.addFormField(sewingForm, "Formattyp", "formatType", file.formatType || "", "text");
       this.addFormField(sewingForm, "Quelle", "fileSource", file.fileSource || "", "text");
       this.addLinkField(sewingForm, "Kauflink", "purchaseLink", file.purchaseLink || "");
+
+      // Rich text - Anleitung
+      const instrRow = document.createElement("div");
+      instrRow.className = "metadata-field";
+      const instrLabel = document.createElement("label");
+      instrLabel.className = "metadata-label";
+      instrLabel.textContent = "Anleitung";
+      instrRow.appendChild(instrLabel);
+      const instrToolbar = document.createElement("div");
+      instrToolbar.className = "rt-toolbar";
+      for (const tb of [
+        { cmd: "bold", label: "B", style: "font-weight:bold" },
+        { cmd: "italic", label: "I", style: "font-style:italic" },
+        { cmd: "insertUnorderedList", label: "\u2022", style: "" },
+      ]) {
+        const btn = document.createElement("button");
+        btn.className = "rt-btn";
+        btn.type = "button";
+        btn.innerHTML = `<span style="${tb.style}">${tb.label}</span>`;
+        btn.addEventListener("click", (e) => { e.preventDefault(); document.execCommand(tb.cmd, false); });
+        instrToolbar.appendChild(btn);
+      }
+      instrRow.appendChild(instrToolbar);
+      const instrEditor = document.createElement("div");
+      instrEditor.className = "rt-editor";
+      instrEditor.contentEditable = "true";
+      instrEditor.dataset.field = "instructionsHtml";
+      instrEditor.innerHTML = file.instructionsHtml || "";
+      instrEditor.addEventListener("input", () => this.checkDirty());
+      instrEditor.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const text = e.clipboardData?.getData("text/plain") || "";
+        document.execCommand("insertText", false, text);
+      });
+      instrRow.appendChild(instrEditor);
+      sewingForm.appendChild(instrRow);
+
       sewingSection.appendChild(sewingForm);
       wrapper.appendChild(sewingSection);
     }
@@ -788,7 +889,7 @@ export class MetadataPanel extends Component {
     label: string,
     field: string,
     value: string,
-    type: "text" | "textarea"
+    type: "text" | "textarea" | "date"
   ): void {
     const group = document.createElement("div");
     group.className = "metadata-form-group";
@@ -808,7 +909,7 @@ export class MetadataPanel extends Component {
       group.appendChild(textarea);
     } else {
       const input = document.createElement("input");
-      input.type = "text";
+      input.type = type;
       input.className = "metadata-form-input";
       input.dataset.field = field;
       input.value = value;
@@ -1052,6 +1153,23 @@ export class MetadataPanel extends Component {
         }
         if (values.status !== this.snapshot.status) {
           updates.status = values.status;
+          hasUpdates = true;
+        }
+        if (values.author !== this.snapshot.author) {
+          updates.author = values.author;
+          hasUpdates = true;
+        }
+        if (values.instructionsHtml !== this.snapshot.instructionsHtml) {
+          updates.instructionsHtml = values.instructionsHtml;
+          hasUpdates = true;
+        }
+        if (values.patternDate !== this.snapshot.patternDate) {
+          updates.patternDate = values.patternDate;
+          hasUpdates = true;
+        }
+        if (values.rating !== this.snapshot.rating) {
+          const r = Number(values.rating) || 0;
+          updates.rating = r;
           hasUpdates = true;
         }
       }

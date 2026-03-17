@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 23;
+const CURRENT_VERSION: i32 = 24;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -135,6 +135,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 23 {
         apply_v23(conn)?;
+    }
+
+    if current < 24 {
+        apply_v24(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1294,6 +1298,22 @@ fn apply_v23(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v24(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE embroidery_files ADD COLUMN instructions_html TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN pattern_date TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN rating INTEGER CHECK(rating IS NULL OR (rating >= 1 AND rating <= 5));
+
+        INSERT INTO schema_version (version, description)
+        VALUES (24, 'Add sewing pattern metadata: instructions, date, rating');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1378,7 +1398,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 23, "Schema version must be 23");
+        assert_eq!(version, 24, "Schema version must be 24");
     }
 
     #[test]
@@ -1407,16 +1427,16 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 23);
+        assert_eq!(version, 24);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 23",
+                "SELECT description FROM schema_version WHERE version = 24",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("BOM"), "v23 description should mention BOM");
+        assert!(desc.contains("sewing pattern"), "v24 description should mention sewing pattern");
     }
 
     #[test]

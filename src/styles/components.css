@@ -4152,3 +4152,38 @@ a:focus:not(:focus-visible),
   color: var(--color-accent);
   font-size: var(--font-size-body);
 }
+
+/* Star Rating */
+.star-rating { display: inline-flex; gap: 2px; cursor: pointer; }
+.star-rating .star { font-size: 1.4rem; color: var(--color-text-muted); transition: color 0.15s; user-select: none; }
+.star-rating .star.filled { color: #f5a623; }
+.star-rating .star.hover-fill { color: #f5a623; }
+
+/* Rich Text Editor */
+.rt-toolbar { display: flex; gap: 2px; margin-bottom: 4px; }
+.rt-btn {
+  padding: 2px 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-caption);
+  color: var(--color-text);
+}
+.rt-btn:hover { background: var(--color-bg-hover); }
+.rt-editor {
+  min-height: 80px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--spacing-2);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
+}
+.rt-editor:focus { border-color: var(--color-accent); outline: none; }
+
+/* Pattern Upload Dialog */
+.pattern-upload-dialog { max-height: 90vh; display: flex; flex-direction: column; }

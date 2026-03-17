@@ -67,6 +67,9 @@ pub struct EmbroideryFile {
     pub ai_confirmed: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub instructions_html: Option<String>,
+    pub pattern_date: Option<String>,
+    pub rating: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,6 +186,10 @@ pub struct FileUpdate {
     pub file_source: Option<String>,
     pub purchase_link: Option<String>,
     pub status: Option<String>,
+    pub author: Option<String>,
+    pub instructions_html: Option<String>,
+    pub pattern_date: Option<String>,
+    pub rating: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

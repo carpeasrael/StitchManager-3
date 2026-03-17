@@ -193,6 +193,16 @@ export class Sidebar extends Component {
       }
     });
     header.appendChild(addBtn);
+
+    const uploadBtn = document.createElement("button");
+    uploadBtn.className = "sidebar-add-btn";
+    uploadBtn.textContent = "\u2191";
+    uploadBtn.title = "Schnittmuster hochladen";
+    uploadBtn.setAttribute("aria-label", "Schnittmuster hochladen");
+    uploadBtn.addEventListener("click", () => {
+      EventBus.emit("pattern:upload");
+    });
+    header.appendChild(uploadBtn);
     section.appendChild(header);
 
     if (this.collections.length > 0) {
