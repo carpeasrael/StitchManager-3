@@ -1571,9 +1571,13 @@ export class ManufacturingDialog {
   }
 
   private renderCostRatesTab(container: HTMLElement): void {
-    container.className = "mfg-content mfg-content-single";
+    // Two-column layout: rates left, product calculator right
+    const listPane = document.createElement("div");
+    listPane.className = "mfg-list-pane";
+    listPane.style.width = "50%";
+    listPane.style.minWidth = "300px";
 
-    // ── Section A: Rate Management ──
+    // ── Left: Rate Management ──
     const rateSection = document.createElement("div");
     rateSection.className = "mfg-form";
 
@@ -1733,12 +1737,15 @@ export class ManufacturingDialog {
     };
 
     renderInlineRates();
-    container.appendChild(rateSection);
+    listPane.appendChild(rateSection);
+    container.appendChild(listPane);
 
-    // ── Section B: Product Cost Calculator ──
+    // ── Right: Product Cost Calculator ──
+    const detailPane = document.createElement("div");
+    detailPane.className = "mfg-detail-pane";
+
     const calcSection = document.createElement("div");
     calcSection.className = "mfg-form";
-    calcSection.style.marginTop = "var(--spacing-3)";
 
     const calcTitle = document.createElement("h3");
     calcTitle.style.marginBottom = "var(--spacing-2)";
@@ -1817,7 +1824,8 @@ export class ManufacturingDialog {
 
     prodSelect.addEventListener("change", recalculate);
     qtyInput.addEventListener("input", recalculate);
-    container.appendChild(calcSection);
+    detailPane.appendChild(calcSection);
+    container.appendChild(detailPane);
   }
 
   // ── Reports Tab ─────────────────────────────────────────────────
@@ -1830,14 +1838,19 @@ export class ManufacturingDialog {
   }
 
   private renderReportsTab(container: HTMLElement): void {
-    container.className = "mfg-content mfg-content-single";
+    // Two-column layout: selectors left, results right
+    const listPane = document.createElement("div");
+    listPane.className = "mfg-list-pane";
+    listPane.style.width = "300px";
 
-    // ── Mode selector ──
+    const detailPane = document.createElement("div");
+    detailPane.className = "mfg-detail-pane";
+
+    // ── Left: Mode selector ──
     const modeRow = document.createElement("div");
-    modeRow.className = "mfg-tt-selector";
     modeRow.style.display = "flex";
-    modeRow.style.gap = "var(--spacing-2)";
-    modeRow.style.alignItems = "center";
+    modeRow.style.flexDirection = "column";
+    modeRow.style.gap = "var(--spacing-1)";
     modeRow.style.marginBottom = "var(--spacing-2)";
 
     const modeLabel = document.createElement("label");
@@ -1865,11 +1878,10 @@ export class ManufacturingDialog {
       radioLabel.appendChild(document.createTextNode(m.label));
       modeRow.appendChild(radioLabel);
     }
-    container.appendChild(modeRow);
+    listPane.appendChild(modeRow);
 
-    // ── Selector row (project or product) ──
+    // ── Left: Selector row (project or product) ──
     const selectorRow = document.createElement("div");
-    selectorRow.className = "mfg-tt-selector";
     selectorRow.style.marginBottom = "var(--spacing-2)";
 
     if (this.reportMode === "project") {
@@ -1919,7 +1931,7 @@ export class ManufacturingDialog {
 
       const qtyLabel = document.createElement("label");
       qtyLabel.className = "mfg-label";
-      qtyLabel.style.marginLeft = "var(--spacing-2)";
+      qtyLabel.style.marginTop = "var(--spacing-1)";
       qtyLabel.textContent = "Menge:";
       const qtyInput = document.createElement("input");
       qtyInput.className = "mfg-input";
@@ -1950,9 +1962,14 @@ export class ManufacturingDialog {
       selectorRow.appendChild(qtyLabel);
       selectorRow.appendChild(qtyInput);
     }
-    container.appendChild(selectorRow);
+    listPane.appendChild(selectorRow);
 
-    // ── Section 1: Netto-Kosten und Preis ──
+    // ── Left: Action buttons ──
+    this.renderReportsActions(listPane);
+
+    container.appendChild(listPane);
+
+    // ── Right: Section 1 — Netto-Kosten und Preis ──
     const cb = this.costBreakdown;
     if (!cb) {
       const hint = document.createElement("div");
@@ -1960,23 +1977,24 @@ export class ManufacturingDialog {
       hint.textContent = this.reportMode === "project"
         ? (this.reportProjectId ? "Bericht wird geladen..." : "Projekt auswaehlen")
         : (this.reportProductId ? "Berechnung wird geladen..." : "Produkt auswaehlen");
-      container.appendChild(hint);
+      detailPane.appendChild(hint);
+      container.appendChild(detailPane);
       return;
     }
 
     const section1Title = document.createElement("h3");
     section1Title.style.marginBottom = "var(--spacing-2)";
     section1Title.textContent = "Netto-Kosten und Preis";
-    container.appendChild(section1Title);
+    detailPane.appendChild(section1Title);
 
     const kalkCard = this.createKalkulationCard(cb);
-    container.appendChild(kalkCard);
+    detailPane.appendChild(kalkCard);
 
-    // ── Section 2: Verkauf ──
+    // ── Right: Section 2 — Verkauf ──
     const section2Title = document.createElement("h3");
     section2Title.style.margin = "var(--spacing-3) 0 var(--spacing-2)";
     section2Title.textContent = "Verkauf";
-    container.appendChild(section2Title);
+    detailPane.appendChild(section2Title);
 
     const verkaufCard = document.createElement("div");
     verkaufCard.className = "mfg-report-card mfg-kalkulation-card";
@@ -2040,12 +2058,15 @@ export class ManufacturingDialog {
       renderVerkauf(pct);
     });
     verkaufCard.appendChild(verkaufDisplay);
-    container.appendChild(verkaufCard);
+    detailPane.appendChild(verkaufCard);
+    container.appendChild(detailPane);
+  }
 
-    // ── Action buttons ──
+  private renderReportsActions(listPane: HTMLElement): void {
     const exportRow = document.createElement("div");
     exportRow.className = "mfg-actions";
-    exportRow.style.marginTop = "var(--spacing-2)";
+    exportRow.style.marginTop = "var(--spacing-3)";
+    exportRow.style.flexWrap = "wrap";
 
     if (this.reportMode === "project" && this.reportProjectId) {
       // CSV export
@@ -2124,7 +2145,7 @@ export class ManufacturingDialog {
       this.renderActiveTab();
     });
     exportRow.appendChild(ratesBtn);
-    container.appendChild(exportRow);
+    listPane.appendChild(exportRow);
   }
 
   private createKalkulationCard(cb: CostBreakdown): HTMLElement {
