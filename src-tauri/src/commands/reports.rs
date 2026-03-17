@@ -571,6 +571,274 @@ pub fn export_project_csv(
     Ok(csv)
 }
 
+// ── Additional Exports (project.md 9.6) ──────────────────────────────
+
+/// Quote a string for CSV: wrap in double quotes, escape internal quotes.
+fn csv_quote(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Export BOM for a product as CSV.
+#[tauri::command]
+pub fn export_bom_csv(
+    db: State<'_, DbState>,
+    product_id: i64,
+) -> Result<String, AppError> {
+    let conn = lock_db(&db)?;
+    let product_name: String = conn.query_row(
+        "SELECT name FROM products WHERE id = ?1 AND deleted_at IS NULL",
+        [product_id], |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Produkt {product_id} nicht gefunden")),
+        _ => AppError::Database(e),
+    })?;
+
+    let mut csv = String::new();
+    csv.push_str(&format!("Stueckliste fuer: \"{}\"\n", product_name.replace('"', "\"\"")));
+    csv.push_str("Material,Materialnummer,Menge,Einheit,Nettopreis,Verschnitt(%),Kosten\n");
+
+    let mut stmt = conn.prepare(
+        "SELECT m.name, COALESCE(m.material_number,''), b.quantity, COALESCE(b.unit, m.unit, ''), \
+         COALESCE(m.net_price, 0), COALESCE(m.waste_factor, 0) \
+         FROM bill_of_materials b \
+         JOIN materials m ON m.id = b.material_id AND m.deleted_at IS NULL \
+         WHERE b.product_id = ?1 ORDER BY m.name"
+    )?;
+
+    let rows: Vec<(String, String, f64, String, f64, f64)> = stmt.query_map([product_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
+    })?.collect::<Result<Vec<_>, _>>()?;
+
+    for (name, num, qty, unit, price, waste) in &rows {
+        let cost = qty * price * (1.0 + waste);
+        csv.push_str(&format!("\"{}\",\"{}\",{:.2},{},{:.2},{:.0},{:.2}\n",
+            name.replace('"', "\"\""), num.replace('"', "\"\""), qty, unit, price, waste * 100.0, cost));
+    }
+    Ok(csv)
+}
+
+/// Export purchase orders as CSV, optionally filtered by project.
+#[tauri::command]
+pub fn export_orders_csv(
+    db: State<'_, DbState>,
+    project_id: Option<i64>,
+) -> Result<String, AppError> {
+    let conn = lock_db(&db)?;
+    let mut csv = String::new();
+    csv.push_str("Bestellnummer,Lieferant,Projekt,Status,Bestelldatum,Lieferdatum,Versandkosten,Material,Menge,Stueckpreis\n");
+
+    let base_sql = "SELECT po.order_number, s.name, p.name, po.status, po.order_date, po.expected_delivery, po.shipping_cost, \
+        m.name, oi.quantity_ordered, oi.unit_price \
+        FROM purchase_orders po \
+        JOIN suppliers s ON s.id = po.supplier_id \
+        LEFT JOIN projects p ON p.id = po.project_id \
+        LEFT JOIN order_items oi ON oi.order_id = po.id \
+        LEFT JOIN materials m ON m.id = oi.material_id \
+        WHERE po.deleted_at IS NULL";
+
+    if let Some(pid) = project_id {
+        let sql = format!("{base_sql} AND po.project_id = ?1 ORDER BY po.created_at DESC, oi.id");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([pid], |row| {
+            Ok((row.get::<_,Option<String>>(0)?, row.get::<_,String>(1)?, row.get::<_,Option<String>>(2)?,
+                row.get::<_,String>(3)?, row.get::<_,Option<String>>(4)?, row.get::<_,Option<String>>(5)?,
+                row.get::<_,Option<f64>>(6)?, row.get::<_,Option<String>>(7)?,
+                row.get::<_,Option<f64>>(8)?, row.get::<_,Option<f64>>(9)?))
+        })?.collect::<Result<Vec<_>, _>>()?;
+        for r in &rows {
+            csv.push_str(&format!("{},{},{},{},{},{},{:.2},{},{},{}\n",
+                csv_quote(r.0.as_deref().unwrap_or("")), csv_quote(&r.1), csv_quote(r.2.as_deref().unwrap_or("")),
+                r.3, r.4.as_deref().unwrap_or(""), r.5.as_deref().unwrap_or(""),
+                r.6.unwrap_or(0.0), csv_quote(r.7.as_deref().unwrap_or("")),
+                r.8.map(|v| format!("{:.2}", v)).unwrap_or_default(),
+                r.9.map(|v| format!("{:.2}", v)).unwrap_or_default()));
+        }
+    } else {
+        let sql = format!("{base_sql} ORDER BY po.created_at DESC, oi.id");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_,Option<String>>(0)?, row.get::<_,String>(1)?, row.get::<_,Option<String>>(2)?,
+                row.get::<_,String>(3)?, row.get::<_,Option<String>>(4)?, row.get::<_,Option<String>>(5)?,
+                row.get::<_,Option<f64>>(6)?, row.get::<_,Option<String>>(7)?,
+                row.get::<_,Option<f64>>(8)?, row.get::<_,Option<f64>>(9)?))
+        })?.collect::<Result<Vec<_>, _>>()?;
+        for r in &rows {
+            csv.push_str(&format!("{},{},{},{},{},{},{:.2},{},{},{}\n",
+                csv_quote(r.0.as_deref().unwrap_or("")), csv_quote(&r.1), csv_quote(r.2.as_deref().unwrap_or("")),
+                r.3, r.4.as_deref().unwrap_or(""), r.5.as_deref().unwrap_or(""),
+                r.6.unwrap_or(0.0), csv_quote(r.7.as_deref().unwrap_or("")),
+                r.8.map(|v| format!("{:.2}", v)).unwrap_or_default(),
+                r.9.map(|v| format!("{:.2}", v)).unwrap_or_default()));
+        }
+    }
+    Ok(csv)
+}
+
+/// Export comprehensive project data as CSV.
+#[tauri::command]
+pub fn export_project_full_csv(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<String, AppError> {
+    let conn = lock_db(&db)?;
+    let project_name: String = conn.query_row(
+        "SELECT name FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        [project_id], |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Projekt {project_id} nicht gefunden")),
+        _ => AppError::Database(e),
+    })?;
+
+    let mut csv = String::new();
+    csv.push_str(&format!("Projektexport: \"{}\"\n\n", project_name.replace('"', "\"\"")));
+
+    // Time entries
+    csv.push_str("Zeiterfassung\nSchritt,Geplant (min),Tatsaechlich (min),Mitarbeiter,Maschine\n");
+    let mut stmt = conn.prepare(
+        "SELECT step_name, COALESCE(planned_minutes,0), COALESCE(actual_minutes,0), \
+         COALESCE(worker,''), COALESCE(machine,'') FROM time_entries WHERE project_id = ?1 ORDER BY recorded_at"
+    )?;
+    let time_rows: Vec<(String, f64, f64, String, String)> = stmt.query_map([project_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+    })?.collect::<Result<Vec<_>, _>>()?;
+    for r in &time_rows {
+        csv.push_str(&format!("{},{:.1},{:.1},{},{}\n", csv_quote(&r.0), r.1, r.2, csv_quote(&r.3), csv_quote(&r.4)));
+    }
+
+    // Workflow steps
+    csv.push_str("\nWorkflow\nSchritt,Status,Verantwortlich\n");
+    let mut stmt = conn.prepare(
+        "SELECT sd.name, ws.status, COALESCE(ws.responsible,'') \
+         FROM workflow_steps ws JOIN step_definitions sd ON sd.id = ws.step_definition_id \
+         WHERE ws.project_id = ?1 ORDER BY ws.sort_order"
+    )?;
+    let wf_rows: Vec<(String, String, String)> = stmt.query_map([project_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?.collect::<Result<Vec<_>, _>>()?;
+    for r in &wf_rows {
+        csv.push_str(&format!("{},{},{}\n", csv_quote(&r.0), r.1, csv_quote(&r.2)));
+    }
+
+    // Material consumption
+    csv.push_str("\nMaterialverbrauch\nMaterial,Menge,Einheit,Schritt,Datum\n");
+    let mut stmt = conn.prepare(
+        "SELECT m.name, mc.quantity, COALESCE(mc.unit, m.unit, ''), COALESCE(mc.step_name,''), mc.recorded_at \
+         FROM material_consumptions mc JOIN materials m ON m.id = mc.material_id \
+         WHERE mc.project_id = ?1 ORDER BY mc.recorded_at"
+    )?;
+    let mc_rows: Vec<(String, f64, String, String, String)> = stmt.query_map([project_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+    })?.collect::<Result<Vec<_>, _>>()?;
+    for r in &mc_rows {
+        csv.push_str(&format!("{},{:.2},{},{},{}\n", csv_quote(&r.0), r.1, r.2, csv_quote(&r.3), r.4));
+    }
+
+    // Quality inspections
+    csv.push_str("\nQualitaetspruefungen\nDatum,Pruefer,Ergebnis,Notizen\n");
+    let mut stmt = conn.prepare(
+        "SELECT qi.inspection_date, COALESCE(qi.inspector,''), qi.result, COALESCE(qi.notes,'') \
+         FROM quality_inspections qi WHERE qi.project_id = ?1 ORDER BY qi.inspection_date"
+    )?;
+    let qi_rows: Vec<(String, String, String, String)> = stmt.query_map([project_id], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    })?.collect::<Result<Vec<_>, _>>()?;
+    for r in &qi_rows {
+        csv.push_str(&format!("{},{},{},{}\n", r.0, csv_quote(&r.1), r.2, csv_quote(&r.3)));
+    }
+
+    // Cost breakdown (if available)
+    if let Ok(cb) = calculate_cost_breakdown(&conn, project_id) {
+        csv.push_str("\nKalkulation\n");
+        csv.push_str(&format!("Materialkosten,{:.2}\n", cb.material_cost));
+        csv.push_str(&format!("Lizenzkosten,{:.2}\n", cb.license_cost));
+        csv.push_str(&format!("Arbeitskosten,{:.2}\n", cb.labor_cost));
+        csv.push_str(&format!("Maschinenkosten,{:.2}\n", cb.machine_cost));
+        csv.push_str(&format!("Beschaffungskosten,{:.2}\n", cb.procurement_cost));
+        csv.push_str(&format!("Gemeinkosten,{:.2}\n", cb.overhead_cost));
+        csv.push_str(&format!("Selbstkosten,{:.2}\n", cb.selbstkosten));
+        csv.push_str(&format!("Gewinnzuschlag,{:.2}\n", cb.profit_amount));
+        csv.push_str(&format!("Netto-Verkaufspreis,{:.2}\n", cb.netto_verkaufspreis));
+    }
+
+    Ok(csv)
+}
+
+/// Export material consumption per project as CSV (Nachkalkulation).
+#[tauri::command]
+pub fn export_material_usage_csv(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<String, AppError> {
+    let conn = lock_db(&db)?;
+    let project_name: String = conn.query_row(
+        "SELECT name FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        [project_id], |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Projekt {project_id} nicht gefunden")),
+        _ => AppError::Database(e),
+    })?;
+
+    let quantity: i64 = conn.query_row(
+        "SELECT COALESCE(quantity, 1) FROM projects WHERE id = ?1",
+        [project_id], |row| row.get(0),
+    )?;
+    let qty = (quantity.max(1)) as f64;
+
+    let mut csv = String::new();
+    csv.push_str(&format!("Materialverbrauch: \"{}\"\n", project_name.replace('"', "\"\"")));
+    csv.push_str("Material,Einheit,Soll-Menge,Ist-Menge,Differenz,Soll-Kosten,Ist-Kosten,Kosten-Differenz\n");
+
+    let mut stmt = conn.prepare(
+        "SELECT m.name, m.unit, \
+             COALESCE(planned.total_qty, 0) * ?2 as planned_qty, \
+             COALESCE(actual.total_qty, 0) as actual_qty, \
+             COALESCE(m.net_price, 0) as net_price, \
+             COALESCE(m.waste_factor, 0) as waste_factor \
+         FROM materials m \
+         LEFT JOIN ( \
+             SELECT b.material_id, SUM(b.quantity) as total_qty \
+             FROM bill_of_materials b \
+             WHERE b.product_id IN ( \
+                 SELECT DISTINCT ps.product_id FROM product_steps ps \
+                 JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
+                 WHERE ws.project_id = ?1 \
+             ) GROUP BY b.material_id \
+         ) planned ON planned.material_id = m.id \
+         LEFT JOIN ( \
+             SELECT material_id, SUM(quantity) as total_qty \
+             FROM material_consumptions WHERE project_id = ?1 GROUP BY material_id \
+         ) actual ON actual.material_id = m.id \
+         WHERE m.deleted_at IS NULL AND (planned.total_qty > 0 OR actual.total_qty > 0) \
+         ORDER BY m.name"
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![project_id, qty], |row| {
+        let name: String = row.get(0)?;
+        let unit: Option<String> = row.get(1)?;
+        let planned: f64 = row.get(2)?;
+        let actual: f64 = row.get(3)?;
+        let price: f64 = row.get(4)?;
+        let waste: f64 = row.get(5)?;
+        Ok((name, unit, planned, actual, price, waste))
+    })?.collect::<Result<Vec<_>, _>>()?;
+
+    for (name, unit, planned, actual, price, waste) in &rows {
+        let diff = actual - planned;
+        let planned_cost = planned * price * (1.0 + waste);
+        let actual_cost = actual * price;
+        let cost_diff = actual_cost - planned_cost;
+        csv.push_str(&format!("\"{}\",{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2}\n",
+            name.replace('"', "\"\""), unit.as_deref().unwrap_or(""), planned, actual, diff,
+            planned_cost, actual_cost, cost_diff));
+    }
+
+    Ok(csv)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::db::migrations::init_database_in_memory;

@@ -92,6 +92,24 @@ export async function getProjectLicenses(
   return invoke("get_project_licenses", { projectId });
 }
 
+// Additional Exports (project.md 9.6)
+
+export async function exportBomCsv(productId: number): Promise<string> {
+  return invoke("export_bom_csv", { productId });
+}
+
+export async function exportOrdersCsv(projectId?: number): Promise<string> {
+  return invoke("export_orders_csv", { projectId });
+}
+
+export async function exportProjectFullCsv(projectId: number): Promise<string> {
+  return invoke("export_project_full_csv", { projectId });
+}
+
+export async function exportMaterialUsageCsv(projectId: number): Promise<string> {
+  return invoke("export_material_usage_csv", { projectId });
+}
+
 // Audit Trail
 
 export async function getAuditLog(

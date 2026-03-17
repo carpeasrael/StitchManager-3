@@ -967,6 +967,17 @@ export class ManufacturingDialog {
     // Actions
     const actions = document.createElement("div");
     actions.className = "mfg-actions";
+    const bomExportBtn = document.createElement("button");
+    bomExportBtn.className = "dialog-btn";
+    bomExportBtn.textContent = "BOM Export";
+    bomExportBtn.addEventListener("click", async () => {
+      try {
+        const csv = await ReportService.exportBomCsv(p.id);
+        this.downloadCsv(csv, `bom_${p.productNumber || p.id}.csv`);
+        ToastContainer.show("success", "BOM exportiert");
+      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+    });
+    actions.appendChild(bomExportBtn);
     const delBtn = document.createElement("button");
     delBtn.className = "dialog-btn dialog-btn-danger";
     delBtn.textContent = "Produkt loeschen";
@@ -2322,6 +2333,47 @@ export class ManufacturingDialog {
     ratesBtn.addEventListener("click", () => this.showCostRatesDialog());
     exportRow.appendChild(ratesBtn);
 
+    // Full project export
+    const fullExportBtn = document.createElement("button");
+    fullExportBtn.className = "dialog-btn";
+    fullExportBtn.textContent = "Vollstaendiger Export";
+    fullExportBtn.addEventListener("click", async () => {
+      if (!this.reportProjectId) return;
+      try {
+        const csv = await ReportService.exportProjectFullCsv(this.reportProjectId);
+        this.downloadCsv(csv, `projekt_${this.reportProjectId}_vollstaendig.csv`);
+        ToastContainer.show("success", "Projekt exportiert");
+      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+    });
+    exportRow.appendChild(fullExportBtn);
+
+    // Material usage export
+    const usageExportBtn = document.createElement("button");
+    usageExportBtn.className = "dialog-btn";
+    usageExportBtn.textContent = "Materialverbrauch Export";
+    usageExportBtn.addEventListener("click", async () => {
+      if (!this.reportProjectId) return;
+      try {
+        const csv = await ReportService.exportMaterialUsageCsv(this.reportProjectId);
+        this.downloadCsv(csv, `materialverbrauch_${this.reportProjectId}.csv`);
+        ToastContainer.show("success", "Materialverbrauch exportiert");
+      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+    });
+    exportRow.appendChild(usageExportBtn);
+
+    // Orders export
+    const ordersExportBtn = document.createElement("button");
+    ordersExportBtn.className = "dialog-btn";
+    ordersExportBtn.textContent = "Bestellungen Export";
+    ordersExportBtn.addEventListener("click", async () => {
+      try {
+        const csv = await ReportService.exportOrdersCsv(this.reportProjectId || undefined);
+        this.downloadCsv(csv, `bestellungen${this.reportProjectId ? `_projekt_${this.reportProjectId}` : ""}.csv`);
+        ToastContainer.show("success", "Bestellungen exportiert");
+      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+    });
+    exportRow.appendChild(ordersExportBtn);
+
     container.appendChild(exportRow);
 
     // Nachkalkulation section
@@ -2686,6 +2738,16 @@ export class ManufacturingDialog {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────
+
+  private downloadCsv(csv: string, filename: string): void {
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   private renderAuditHistory(container: HTMLElement, entityType: string, entityId: number): void {
     const section = document.createElement("div");
