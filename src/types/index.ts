@@ -566,6 +566,7 @@ export interface CostBreakdown {
   quantity: number;
   materialCost: number;
   licenseCost: number;
+  stitchCost: number;
   laborCost: number;
   machineCost: number;
   procurementCost: number;

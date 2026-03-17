@@ -23,7 +23,7 @@ fn row_to_cost_rate(row: &rusqlite::Row) -> rusqlite::Result<CostRate> {
 const COST_RATE_SELECT: &str =
     "SELECT id, rate_type, name, rate_value, unit, setup_cost, notes, created_at, updated_at FROM cost_rates";
 
-const VALID_RATE_TYPES: &[&str] = &["labor", "machine", "overhead", "profit"];
+const VALID_RATE_TYPES: &[&str] = &["labor", "machine", "overhead", "profit", "stitch"];
 
 #[tauri::command]
 pub fn list_cost_rates(
@@ -245,6 +245,25 @@ fn calculate_cost_breakdown(conn: &rusqlite::Connection, project_id: i64) -> Res
         |row| row.get(0),
     )?;
 
+    // 2b. Stickkosten: stitch_count from project's pattern file * stitch rate per 1000
+    let stitch_count: i64 = conn.query_row(
+        "SELECT COALESCE( \
+             (SELECT COALESCE(e.stitch_count, 0) FROM embroidery_files e \
+              JOIN projects p ON p.pattern_file_id = e.id \
+              WHERE p.id = ?1 AND p.deleted_at IS NULL AND e.deleted_at IS NULL), \
+             0)",
+        [project_id],
+        |row| row.get(0),
+    )?;
+
+    let stitch_rate: f64 = conn.query_row(
+        "SELECT COALESCE((SELECT rate_value FROM cost_rates WHERE rate_type = 'stitch' AND deleted_at IS NULL ORDER BY id LIMIT 1), 0.0)",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let stitch_cost = (stitch_count as f64 / 1000.0) * stitch_rate;
+
     // 3. Arbeitskosten: per-entry rate or default labor rate
     // Get default labor rate (first 'labor' rate or 25.0 fallback)
     let default_labor_rate: f64 = conn.query_row(
@@ -320,8 +339,8 @@ fn calculate_cost_breakdown(conn: &rusqlite::Connection, project_id: i64) -> Res
         |row| row.get(0),
     )?;
 
-    // 6. Herstellkosten = material + license + labor + machine + procurement
-    let herstellkosten = material_cost + license_cost + labor_cost + machine_cost + procurement_cost;
+    // 6. Herstellkosten = material + license + stitch + labor + machine + procurement
+    let herstellkosten = material_cost + license_cost + stitch_cost + labor_cost + machine_cost + procurement_cost;
 
     // 7. Gemeinkosten: overhead percentage on Herstellkosten
     let overhead_pct: f64 = conn.query_row(
@@ -356,6 +375,7 @@ fn calculate_cost_breakdown(conn: &rusqlite::Connection, project_id: i64) -> Res
         quantity,
         material_cost,
         license_cost,
+        stitch_cost,
         labor_cost,
         machine_cost,
         procurement_cost,
@@ -416,6 +436,7 @@ pub fn save_cost_breakdown(
     let items = [
         ("material", "Materialkosten", breakdown.material_cost),
         ("license", "Lizenzkosten", breakdown.license_cost),
+        ("stitch", "Stickkosten", breakdown.stitch_cost),
         ("labor", "Arbeitskosten", breakdown.labor_cost),
         ("machine", "Maschinenkosten", breakdown.machine_cost),
         ("procurement", "Beschaffungskosten", breakdown.procurement_cost),
@@ -554,6 +575,7 @@ pub fn export_project_csv(
         csv.push_str(&format!("Stueckzahl,{}\n", cb.quantity));
         csv.push_str(&format!("Materialkosten netto,{:.2}\n", cb.material_cost));
         csv.push_str(&format!("Lizenzkosten netto,{:.2}\n", cb.license_cost));
+        csv.push_str(&format!("Stickkosten netto,{:.2}\n", cb.stitch_cost));
         csv.push_str(&format!("Arbeitskosten netto,{:.2}\n", cb.labor_cost));
         csv.push_str(&format!("Maschinenkosten netto,{:.2}\n", cb.machine_cost));
         csv.push_str(&format!("Beschaffungskosten netto,{:.2}\n", cb.procurement_cost));
@@ -755,6 +777,7 @@ pub fn export_project_full_csv(
         csv.push_str("\nKalkulation\n");
         csv.push_str(&format!("Materialkosten,{:.2}\n", cb.material_cost));
         csv.push_str(&format!("Lizenzkosten,{:.2}\n", cb.license_cost));
+        csv.push_str(&format!("Stickkosten,{:.2}\n", cb.stitch_cost));
         csv.push_str(&format!("Arbeitskosten,{:.2}\n", cb.labor_cost));
         csv.push_str(&format!("Maschinenkosten,{:.2}\n", cb.machine_cost));
         csv.push_str(&format!("Beschaffungskosten,{:.2}\n", cb.procurement_cost));
@@ -1033,6 +1056,8 @@ mod tests {
         assert!((breakdown.material_cost - 11.77).abs() < 0.01, "material_cost: {}", breakdown.material_cost);
         // License: 1.20
         assert!((breakdown.license_cost - 1.20).abs() < 0.01, "license_cost: {}", breakdown.license_cost);
+        // Stitch cost: 0.0 (no pattern_file_id)
+        assert_eq!(breakdown.stitch_cost, 0.0);
         // Labor: 42/60 * 36 = 25.20
         assert!((breakdown.labor_cost - 25.20).abs() < 0.01, "labor_cost: {}", breakdown.labor_cost);
         // Machine: 15/60 * 12 = 3.00
@@ -1060,11 +1085,80 @@ mod tests {
         let breakdown = super::calculate_cost_breakdown(&conn, pid).unwrap();
         assert_eq!(breakdown.material_cost, 0.0);
         assert_eq!(breakdown.license_cost, 0.0);
+        assert_eq!(breakdown.stitch_cost, 0.0);
         assert_eq!(breakdown.labor_cost, 0.0);
         assert_eq!(breakdown.machine_cost, 0.0);
         assert_eq!(breakdown.procurement_cost, 0.0);
         assert_eq!(breakdown.selbstkosten, 0.0);
         assert_eq!(breakdown.netto_verkaufspreis, 0.0);
+    }
+
+    #[test]
+    fn test_cost_breakdown_with_stitch_cost() {
+        let conn = init_database_in_memory().unwrap();
+
+        // Create folder + embroidery file with stitch_count = 15000
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('TestFolder', '/test')",
+            [],
+        ).unwrap();
+        let folder_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, file_type, status, stitch_count) \
+             VALUES (?1, 'test.pes', '/test/test.pes', 'embroidery', 'active', 15000)",
+            [folder_id],
+        ).unwrap();
+        let file_id = conn.last_insert_rowid();
+
+        // Create project with pattern_file_id pointing to that file
+        conn.execute(
+            "INSERT INTO projects (name, status, pattern_file_id, quantity) VALUES ('StitchTest', 'in_progress', ?1, 1)",
+            [file_id],
+        ).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        // Create stitch rate: 5.0 EUR/1000 Stiche
+        conn.execute(
+            "INSERT INTO cost_rates (rate_type, name, rate_value, unit) VALUES ('stitch', 'Standard', 5.0, 'EUR/1000 Stiche')",
+            [],
+        ).unwrap();
+
+        let breakdown = super::calculate_cost_breakdown(&conn, pid).unwrap();
+
+        // stitch_cost = 15000 / 1000 * 5.0 = 75.0
+        assert!((breakdown.stitch_cost - 75.0).abs() < 0.01, "stitch_cost: {}", breakdown.stitch_cost);
+        // herstellkosten should include stitch_cost
+        assert!((breakdown.herstellkosten - 75.0).abs() < 0.01, "herstellkosten: {}", breakdown.herstellkosten);
+    }
+
+    #[test]
+    fn test_cost_breakdown_no_stitch_rate() {
+        let conn = init_database_in_memory().unwrap();
+
+        // Create folder + file with stitch_count
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('TestFolder', '/test2')",
+            [],
+        ).unwrap();
+        let folder_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, file_type, status, stitch_count) \
+             VALUES (?1, 'test2.pes', '/test2/test2.pes', 'embroidery', 'active', 10000)",
+            [folder_id],
+        ).unwrap();
+        let file_id = conn.last_insert_rowid();
+
+        // Create project with pattern_file_id but no stitch rate defined
+        conn.execute(
+            "INSERT INTO projects (name, status, pattern_file_id) VALUES ('NoRateTest', 'in_progress', ?1)",
+            [file_id],
+        ).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        let breakdown = super::calculate_cost_breakdown(&conn, pid).unwrap();
+        assert_eq!(breakdown.stitch_cost, 0.0);
     }
 
     #[test]

@@ -560,6 +560,7 @@ pub struct CostBreakdown {
     pub quantity: i64,
     pub material_cost: f64,
     pub license_cost: f64,
+    pub stitch_cost: f64,
     pub labor_cost: f64,
     pub machine_cost: f64,
     pub procurement_cost: f64,
