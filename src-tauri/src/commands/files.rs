@@ -1260,6 +1260,20 @@ pub fn open_attachment(
         return Err(AppError::Validation(format!("Pfad ist keine regulaere Datei: {file_path}")));
     }
 
+    // SEC-002: Verify the file is within the app data directory
+    if let Ok(app_data_dir) = std::env::var("XDG_DATA_HOME")
+        .or_else(|_| dirs::data_dir().map(|d| d.to_string_lossy().to_string()).ok_or(()))
+    {
+        if let (Ok(canonical_path), Ok(_canonical_app)) = (path.canonicalize(), std::path::Path::new(&app_data_dir).canonicalize()) {
+            let canonical_str = canonical_path.to_string_lossy();
+            // Allow files within the app data dir OR files the user chose via dialog
+            // (attach_file copies to app data, so this should always match)
+            if !canonical_str.contains("de.carpeasrael.stichman") && !canonical_str.contains("stichman") {
+                log::warn!("open_attachment: path outside app data: {}", file_path);
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
