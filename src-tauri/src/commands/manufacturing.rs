@@ -499,7 +499,7 @@ pub fn reserve_materials_for_project_inner(conn: &rusqlite::Connection, project_
         let mut stmt = conn.prepare(
             "SELECT b.material_id, SUM(b.quantity) \
              FROM bill_of_materials b \
-             WHERE b.product_id IN ( \
+             WHERE b.entry_type = 'material' AND b.product_id IN ( \
                  SELECT pp.product_id FROM project_products pp WHERE pp.project_id = ?1 \
              ) \
              GROUP BY b.material_id"
@@ -828,7 +828,7 @@ pub fn get_nachkalkulation(
          LEFT JOIN ( \
              SELECT b.material_id, SUM(b.quantity) as total_qty \
              FROM bill_of_materials b \
-             WHERE b.product_id IN ( \
+             WHERE b.entry_type = 'material' AND b.product_id IN ( \
                  SELECT DISTINCT ps.product_id FROM product_steps ps \
                  JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
                  WHERE ws.project_id = ?1 \
@@ -1032,7 +1032,7 @@ fn row_to_product(row: &rusqlite::Row) -> rusqlite::Result<Product> {
 // ── Product Variants ──────────────────────────────────────────────────────
 
 const VARIANT_SELECT: &str =
-    "SELECT id, product_id, sku, variant_name, size, color, additional_cost, notes, status, created_at, updated_at FROM product_variants";
+    "SELECT id, product_id, sku, variant_name, size, color, additional_cost, description, notes, status, created_at, updated_at FROM product_variants";
 
 fn row_to_variant(row: &rusqlite::Row) -> rusqlite::Result<ProductVariant> {
     Ok(ProductVariant {
@@ -1043,10 +1043,11 @@ fn row_to_variant(row: &rusqlite::Row) -> rusqlite::Result<ProductVariant> {
         size: row.get(4)?,
         color: row.get(5)?,
         additional_cost: row.get::<_, Option<f64>>(6)?.unwrap_or(0.0),
-        notes: row.get(7)?,
-        status: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        description: row.get(7)?,
+        notes: row.get(8)?,
+        status: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 
@@ -1058,6 +1059,7 @@ pub struct VariantCreate {
     pub size: Option<String>,
     pub color: Option<String>,
     pub additional_cost: Option<f64>,
+    pub description: Option<String>,
     pub notes: Option<String>,
 }
 
@@ -1076,10 +1078,10 @@ pub fn create_variant(
         return Err(AppError::NotFound(format!("Produkt {product_id} nicht gefunden")));
     }
     conn.execute(
-        "INSERT INTO product_variants (product_id, sku, variant_name, size, color, additional_cost, notes) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO product_variants (product_id, sku, variant_name, size, color, additional_cost, description, notes) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![product_id, variant.sku, variant.variant_name, variant.size, variant.color,
-            variant.additional_cost.unwrap_or(0.0), variant.notes],
+            variant.additional_cost.unwrap_or(0.0), variant.description, variant.notes],
     )?;
     let id = conn.last_insert_rowid();
     let sql = format!("{VARIANT_SELECT} WHERE id = ?1");
@@ -1107,6 +1109,7 @@ pub fn update_variant(
     size: Option<String>,
     color: Option<String>,
     additional_cost: Option<f64>,
+    description: Option<String>,
     notes: Option<String>,
     status: Option<String>,
 ) -> Result<ProductVariant, AppError> {
@@ -1119,6 +1122,7 @@ pub fn update_variant(
     if let Some(v) = &size { params.push(Box::new(v.clone())); sets.push(format!("size = ?{}", params.len())); }
     if let Some(v) = &color { params.push(Box::new(v.clone())); sets.push(format!("color = ?{}", params.len())); }
     if let Some(v) = additional_cost { params.push(Box::new(v)); sets.push(format!("additional_cost = ?{}", params.len())); }
+    if let Some(v) = &description { params.push(Box::new(v.clone())); sets.push(format!("description = ?{}", params.len())); }
     if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
     if let Some(v) = &status { params.push(Box::new(v.clone())); sets.push(format!("status = ?{}", params.len())); }
 
@@ -1154,37 +1158,72 @@ pub fn delete_variant(db: State<'_, DbState>, variant_id: i64) -> Result<(), App
 
 // ── Bill of Materials ──────────────────────────────────────────────────────
 
+const BOM_SELECT: &str =
+    "SELECT id, product_id, entry_type, material_id, step_definition_id, file_id, quantity, unit, duration_minutes, label, notes, sort_order FROM bill_of_materials";
+
 #[tauri::command]
 pub fn add_bom_entry(
     db: State<'_, DbState>,
     product_id: i64,
-    material_id: i64,
-    quantity: f64,
+    entry_type: Option<String>,
+    material_id: Option<i64>,
+    step_definition_id: Option<i64>,
+    file_id: Option<i64>,
+    quantity: Option<f64>,
     unit: Option<String>,
+    duration_minutes: Option<f64>,
+    label: Option<String>,
     notes: Option<String>,
+    sort_order: Option<i32>,
 ) -> Result<BillOfMaterial, AppError> {
-    if quantity <= 0.0 {
-        return Err(AppError::Validation("Menge muss groesser als 0 sein".into()));
+    let et = entry_type.unwrap_or_else(|| "material".to_string());
+    let qty = quantity.unwrap_or(0.0);
+    let so = sort_order.unwrap_or(0);
+
+    match et.as_str() {
+        "material" => {
+            if material_id.is_none() {
+                return Err(AppError::Validation("Material muss angegeben werden".into()));
+            }
+            if qty <= 0.0 {
+                return Err(AppError::Validation("Menge muss groesser als 0 sein".into()));
+            }
+        }
+        "work_step" | "machine_time" => {
+            if let Some(d) = duration_minutes {
+                if d <= 0.0 {
+                    return Err(AppError::Validation("Dauer muss groesser als 0 sein".into()));
+                }
+            } else {
+                return Err(AppError::Validation("Dauer in Minuten muss angegeben werden".into()));
+            }
+        }
+        "pattern" | "cutting_template" => {
+            if file_id.is_none() {
+                return Err(AppError::Validation("Datei muss angegeben werden".into()));
+            }
+        }
+        _ => {
+            return Err(AppError::Validation(format!("Ungueltiger BOM-Typ: {et}")));
+        }
     }
+
     let conn = lock_db(&db)?;
     conn.execute(
-        "INSERT INTO bill_of_materials (product_id, material_id, quantity, unit, notes) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![product_id, material_id, quantity, unit, notes],
+        "INSERT INTO bill_of_materials (product_id, entry_type, material_id, step_definition_id, file_id, quantity, unit, duration_minutes, label, notes, sort_order) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        rusqlite::params![product_id, et, material_id, step_definition_id, file_id, qty, unit, duration_minutes, label, notes, so],
     )?;
     let id = conn.last_insert_rowid();
-    conn.query_row(
-        "SELECT id, product_id, material_id, quantity, unit, notes FROM bill_of_materials WHERE id = ?1",
-        [id],
-        row_to_bom,
-    ).map_err(AppError::Database)
+    let sql = format!("{BOM_SELECT} WHERE id = ?1");
+    conn.query_row(&sql, [id], row_to_bom).map_err(AppError::Database)
 }
 
 #[tauri::command]
 pub fn get_bom_entries(db: State<'_, DbState>, product_id: i64) -> Result<Vec<BillOfMaterial>, AppError> {
     let conn = lock_db(&db)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, product_id, material_id, quantity, unit, notes FROM bill_of_materials WHERE product_id = ?1"
-    )?;
+    let sql = format!("{BOM_SELECT} WHERE product_id = ?1 ORDER BY sort_order, id");
+    let mut stmt = conn.prepare(&sql)?;
     let entries = stmt
         .query_map([product_id], row_to_bom)?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1195,29 +1234,47 @@ pub fn get_bom_entries(db: State<'_, DbState>, product_id: i64) -> Result<Vec<Bi
 pub fn update_bom_entry(
     db: State<'_, DbState>,
     bom_id: i64,
+    entry_type: Option<String>,
+    material_id: Option<i64>,
+    step_definition_id: Option<i64>,
+    file_id: Option<i64>,
     quantity: Option<f64>,
     unit: Option<String>,
+    duration_minutes: Option<f64>,
+    label: Option<String>,
     notes: Option<String>,
+    sort_order: Option<i32>,
 ) -> Result<BillOfMaterial, AppError> {
     if let Some(q) = quantity {
-        if q <= 0.0 {
-            return Err(AppError::Validation("Menge muss groesser als 0 sein".into()));
+        if q < 0.0 {
+            return Err(AppError::Validation("Menge darf nicht negativ sein".into()));
+        }
+    }
+    // Validate entry_type if provided
+    if let Some(ref et) = entry_type {
+        let valid = ["material", "work_step", "machine_time", "pattern", "cutting_template"];
+        if !valid.contains(&et.as_str()) {
+            return Err(AppError::Validation(format!("Ungueltiger BOM-Eintragstyp: {et}")));
         }
     }
     let conn = lock_db(&db)?;
     let mut sets: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
+    if let Some(v) = &entry_type { params.push(Box::new(v.clone())); sets.push(format!("entry_type = ?{}", params.len())); }
+    if let Some(v) = material_id { params.push(Box::new(v)); sets.push(format!("material_id = ?{}", params.len())); }
+    if let Some(v) = step_definition_id { params.push(Box::new(v)); sets.push(format!("step_definition_id = ?{}", params.len())); }
+    if let Some(v) = file_id { params.push(Box::new(v)); sets.push(format!("file_id = ?{}", params.len())); }
     if let Some(v) = quantity { params.push(Box::new(v)); sets.push(format!("quantity = ?{}", params.len())); }
     if let Some(v) = &unit { params.push(Box::new(v.clone())); sets.push(format!("unit = ?{}", params.len())); }
+    if let Some(v) = duration_minutes { params.push(Box::new(v)); sets.push(format!("duration_minutes = ?{}", params.len())); }
+    if let Some(v) = &label { params.push(Box::new(v.clone())); sets.push(format!("label = ?{}", params.len())); }
     if let Some(v) = &notes { params.push(Box::new(v.clone())); sets.push(format!("notes = ?{}", params.len())); }
+    if let Some(v) = sort_order { params.push(Box::new(v)); sets.push(format!("sort_order = ?{}", params.len())); }
 
     if sets.is_empty() {
-        return conn.query_row(
-            "SELECT id, product_id, material_id, quantity, unit, notes FROM bill_of_materials WHERE id = ?1",
-            [bom_id],
-            row_to_bom,
-        ).map_err(|e| match e {
+        let sql = format!("{BOM_SELECT} WHERE id = ?1");
+        return conn.query_row(&sql, [bom_id], row_to_bom).map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("BOM-Eintrag {bom_id} nicht gefunden")),
             _ => AppError::Database(e),
         });
@@ -1234,11 +1291,8 @@ pub fn update_bom_entry(
     if changes == 0 {
         return Err(AppError::NotFound(format!("BOM-Eintrag {bom_id} nicht gefunden")));
     }
-    conn.query_row(
-        "SELECT id, product_id, material_id, quantity, unit, notes FROM bill_of_materials WHERE id = ?1",
-        [bom_id],
-        row_to_bom,
-    ).map_err(AppError::Database)
+    let select_sql = format!("{BOM_SELECT} WHERE id = ?1");
+    conn.query_row(&select_sql, [bom_id], row_to_bom).map_err(AppError::Database)
 }
 
 #[tauri::command]
@@ -1255,10 +1309,16 @@ fn row_to_bom(row: &rusqlite::Row) -> rusqlite::Result<BillOfMaterial> {
     Ok(BillOfMaterial {
         id: row.get(0)?,
         product_id: row.get(1)?,
-        material_id: row.get(2)?,
-        quantity: row.get(3)?,
-        unit: row.get(4)?,
-        notes: row.get(5)?,
+        entry_type: row.get(2)?,
+        material_id: row.get(3)?,
+        step_definition_id: row.get(4)?,
+        file_id: row.get(5)?,
+        quantity: row.get(6)?,
+        unit: row.get(7)?,
+        duration_minutes: row.get(8)?,
+        label: row.get(9)?,
+        notes: row.get(10)?,
+        sort_order: row.get(11)?,
     })
 }
 
@@ -2154,7 +2214,7 @@ mod tests {
         let mid = conn.last_insert_rowid();
 
         conn.execute(
-            "INSERT INTO bill_of_materials (product_id, material_id, quantity, unit) VALUES (?1, ?2, 1.5, 'm')",
+            "INSERT INTO bill_of_materials (product_id, entry_type, material_id, quantity, unit) VALUES (?1, 'material', ?2, 1.5, 'm')",
             rusqlite::params![pid, mid],
         ).unwrap();
 
@@ -2163,12 +2223,121 @@ mod tests {
         ).unwrap();
         assert_eq!(qty, 1.5);
 
+        // Verify entry_type default
+        let et: String = conn.query_row(
+            "SELECT entry_type FROM bill_of_materials WHERE product_id = ?1", [pid], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(et, "material");
+
         // Cascade delete
         conn.execute("DELETE FROM products WHERE id = ?1", [pid]).unwrap();
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM bill_of_materials", [], |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_bom_work_step_entry() {
+        let conn = init_database_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO products (name) VALUES ('Test Produkt')",
+            [],
+        ).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO step_definitions (name, default_duration_minutes) VALUES ('Naehen', 30.0)",
+            [],
+        ).unwrap();
+        let sid = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO bill_of_materials (product_id, entry_type, step_definition_id, duration_minutes, label, sort_order) \
+             VALUES (?1, 'work_step', ?2, 45.0, 'Naehen Schritt', 1)",
+            rusqlite::params![pid, sid],
+        ).unwrap();
+
+        let (et, dur, lbl): (String, f64, String) = conn.query_row(
+            "SELECT entry_type, duration_minutes, label FROM bill_of_materials WHERE product_id = ?1 AND entry_type = 'work_step'",
+            [pid], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(et, "work_step");
+        assert_eq!(dur, 45.0);
+        assert_eq!(lbl, "Naehen Schritt");
+    }
+
+    #[test]
+    fn test_bom_pattern_entry() {
+        let conn = init_database_in_memory().unwrap();
+        conn.execute(
+            "INSERT INTO products (name) VALUES ('Stickprodukt')",
+            [],
+        ).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('TestFolder', '/tmp/test')",
+            [],
+        ).unwrap();
+        let fid = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath, stitch_count) VALUES (?1, 'rose.pes', '/tmp/test/rose.pes', 12345)",
+            [fid],
+        ).unwrap();
+        let file_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO bill_of_materials (product_id, entry_type, file_id, sort_order) \
+             VALUES (?1, 'pattern', ?2, 2)",
+            rusqlite::params![pid, file_id],
+        ).unwrap();
+
+        let (et, fid_out): (String, i64) = conn.query_row(
+            "SELECT entry_type, file_id FROM bill_of_materials WHERE product_id = ?1 AND entry_type = 'pattern'",
+            [pid], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(et, "pattern");
+        assert_eq!(fid_out, file_id);
+    }
+
+    #[test]
+    fn test_reservation_ignores_non_material_bom() {
+        let conn = init_database_in_memory().unwrap();
+
+        conn.execute("INSERT INTO projects (name, status, quantity) VALUES ('Test', 'in_progress', 1)", []).unwrap();
+        let pid = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO products (name, status) VALUES ('Tasche', 'active')", []).unwrap();
+        let prod_id = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO materials (name, net_price) VALUES ('Stoff', 10.0)", []).unwrap();
+        let mat_id = conn.last_insert_rowid();
+
+        // Material BOM entry
+        conn.execute("INSERT INTO bill_of_materials (product_id, entry_type, material_id, quantity) VALUES (?1, 'material', ?2, 2.0)",
+            rusqlite::params![prod_id, mat_id]).unwrap();
+
+        // Work step BOM entry (should be ignored by reservation)
+        conn.execute("INSERT INTO bill_of_materials (product_id, entry_type, duration_minutes, label) VALUES (?1, 'work_step', 30.0, 'Naehen')",
+            rusqlite::params![prod_id]).unwrap();
+
+        conn.execute("INSERT INTO project_products (project_id, product_id) VALUES (?1, ?2)",
+            rusqlite::params![pid, prod_id]).unwrap();
+
+        conn.execute("INSERT INTO material_inventory (material_id, total_stock, reserved_stock) VALUES (?1, 20.0, 0.0)",
+            [mat_id]).unwrap();
+
+        let reservations = super::reserve_materials_for_project_inner(&conn, pid).unwrap();
+        assert_eq!(reservations.len(), 1, "Only material entries should produce reservations");
+        assert_eq!(reservations[0].0, mat_id);
+        assert_eq!(reservations[0].1, 2.0);
+
+        let reserved: f64 = conn.query_row(
+            "SELECT reserved_stock FROM material_inventory WHERE material_id = ?1", [mat_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(reserved, 2.0);
     }
 
     #[test]
@@ -2234,7 +2403,7 @@ mod tests {
         conn.execute("INSERT INTO materials (name, net_price, waste_factor) VALUES ('Stoff', 10.0, 0.05)", []).unwrap();
         let mat_id = conn.last_insert_rowid();
 
-        conn.execute("INSERT INTO bill_of_materials (product_id, material_id, quantity) VALUES (?1, ?2, 3.0)",
+        conn.execute("INSERT INTO bill_of_materials (product_id, entry_type, material_id, quantity) VALUES (?1, 'material', ?2, 3.0)",
             rusqlite::params![prod_id, mat_id]).unwrap();
 
         // Link product to project via project_products
@@ -2299,7 +2468,7 @@ mod tests {
         let (planned, actual): (f64, f64) = conn.query_row(
             "SELECT \
                  COALESCE((SELECT SUM(b.quantity) FROM bill_of_materials b \
-                     WHERE b.product_id IN (SELECT DISTINCT ps.product_id FROM product_steps ps \
+                     WHERE b.entry_type = 'material' AND b.product_id IN (SELECT DISTINCT ps.product_id FROM product_steps ps \
                          JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
                          WHERE ws.project_id = ?1) \
                      AND b.material_id = ?2), 0) * 2, \

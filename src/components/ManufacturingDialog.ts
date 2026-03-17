@@ -11,6 +11,7 @@ import type {
   MaterialInventory,
   Product,
   BillOfMaterial,
+  EmbroideryFile,
   Project,
   TimeEntry,
   StepDefinition,
@@ -771,24 +772,61 @@ export class ManufacturingDialog {
     bomSection.appendChild(bomTitle);
 
     const entries = this.bomMap.get(p.id) || [];
+    const files = appState.get("files") as EmbroideryFile[] || [];
     if (entries.length > 0) {
       const table = document.createElement("table");
       table.className = "mfg-bom-table";
-      table.innerHTML =
-        "<thead><tr><th>Material</th><th>Menge</th><th>Einheit</th><th></th></tr></thead>";
+      const thead = document.createElement("thead");
+      const headTr = document.createElement("tr");
+      for (const h of ["Typ", "Bezeichnung", "Menge/Zeit", "Einheit", ""]) {
+        const th = document.createElement("th");
+        th.textContent = h;
+        headTr.appendChild(th);
+      }
+      thead.appendChild(headTr);
+      table.appendChild(thead);
       const tbody = document.createElement("tbody");
       for (const bom of entries) {
-        const mat = this.materials.find((m) => m.id === bom.materialId);
         const tr = document.createElement("tr");
+        const tdType = document.createElement("td");
+        tdType.textContent = this.bomTypeLabel(bom.entryType);
+        tr.appendChild(tdType);
+
         const tdName = document.createElement("td");
-        tdName.textContent = mat?.name || "?";
-        const tdQty = document.createElement("td");
-        tdQty.textContent = String(bom.quantity);
-        const tdUnit = document.createElement("td");
-        tdUnit.textContent = bom.unit || "";
+        if (bom.entryType === "material") {
+          const mat = this.materials.find((m) => m.id === bom.materialId);
+          tdName.textContent = mat?.name || "?";
+        } else if (bom.entryType === "work_step" || bom.entryType === "machine_time") {
+          const sd = this.stepDefs.find((s) => s.id === bom.stepDefinitionId);
+          tdName.textContent = bom.label || sd?.name || "?";
+        } else if (bom.entryType === "pattern" || bom.entryType === "cutting_template") {
+          const f = files.find((fi) => fi.id === bom.fileId);
+          let name = f?.filename || f?.name || "?";
+          if (bom.entryType === "pattern" && f?.stitchCount) {
+            name += ` (${f.stitchCount} Stiche)`;
+          }
+          tdName.textContent = name;
+        }
         tr.appendChild(tdName);
+
+        const tdQty = document.createElement("td");
+        if (bom.entryType === "material") {
+          tdQty.textContent = String(bom.quantity);
+        } else if (bom.entryType === "work_step" || bom.entryType === "machine_time") {
+          tdQty.textContent = bom.durationMinutes != null ? `${bom.durationMinutes} min` : "-";
+        } else {
+          tdQty.textContent = "-";
+        }
         tr.appendChild(tdQty);
+
+        const tdUnit = document.createElement("td");
+        if (bom.entryType === "material") {
+          tdUnit.textContent = bom.unit || "";
+        } else {
+          tdUnit.textContent = "";
+        }
         tr.appendChild(tdUnit);
+
         const tdAction = document.createElement("td");
         const rmBtn = document.createElement("button");
         rmBtn.className = "mfg-bom-remove";
@@ -812,58 +850,173 @@ export class ManufacturingDialog {
     } else {
       const empty = document.createElement("div");
       empty.className = "mfg-item-sub";
-      empty.textContent = "Keine Materialien zugeordnet";
+      empty.textContent = "Keine Eintraege in der Stueckliste";
       bomSection.appendChild(empty);
     }
 
-    // Add BOM entry form
+    // Add BOM entry form with type selector
     const addRow = document.createElement("div");
     addRow.className = "mfg-bom-add";
-    const matSelect = document.createElement("select");
-    matSelect.className = "mfg-input";
-    const defaultOpt = document.createElement("option");
-    defaultOpt.value = "";
-    defaultOpt.textContent = "Material waehlen";
-    matSelect.appendChild(defaultOpt);
-    for (const mat of this.materials) {
+    addRow.style.flexWrap = "wrap";
+    addRow.style.gap = "4px";
+
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "mfg-input";
+    for (const [val, lbl] of [
+      ["material", "Material"],
+      ["work_step", "Arbeitsschritt"],
+      ["machine_time", "Maschinenzeit"],
+      ["pattern", "Stickmuster"],
+      ["cutting_template", "Schnittvorlage"],
+    ] as [string, string][]) {
       const opt = document.createElement("option");
-      opt.value = String(mat.id);
-      opt.textContent = mat.name;
-      matSelect.appendChild(opt);
+      opt.value = val;
+      opt.textContent = lbl;
+      typeSelect.appendChild(opt);
     }
-    addRow.appendChild(matSelect);
+    addRow.appendChild(typeSelect);
 
-    const qtyInput = document.createElement("input");
-    qtyInput.type = "number";
-    qtyInput.className = "mfg-input mfg-input-sm";
-    qtyInput.placeholder = "Menge";
-    qtyInput.min = "0.01";
-    qtyInput.step = "0.01";
-    addRow.appendChild(qtyInput);
+    // Dynamic fields container
+    const dynFields = document.createElement("div");
+    dynFields.className = "mfg-bom-add";
+    dynFields.style.flexWrap = "wrap";
+    dynFields.style.gap = "4px";
 
-    const unitInput = document.createElement("input");
-    unitInput.type = "text";
-    unitInput.className = "mfg-input mfg-input-sm";
-    unitInput.placeholder = "Einheit";
-    addRow.appendChild(unitInput);
+    const renderDynFields = (et: string) => {
+      dynFields.innerHTML = "";
+      if (et === "material") {
+        const matSelect = document.createElement("select");
+        matSelect.className = "mfg-input";
+        matSelect.dataset.field = "materialId";
+        const defaultOpt = document.createElement("option");
+        defaultOpt.value = "";
+        defaultOpt.textContent = "Material waehlen";
+        matSelect.appendChild(defaultOpt);
+        for (const mat of this.materials) {
+          const opt = document.createElement("option");
+          opt.value = String(mat.id);
+          opt.textContent = mat.name;
+          matSelect.appendChild(opt);
+        }
+        dynFields.appendChild(matSelect);
+        const qtyIn = document.createElement("input");
+        qtyIn.type = "number";
+        qtyIn.className = "mfg-input mfg-input-sm";
+        qtyIn.placeholder = "Menge";
+        qtyIn.min = "0.01";
+        qtyIn.step = "0.01";
+        qtyIn.dataset.field = "quantity";
+        dynFields.appendChild(qtyIn);
+        const unitIn = document.createElement("input");
+        unitIn.type = "text";
+        unitIn.className = "mfg-input mfg-input-sm";
+        unitIn.placeholder = "Einheit";
+        unitIn.dataset.field = "unit";
+        dynFields.appendChild(unitIn);
+      } else if (et === "work_step" || et === "machine_time") {
+        const dlId = `bom-step-dl-${this.fieldIdCounter++}`;
+        const labelIn = document.createElement("input");
+        labelIn.className = "mfg-input";
+        labelIn.placeholder = et === "work_step" ? "Arbeitsschritt" : "Maschine";
+        labelIn.setAttribute("list", dlId);
+        labelIn.dataset.field = "label";
+        dynFields.appendChild(labelIn);
+        const dl = document.createElement("datalist");
+        dl.id = dlId;
+        for (const sd of this.stepDefs) {
+          const opt = document.createElement("option");
+          opt.value = sd.name;
+          opt.dataset.sdId = String(sd.id);
+          dl.appendChild(opt);
+        }
+        dynFields.appendChild(dl);
+        const durIn = document.createElement("input");
+        durIn.type = "number";
+        durIn.className = "mfg-input mfg-input-sm";
+        durIn.placeholder = "Dauer (min)";
+        durIn.min = "0.1";
+        durIn.step = "0.1";
+        durIn.dataset.field = "durationMinutes";
+        dynFields.appendChild(durIn);
+      } else if (et === "pattern" || et === "cutting_template") {
+        const dlId = `bom-file-dl-${this.fieldIdCounter++}`;
+        const fileIn = document.createElement("input");
+        fileIn.className = "mfg-input";
+        fileIn.placeholder = "Datei suchen...";
+        fileIn.setAttribute("list", dlId);
+        fileIn.dataset.field = "fileSearch";
+        dynFields.appendChild(fileIn);
+        const dl = document.createElement("datalist");
+        dl.id = dlId;
+        const filteredFiles = et === "pattern"
+          ? files.filter((f) => ["pes", "dst", "jef", "vp3"].includes(f.filepath.split(".").pop()?.toLowerCase() || ""))
+          : files;
+        for (const f of filteredFiles) {
+          const opt = document.createElement("option");
+          const displayText = f.name || f.filename;
+          opt.value = displayText;
+          opt.dataset.fileId = String(f.id);
+          if (et === "pattern" && f.stitchCount) {
+            opt.textContent = `${displayText} (${f.stitchCount} Stiche)`;
+          }
+          dl.appendChild(opt);
+        }
+        dynFields.appendChild(dl);
+      }
+    };
+
+    renderDynFields("material");
+    typeSelect.addEventListener("change", () => renderDynFields(typeSelect.value));
+    addRow.appendChild(dynFields);
 
     const addBtn = document.createElement("button");
     addBtn.className = "dialog-btn dialog-btn-primary";
     addBtn.textContent = "+";
     addBtn.addEventListener("click", async () => {
-      const matId = Number(matSelect.value);
-      const qty = Number(qtyInput.value);
-      if (!matId || !qty || qty <= 0) {
-        ToastContainer.show("error", "Material und Menge angeben");
-        return;
-      }
+      const et = typeSelect.value;
       try {
-        await MfgService.addBomEntry(
-          p.id,
-          matId,
-          qty,
-          unitInput.value || undefined
-        );
+        if (et === "material") {
+          const matId = Number((dynFields.querySelector('[data-field="materialId"]') as HTMLSelectElement)?.value);
+          const qty = Number((dynFields.querySelector('[data-field="quantity"]') as HTMLInputElement)?.value);
+          const unit = (dynFields.querySelector('[data-field="unit"]') as HTMLInputElement)?.value;
+          if (!matId || !qty || qty <= 0) {
+            ToastContainer.show("error", "Material und Menge angeben");
+            return;
+          }
+          await MfgService.addBomEntry(p.id, { entryType: "material", materialId: matId, quantity: qty, unit: unit || undefined });
+        } else if (et === "work_step" || et === "machine_time") {
+          const labelVal = (dynFields.querySelector('[data-field="label"]') as HTMLInputElement)?.value;
+          const dur = Number((dynFields.querySelector('[data-field="durationMinutes"]') as HTMLInputElement)?.value);
+          if (!dur || dur <= 0) {
+            ToastContainer.show("error", "Dauer muss angegeben werden");
+            return;
+          }
+          // Check if label matches a step definition for step_definition_id
+          let stepDefId: number | undefined;
+          const dlOpts = dynFields.querySelectorAll("datalist option");
+          dlOpts.forEach((optEl) => {
+            const opt = optEl as HTMLOptionElement;
+            if (opt.value === labelVal && opt.dataset.sdId) {
+              stepDefId = Number(opt.dataset.sdId);
+            }
+          });
+          await MfgService.addBomEntry(p.id, { entryType: et, stepDefinitionId: stepDefId, durationMinutes: dur, label: labelVal || undefined });
+        } else if (et === "pattern" || et === "cutting_template") {
+          const fileSearch = (dynFields.querySelector('[data-field="fileSearch"]') as HTMLInputElement)?.value;
+          let fileId: number | undefined;
+          const dlOpts = dynFields.querySelectorAll("datalist option");
+          dlOpts.forEach((optEl) => {
+            const opt = optEl as HTMLOptionElement;
+            if (opt.value === fileSearch && opt.dataset.fileId) {
+              fileId = Number(opt.dataset.fileId);
+            }
+          });
+          if (!fileId) {
+            ToastContainer.show("error", "Datei muss ausgewaehlt werden");
+            return;
+          }
+          await MfgService.addBomEntry(p.id, { entryType: et, fileId });
+        }
         this.bomMap.set(p.id, await MfgService.getBomEntries(p.id));
         this.renderActiveTab();
       } catch (e) {
@@ -887,11 +1040,19 @@ export class ManufacturingDialog {
       if (variants.length > 0) {
         const vtable = document.createElement("table");
         vtable.className = "mfg-bom-table";
-        vtable.innerHTML = "<thead><tr><th>SKU</th><th>Name</th><th>Groesse</th><th>Farbe</th><th>Zusatzk.</th><th></th></tr></thead>";
+        const vthead = document.createElement("thead");
+        const vheadTr = document.createElement("tr");
+        for (const h of ["SKU", "Name", "Beschreibung", "Groesse", "Farbe", "Zusatzk.", ""]) {
+          const vth = document.createElement("th");
+          vth.textContent = h;
+          vheadTr.appendChild(vth);
+        }
+        vthead.appendChild(vheadTr);
+        vtable.appendChild(vthead);
         const vtbody = document.createElement("tbody");
         for (const v of variants) {
           const vtr = document.createElement("tr");
-          for (const cell of [v.sku || "-", v.variantName || "-", v.size || "-", v.color || "-", v.additionalCost ? `${v.additionalCost.toFixed(2)} EUR` : "-"]) {
+          for (const cell of [v.sku || "-", v.variantName || "-", v.description || "-", v.size || "-", v.color || "-", v.additionalCost ? `${v.additionalCost.toFixed(2)} EUR` : "-"]) {
             const vtd = document.createElement("td");
             vtd.textContent = cell;
             vtr.appendChild(vtd);
@@ -931,6 +1092,11 @@ export class ManufacturingDialog {
     vnameIn.placeholder = "Name";
     varAddRow.appendChild(vnameIn);
 
+    const descIn = document.createElement("input");
+    descIn.className = "mfg-input mfg-input-sm";
+    descIn.placeholder = "Beschreibung";
+    varAddRow.appendChild(descIn);
+
     const sizeIn = document.createElement("input");
     sizeIn.className = "mfg-input mfg-input-sm";
     sizeIn.placeholder = "Groesse";
@@ -963,6 +1129,7 @@ export class ManufacturingDialog {
         await MfgService.createVariant(p.id, {
           sku: skuIn.value || undefined,
           variantName: vnameIn.value || undefined,
+          description: descIn.value || undefined,
           size: sizeIn.value || undefined,
           color: colorIn.value || undefined,
           additionalCost: costIn.value ? parseFloat(costIn.value) : undefined,
@@ -3159,6 +3326,17 @@ export class ManufacturingDialog {
       naehprodukt: "Naehprodukt",
       stickprodukt: "Stickprodukt",
       kombiprodukt: "Kombiprodukt",
+    };
+    return map[type] || type;
+  }
+
+  private bomTypeLabel(type: string): string {
+    const map: Record<string, string> = {
+      material: "Material",
+      work_step: "Arbeitsschritt",
+      machine_time: "Maschinenzeit",
+      pattern: "Stickmuster",
+      cutting_template: "Schnittvorlage",
     };
     return map[type] || type;
   }

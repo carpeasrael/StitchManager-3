@@ -161,6 +161,7 @@ export async function createVariant(
     size?: string;
     color?: string;
     additionalCost?: number;
+    description?: string;
     notes?: string;
   }
 ): Promise<ProductVariant> {
@@ -178,10 +179,11 @@ export async function updateVariant(
   size?: string,
   color?: string,
   additionalCost?: number,
+  description?: string,
   notes?: string,
   status?: string
 ): Promise<ProductVariant> {
-  return invoke("update_variant", { variantId, sku, variantName, size, color, additionalCost, notes, status });
+  return invoke("update_variant", { variantId, sku, variantName, size, color, additionalCost, description, notes, status });
 }
 
 export async function deleteVariant(variantId: number): Promise<void> {
@@ -192,12 +194,32 @@ export async function deleteVariant(variantId: number): Promise<void> {
 
 export async function addBomEntry(
   productId: number,
-  materialId: number,
-  quantity: number,
-  unit?: string,
-  notes?: string
+  opts: {
+    entryType?: string;
+    materialId?: number;
+    stepDefinitionId?: number;
+    fileId?: number;
+    quantity?: number;
+    unit?: string;
+    durationMinutes?: number;
+    label?: string;
+    notes?: string;
+    sortOrder?: number;
+  }
 ): Promise<BillOfMaterial> {
-  return invoke("add_bom_entry", { productId, materialId, quantity, unit, notes });
+  return invoke("add_bom_entry", {
+    productId,
+    entryType: opts.entryType,
+    materialId: opts.materialId,
+    stepDefinitionId: opts.stepDefinitionId,
+    fileId: opts.fileId,
+    quantity: opts.quantity,
+    unit: opts.unit,
+    durationMinutes: opts.durationMinutes,
+    label: opts.label,
+    notes: opts.notes,
+    sortOrder: opts.sortOrder,
+  });
 }
 
 export async function getBomEntries(productId: number): Promise<BillOfMaterial[]> {

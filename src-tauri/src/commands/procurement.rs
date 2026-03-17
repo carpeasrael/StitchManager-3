@@ -441,7 +441,7 @@ pub fn get_project_requirements(
          JOIN ( \
              SELECT b.material_id, SUM(b.quantity) as total_qty \
              FROM bill_of_materials b \
-             WHERE b.product_id IN ( \
+             WHERE b.entry_type = 'material' AND b.product_id IN ( \
                  SELECT pp.product_id FROM project_products pp WHERE pp.project_id = ?1 \
              ) GROUP BY b.material_id \
          ) bom ON bom.material_id = m.id \

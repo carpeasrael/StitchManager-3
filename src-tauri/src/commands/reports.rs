@@ -222,7 +222,7 @@ fn calculate_cost_breakdown(conn: &rusqlite::Connection, project_id: i64) -> Res
         "SELECT COALESCE(SUM(b.quantity * COALESCE(m.net_price, 0) * (1 + COALESCE(m.waste_factor, 0))), 0) \
          FROM bill_of_materials b \
          JOIN materials m ON m.id = b.material_id AND m.deleted_at IS NULL \
-         WHERE b.product_id IN ( \
+         WHERE b.entry_type = 'material' AND b.product_id IN ( \
              SELECT DISTINCT ps.product_id FROM product_steps ps \
              JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
              WHERE ws.project_id = ?1 \
@@ -327,7 +327,7 @@ fn calculate_cost_breakdown(conn: &rusqlite::Connection, project_id: i64) -> Res
                  SELECT DISTINCT oi.order_id FROM order_items oi \
                  WHERE oi.material_id IN ( \
                      SELECT b.material_id FROM bill_of_materials b \
-                     WHERE b.product_id IN ( \
+                     WHERE b.entry_type = 'material' AND b.product_id IN ( \
                          SELECT DISTINCT ps.product_id FROM product_steps ps \
                          JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
                          WHERE ws.project_id = ?1 \
@@ -487,7 +487,7 @@ pub fn get_project_report(
         "SELECT COALESCE(SUM(b.quantity * COALESCE(m.net_price, 0) * (1 + COALESCE(m.waste_factor, 0))), 0) \
          FROM bill_of_materials b \
          JOIN materials m ON m.id = b.material_id AND m.deleted_at IS NULL \
-         WHERE b.product_id IN ( \
+         WHERE b.entry_type = 'material' AND b.product_id IN ( \
              SELECT DISTINCT ps.product_id FROM product_steps ps \
              JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
              WHERE ws.project_id = ?1 \
@@ -628,7 +628,7 @@ pub fn export_bom_csv(
          COALESCE(m.net_price, 0), COALESCE(m.waste_factor, 0) \
          FROM bill_of_materials b \
          JOIN materials m ON m.id = b.material_id AND m.deleted_at IS NULL \
-         WHERE b.product_id = ?1 ORDER BY m.name"
+         WHERE b.product_id = ?1 AND b.entry_type = 'material' ORDER BY m.name"
     )?;
 
     let rows: Vec<(String, String, f64, String, f64, f64)> = stmt.query_map([product_id], |row| {
@@ -825,7 +825,7 @@ pub fn export_material_usage_csv(
          LEFT JOIN ( \
              SELECT b.material_id, SUM(b.quantity) as total_qty \
              FROM bill_of_materials b \
-             WHERE b.product_id IN ( \
+             WHERE b.entry_type = 'material' AND b.product_id IN ( \
                  SELECT DISTINCT ps.product_id FROM product_steps ps \
                  JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
                  WHERE ws.project_id = ?1 \

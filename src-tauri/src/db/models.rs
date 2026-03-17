@@ -357,6 +357,7 @@ pub struct ProductVariant {
     pub size: Option<String>,
     pub color: Option<String>,
     pub additional_cost: f64,
+    pub description: Option<String>,
     pub notes: Option<String>,
     pub status: Option<String>,
     pub created_at: String,
@@ -368,10 +369,16 @@ pub struct ProductVariant {
 pub struct BillOfMaterial {
     pub id: i64,
     pub product_id: i64,
-    pub material_id: i64,
+    pub entry_type: String,
+    pub material_id: Option<i64>,
+    pub step_definition_id: Option<i64>,
+    pub file_id: Option<i64>,
     pub quantity: f64,
     pub unit: Option<String>,
+    pub duration_minutes: Option<f64>,
+    pub label: Option<String>,
     pub notes: Option<String>,
+    pub sort_order: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

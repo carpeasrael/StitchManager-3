@@ -391,6 +391,7 @@ export interface ProductVariant {
   size: string | null;
   color: string | null;
   additionalCost: number;
+  description: string | null;
   notes: string | null;
   status: string | null;
   createdAt: string;
@@ -400,10 +401,16 @@ export interface ProductVariant {
 export interface BillOfMaterial {
   id: number;
   productId: number;
-  materialId: number;
+  entryType: string;
+  materialId: number | null;
+  stepDefinitionId: number | null;
+  fileId: number | null;
   quantity: number;
   unit: string | null;
+  durationMinutes: number | null;
+  label: string | null;
   notes: string | null;
+  sortOrder: number;
 }
 
 export interface TimeEntry {

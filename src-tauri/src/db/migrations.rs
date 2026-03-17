@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 22;
+const CURRENT_VERSION: i32 = 23;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -131,6 +131,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 22 {
         apply_v22(conn)?;
+    }
+
+    if current < 23 {
+        apply_v23(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1248,6 +1252,48 @@ fn apply_v22(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v23(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Add description to product_variants
+        ALTER TABLE product_variants ADD COLUMN description TEXT;
+
+        -- Rebuild bill_of_materials to support multiple entry types
+        CREATE TABLE IF NOT EXISTS bill_of_materials_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            entry_type TEXT NOT NULL DEFAULT 'material',
+            material_id INTEGER REFERENCES materials(id) ON DELETE CASCADE,
+            step_definition_id INTEGER REFERENCES step_definitions(id) ON DELETE SET NULL,
+            file_id INTEGER REFERENCES embroidery_files(id) ON DELETE SET NULL,
+            quantity REAL NOT NULL DEFAULT 0,
+            unit TEXT,
+            duration_minutes REAL,
+            label TEXT,
+            notes TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO bill_of_materials_new (id, product_id, entry_type, material_id, quantity, unit, notes, sort_order)
+            SELECT id, product_id, 'material', material_id, quantity, unit, notes, 0
+            FROM bill_of_materials;
+
+        DROP TABLE bill_of_materials;
+        ALTER TABLE bill_of_materials_new RENAME TO bill_of_materials;
+
+        CREATE INDEX IF NOT EXISTS idx_bom_product_id ON bill_of_materials(product_id);
+        CREATE INDEX IF NOT EXISTS idx_bom_material_id ON bill_of_materials(material_id);
+        CREATE INDEX IF NOT EXISTS idx_bom_entry_type ON bill_of_materials(entry_type);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (23, 'Extend BOM with entry types, add variant description');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1332,7 +1378,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 22, "Schema version must be 22");
+        assert_eq!(version, 23, "Schema version must be 23");
     }
 
     #[test]
@@ -1355,22 +1401,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_twentytwo() {
+    fn test_schema_version_is_twentythree() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 22);
+        assert_eq!(version, 23);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 22",
+                "SELECT description FROM schema_version WHERE version = 23",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("project_products"), "v22 description should mention project_products");
+        assert!(desc.contains("BOM"), "v23 description should mention BOM");
     }
 
     #[test]
