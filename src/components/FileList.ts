@@ -8,6 +8,7 @@ import * as FileService from "../services/FileService";
 const CARD_HEIGHT = 72;
 const BUFFER = 5;
 const THUMB_CACHE_MAX = 200;
+const PAGE_SIZE = 500;
 
 export class FileList extends Component {
   private generation = 0;
@@ -20,6 +21,9 @@ export class FileList extends Component {
   private scrollRafPending = false;
   private thumbCache = new Map<number, string>();
   private renderedCards = new Map<number, HTMLElement>();
+  private currentPage = 0;
+  private totalCount = 0;
+  private loadingMore = false;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -54,18 +58,49 @@ export class FileList extends Component {
 
   private async loadFiles(): Promise<void> {
     const gen = ++this.generation;
+    this.currentPage = 0;
+    this.totalCount = 0;
     const folderId = appState.get("selectedFolderId");
     const search = appState.get("searchQuery");
     const formatFilter = appState.get("formatFilter");
     const searchParams = appState.get("searchParams");
 
     try {
-      const result = await FileService.getFilesPaginated(folderId, search, formatFilter, searchParams, 0, 5000);
+      const result = await FileService.getFilesPaginated(folderId, search, formatFilter, searchParams, 0, PAGE_SIZE);
       if (gen !== this.generation) return;
+      this.totalCount = result.totalCount;
+      this.currentPage = 0;
       appState.set("files", result.files);
     } catch (e) {
       console.warn("Failed to load files:", e);
       ToastContainer.show("error", "Dateien konnten nicht geladen werden");
+    }
+  }
+
+  private async loadMoreFiles(): Promise<void> {
+    const files = appState.getRef("files");
+    if (this.loadingMore || files.length >= this.totalCount) return;
+    this.loadingMore = true;
+    const gen = this.generation;
+    const folderId = appState.get("selectedFolderId");
+    const search = appState.get("searchQuery");
+    const formatFilter = appState.get("formatFilter");
+    const searchParams = appState.get("searchParams");
+
+    try {
+      const nextPage = this.currentPage + 1;
+      const result = await FileService.getFilesPaginated(folderId, search, formatFilter, searchParams, nextPage, PAGE_SIZE);
+      if (gen !== this.generation) return;
+      if (result.files.length > 0) {
+        this.currentPage = nextPage;
+        this.totalCount = result.totalCount;
+        const existing = appState.getRef("files");
+        appState.set("files", [...existing, ...result.files]);
+      }
+    } catch (e) {
+      console.warn("Failed to load more files:", e);
+    } finally {
+      this.loadingMore = false;
     }
   }
 
@@ -119,6 +154,12 @@ export class FileList extends Component {
 
       if (this.visibleStart !== oldStart || this.visibleEnd !== oldEnd) {
         this.renderVisible();
+      }
+
+      // Load more files when approaching the end of the loaded list
+      const files = appState.getRef("files");
+      if (files.length < this.totalCount && this.visibleEnd >= files.length - BUFFER * 2) {
+        this.loadMoreFiles();
       }
     });
   }
