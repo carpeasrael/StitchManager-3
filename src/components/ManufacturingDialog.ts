@@ -2,30 +2,25 @@ import * as MfgService from "../services/ManufacturingService";
 import { ToastContainer } from "./Toast";
 import { trapFocus } from "../utils/focus-trap";
 import * as ProjectService from "../services/ProjectService";
-import * as ProcService from "../services/ProcurementService";
 import * as ReportService from "../services/ReportService";
 import { appState } from "../state/AppState";
 import type {
   Supplier,
   Material,
-  MaterialInventory,
   Product,
   BillOfMaterial,
-  EmbroideryFile,
   Project,
-  TimeEntry,
   StepDefinition,
-  PurchaseOrder,
-  OrderItem,
   LicenseRecord,
   QualityInspection,
   DefectRecord,
   ProjectReport,
   CostBreakdown,
   CostRate,
+  EmbroideryFile,
 } from "../types";
 
-type TabKey = "materials" | "suppliers" | "products" | "inventory" | "timetracking" | "workflow" | "orders" | "licenses" | "quality" | "costrates" | "reports";
+type TabKey = "materials" | "suppliers" | "products" | "workflow" | "licenses" | "quality" | "costrates" | "reports";
 
 export class ManufacturingDialog {
   private static instance: ManufacturingDialog | null = null;
@@ -40,7 +35,6 @@ export class ManufacturingDialog {
   private materials: Material[] = [];
   private suppliers: Supplier[] = [];
   private products: Product[] = [];
-  private inventoryMap: Map<number, MaterialInventory> = new Map();
   private bomMap: Map<number, BillOfMaterial[]> = new Map();
 
   // Selection state
@@ -49,20 +43,12 @@ export class ManufacturingDialog {
   private selectedProduct: Product | null = null;
   private fieldIdCounter = 0;
 
-  // Time tracking state
+  // Shared project state
   private allProjects: Project[] = [];
-  private ttSelectedProjectId: number | null = null;
-  private timeEntries: TimeEntry[] = [];
-  private selectedTimeEntry: TimeEntry | null = null;
 
   // Workflow state
   private stepDefs: StepDefinition[] = [];
   private selectedStepDef: StepDefinition | null = null;
-
-  // Orders state
-  private orders: PurchaseOrder[] = [];
-  private selectedOrder: PurchaseOrder | null = null;
-  private orderItems: Map<number, OrderItem[]> = new Map();
 
   // License state
   private licenses: LicenseRecord[] = [];
@@ -79,6 +65,9 @@ export class ManufacturingDialog {
   private currentReport: ProjectReport | null = null;
   private costBreakdown: CostBreakdown | null = null;
   private costRates: CostRate[] = [];
+  private reportMode: "project" | "product" = "project";
+  private reportProductId: number | null = null;
+  private reportQuantity: number = 1;
 
   static async open(): Promise<void> {
     if (ManufacturingDialog.instance) ManufacturingDialog.dismiss();
@@ -115,29 +104,16 @@ export class ManufacturingDialog {
   }
 
   private async loadAll(): Promise<void> {
-    [this.materials, this.suppliers, this.products, this.allProjects, this.stepDefs, this.orders, this.licenses, this.costRates] =
+    [this.materials, this.suppliers, this.products, this.allProjects, this.stepDefs, this.licenses, this.costRates] =
       await Promise.all([
         MfgService.getMaterials(),
         MfgService.getSuppliers(),
         MfgService.getProducts(),
         ProjectService.getProjects(),
         MfgService.getStepDefs(),
-        ProcService.getOrders(),
         MfgService.getLicenses(),
         ReportService.listCostRates(),
       ]);
-    // Load inventory for all materials
-    this.inventoryMap.clear();
-    await Promise.all(
-      this.materials.map(async (m) => {
-        try {
-          const inv = await MfgService.getInventory(m.id);
-          this.inventoryMap.set(m.id, inv);
-        } catch {
-          // No inventory record yet
-        }
-      })
-    );
   }
 
   // ── UI Build ─────────────────────────────────────────────────────
@@ -176,10 +152,7 @@ export class ManufacturingDialog {
       { key: "materials", label: "Materialien" },
       { key: "suppliers", label: "Lieferanten" },
       { key: "products", label: "Produkte" },
-      { key: "inventory", label: "Inventar" },
-      { key: "timetracking", label: "Zeiterfassung" },
       { key: "workflow", label: "Workflow" },
-      { key: "orders", label: "Bestellungen" },
       { key: "licenses", label: "Lizenzen" },
       { key: "quality", label: "Qualitaet" },
       { key: "costrates", label: "Kostensaetze" },
@@ -247,21 +220,9 @@ export class ManufacturingDialog {
         this.renderProductsDashboard(dashboard);
         this.renderProductsTab(content);
         break;
-      case "inventory":
-        this.renderInventoryDashboard(dashboard);
-        this.renderInventoryTab(content);
-        break;
-      case "timetracking":
-        this.renderTimeTrackingDashboard(dashboard);
-        this.renderTimeTrackingTab(content);
-        break;
       case "workflow":
         this.renderWorkflowDashboard(dashboard);
         this.renderWorkflowTab(content);
-        break;
-      case "orders":
-        this.renderOrdersDashboard(dashboard);
-        this.renderOrdersTab(content);
         break;
       case "licenses":
         this.renderLicensesDashboard(dashboard);
@@ -286,17 +247,7 @@ export class ManufacturingDialog {
 
   private renderMaterialsDashboard(container: HTMLElement): void {
     const total = this.materials.length;
-    let lowStock = 0;
-    for (const m of this.materials) {
-      const inv = this.inventoryMap.get(m.id);
-      if (inv && m.minStock && inv.totalStock - inv.reservedStock < m.minStock) {
-        lowStock++;
-      }
-    }
     this.addBadge(container, `Gesamt: ${total}`, "");
-    if (lowStock > 0) {
-      this.addBadge(container, `Niedriger Bestand: ${lowStock}`, "mfg-badge-warn");
-    }
     this.addCreateBtn(container, "Material", () => this.createMaterial());
   }
 
@@ -327,17 +278,6 @@ export class ManufacturingDialog {
       const item = document.createElement("div");
       item.className = "mfg-item";
       if (this.selectedMaterial?.id === m.id) item.classList.add("selected");
-
-      const inv = this.inventoryMap.get(m.id);
-      const available = inv ? inv.totalStock - inv.reservedStock : 0;
-      const isLow = m.minStock != null && m.minStock > 0 && available < m.minStock;
-      const isWarn =
-        m.minStock != null && m.minStock > 0 && available < m.minStock * 2 && !isLow;
-
-      const dot = document.createElement("span");
-      dot.className = "mfg-stock-dot" +
-        (isLow ? " mfg-stock-low" : isWarn ? " mfg-stock-warn" : " mfg-stock-ok");
-      item.appendChild(dot);
 
       const info = document.createElement("div");
       info.className = "mfg-item-info";
@@ -431,41 +371,6 @@ export class ManufacturingDialog {
 
     container.appendChild(form);
 
-    // Inventory section
-    const inv = this.inventoryMap.get(m.id);
-    if (inv) {
-      const invSection = document.createElement("div");
-      invSection.className = "mfg-inv-section";
-      const invTitle = document.createElement("h4");
-      invTitle.className = "mfg-section-title";
-      invTitle.textContent = "Bestand";
-      invSection.appendChild(invTitle);
-
-      const available = inv.totalStock - inv.reservedStock;
-      this.addNumberField(invSection, "Gesamtbestand", inv.totalStock, (v) =>
-        this.updateInv(m.id, v, undefined, undefined)
-      );
-      this.addNumberField(invSection, "Reserviert", inv.reservedStock, (v) =>
-        this.updateInv(m.id, undefined, v, undefined)
-      );
-      const availEl = document.createElement("div");
-      availEl.className = "mfg-field";
-      const availLabel = document.createElement("label");
-      availLabel.className = "mfg-label";
-      availLabel.textContent = "Verfuegbar";
-      const availVal = document.createElement("span");
-      availVal.className = "mfg-readonly-value";
-      availVal.textContent = String(available);
-      availEl.appendChild(availLabel);
-      availEl.appendChild(availVal);
-      invSection.appendChild(availEl);
-
-      this.addTextField(invSection, "Lagerort", inv.location || "", (v) =>
-        this.updateInv(m.id, undefined, undefined, v)
-      );
-      container.appendChild(invSection);
-    }
-
     // Actions
     const actions = document.createElement("div");
     actions.className = "mfg-actions";
@@ -517,25 +422,7 @@ export class ManufacturingDialog {
     }
   }
 
-  private async updateInv(
-    materialId: number,
-    totalStock?: number,
-    reservedStock?: number,
-    location?: string
-  ): Promise<void> {
-    try {
-      const inv = await MfgService.updateInventory(
-        materialId,
-        totalStock,
-        reservedStock,
-        location
-      );
-      this.inventoryMap.set(materialId, inv);
-      this.renderActiveTab();
-    } catch (e) {
-      ToastContainer.show("error", "Bestand konnte nicht aktualisiert werden");
-    }
-  }
+
 
   // ── Suppliers Tab ────────────────────────────────────────────────
 
@@ -1203,460 +1090,6 @@ export class ManufacturingDialog {
     }
   }
 
-  // ── Inventory Tab ────────────────────────────────────────────────
-
-  private renderInventoryDashboard(container: HTMLElement): void {
-    let lowCount = 0;
-    for (const m of this.materials) {
-      const inv = this.inventoryMap.get(m.id);
-      if (inv && m.minStock && inv.totalStock - inv.reservedStock < m.minStock) {
-        lowCount++;
-      }
-    }
-    this.addBadge(container, `Materialien: ${this.materials.length}`, "");
-    if (lowCount > 0) {
-      this.addBadge(container, `Unter Mindestbestand: ${lowCount}`, "mfg-badge-warn");
-    }
-  }
-
-  private renderInventoryTab(container: HTMLElement): void {
-    container.className = "mfg-content mfg-content-single";
-    if (this.materials.length === 0) {
-      container.textContent = "Keine Materialien vorhanden";
-      return;
-    }
-    const table = document.createElement("table");
-    table.className = "mfg-inv-table";
-    table.innerHTML =
-      "<thead><tr>" +
-      "<th>Material</th><th>Typ</th><th>Gesamt</th><th>Reserviert</th>" +
-      "<th>Verfuegbar</th><th>Mindest</th><th>Lagerort</th><th>Status</th>" +
-      "</tr></thead>";
-
-    const tbody = document.createElement("tbody");
-    for (const m of this.materials) {
-      const inv = this.inventoryMap.get(m.id);
-      const total = inv?.totalStock ?? 0;
-      const reserved = inv?.reservedStock ?? 0;
-      const available = total - reserved;
-      const minStock = m.minStock ?? 0;
-
-      let statusClass = "mfg-inv-ok";
-      let statusLabel = "OK";
-      if (minStock > 0) {
-        if (available < minStock) {
-          statusClass = "mfg-inv-low";
-          statusLabel = "Niedrig";
-        } else if (available < minStock * 2) {
-          statusClass = "mfg-inv-warn";
-          statusLabel = "Warnung";
-        }
-      }
-
-      const tr = document.createElement("tr");
-      tr.className = statusClass;
-      const cells = [
-        m.name,
-        this.materialTypeLabel(m.materialType || ""),
-        String(total),
-        String(reserved),
-        null, // available — special handling
-        minStock ? String(minStock) : "-",
-        inv?.location || "-",
-        null, // status — special handling
-      ];
-      for (let ci = 0; ci < cells.length; ci++) {
-        const td = document.createElement("td");
-        if (ci === 4) {
-          const strong = document.createElement("strong");
-          strong.textContent = String(available);
-          td.appendChild(strong);
-        } else if (ci === 7) {
-          const span = document.createElement("span");
-          span.className = "mfg-inv-status " + statusClass;
-          span.textContent = statusLabel;
-          td.appendChild(span);
-        } else {
-          td.textContent = cells[ci]!;
-        }
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    container.appendChild(table);
-
-    // Materialverbrauch erfassen section
-    const consumeSection = document.createElement("div");
-    consumeSection.className = "mfg-form-section";
-    consumeSection.style.marginTop = "var(--spacing-4)";
-
-    const consumeTitle = document.createElement("h4");
-    consumeTitle.className = "mfg-form-section-title";
-    consumeTitle.textContent = "Materialverbrauch erfassen";
-    consumeSection.appendChild(consumeTitle);
-
-    const consumeForm = document.createElement("div");
-    consumeForm.style.display = "flex";
-    consumeForm.style.gap = "8px";
-    consumeForm.style.flexWrap = "wrap";
-    consumeForm.style.alignItems = "flex-end";
-
-    // Project selector
-    const projSel = document.createElement("select");
-    projSel.className = "mfg-input";
-    projSel.style.minWidth = "150px";
-    const projEmpty = document.createElement("option");
-    projEmpty.value = "";
-    projEmpty.textContent = "Projekt";
-    projSel.appendChild(projEmpty);
-    for (const p of this.allProjects) {
-      const opt = document.createElement("option");
-      opt.value = String(p.id);
-      opt.textContent = p.name;
-      projSel.appendChild(opt);
-    }
-    consumeForm.appendChild(projSel);
-
-    // Material selector
-    const matSel = document.createElement("select");
-    matSel.className = "mfg-input";
-    matSel.style.minWidth = "150px";
-    const matEmpty = document.createElement("option");
-    matEmpty.value = "";
-    matEmpty.textContent = "Material";
-    matSel.appendChild(matEmpty);
-    for (const m of this.materials) {
-      const opt = document.createElement("option");
-      opt.value = String(m.id);
-      opt.textContent = m.name;
-      matSel.appendChild(opt);
-    }
-    consumeForm.appendChild(matSel);
-
-    // Quantity
-    const qtyInput = document.createElement("input");
-    qtyInput.className = "mfg-input";
-    qtyInput.type = "number";
-    qtyInput.step = "0.01";
-    qtyInput.placeholder = "Menge";
-    qtyInput.style.width = "80px";
-    consumeForm.appendChild(qtyInput);
-
-    // Step name
-    const stepInput = document.createElement("input");
-    stepInput.className = "mfg-input";
-    stepInput.placeholder = "Arbeitsschritt";
-    stepInput.style.width = "120px";
-    consumeForm.appendChild(stepInput);
-
-    // Record button
-    const consumeBtn = document.createElement("button");
-    consumeBtn.className = "dialog-btn dialog-btn-primary";
-    consumeBtn.textContent = "Erfassen";
-    consumeBtn.addEventListener("click", async () => {
-      const pid = projSel.value ? Number(projSel.value) : null;
-      const mid = matSel.value ? Number(matSel.value) : null;
-      const qty = parseFloat(qtyInput.value);
-      if (!pid || !mid || isNaN(qty) || qty <= 0) {
-        ToastContainer.show("error", "Projekt, Material und positive Menge erforderlich");
-        return;
-      }
-      try {
-        await MfgService.recordConsumption(pid, mid, qty, undefined, stepInput.value || undefined);
-        ToastContainer.show("success", "Verbrauch erfasst");
-        // Refresh inventory
-        try {
-          for (const m of this.materials) {
-            try {
-              const inv = await MfgService.getInventory(m.id);
-              this.inventoryMap.set(m.id, inv);
-            } catch { /* no inventory record */ }
-          }
-        } catch { /* ignore */ }
-        this.renderActiveTab();
-      } catch {
-        ToastContainer.show("error", "Verbrauch konnte nicht erfasst werden");
-      }
-    });
-    consumeForm.appendChild(consumeBtn);
-
-    consumeSection.appendChild(consumeForm);
-    container.appendChild(consumeSection);
-  }
-
-  // ── Time Tracking Tab ─────────────────────────────────────────────
-
-  private renderTimeTrackingDashboard(container: HTMLElement): void {
-    let totalPlanned = 0;
-    let totalActual = 0;
-    for (const e of this.timeEntries) {
-      totalPlanned += e.plannedMinutes ?? 0;
-      totalActual += e.actualMinutes ?? 0;
-    }
-    this.addBadge(container, `Eintraege: ${this.timeEntries.length}`, "");
-    if (this.timeEntries.length > 0) {
-      this.addBadge(
-        container,
-        `Geplant: ${this.fmtHours(totalPlanned)}`,
-        ""
-      );
-      this.addBadge(
-        container,
-        `Tatsaechlich: ${this.fmtHours(totalActual)}`,
-        totalActual > totalPlanned && totalPlanned > 0 ? "mfg-badge-warn" : ""
-      );
-    }
-    this.addCreateBtn(container, "Zeiteintrag", () => this.createTimeEntry());
-  }
-
-  private renderTimeTrackingTab(container: HTMLElement): void {
-    // Project selector at top
-    const selectorRow = document.createElement("div");
-    selectorRow.className = "mfg-tt-selector";
-    const selectorLabel = document.createElement("label");
-    selectorLabel.className = "mfg-label";
-    selectorLabel.textContent = "Projekt:";
-    selectorRow.appendChild(selectorLabel);
-
-    const projectSelect = document.createElement("select");
-    projectSelect.className = "mfg-input";
-    const emptyOpt = document.createElement("option");
-    emptyOpt.value = "";
-    emptyOpt.textContent = "Projekt waehlen";
-    projectSelect.appendChild(emptyOpt);
-    for (const p of this.allProjects) {
-      const opt = document.createElement("option");
-      opt.value = String(p.id);
-      opt.textContent = p.name;
-      if (this.ttSelectedProjectId === p.id) opt.selected = true;
-      projectSelect.appendChild(opt);
-    }
-    projectSelect.addEventListener("change", async () => {
-      const id = projectSelect.value ? Number(projectSelect.value) : null;
-      this.ttSelectedProjectId = id;
-      this.selectedTimeEntry = null;
-      if (id) {
-        try {
-          this.timeEntries = await MfgService.getTimeEntries(id);
-        } catch {
-          this.timeEntries = [];
-          ToastContainer.show("error", "Zeiteintraege konnten nicht geladen werden");
-        }
-      } else {
-        this.timeEntries = [];
-      }
-      this.renderActiveTab();
-    });
-    selectorRow.appendChild(projectSelect);
-    container.insertBefore(selectorRow, container.firstChild);
-
-    if (!this.ttSelectedProjectId) {
-      const hint = document.createElement("div");
-      hint.className = "mfg-tt-hint";
-      hint.textContent = "Projekt auswaehlen, um Zeiteintraege anzuzeigen";
-      container.appendChild(hint);
-      return;
-    }
-
-    // List + detail layout
-    const listPane = document.createElement("div");
-    listPane.className = "mfg-list-pane";
-    this.renderTimeEntryList(listPane);
-    container.appendChild(listPane);
-
-    const detailPane = document.createElement("div");
-    detailPane.className = "mfg-detail-pane";
-    if (this.selectedTimeEntry) {
-      this.renderTimeEntryDetail(detailPane, this.selectedTimeEntry);
-    } else {
-      detailPane.textContent = "Eintrag auswaehlen";
-    }
-    container.appendChild(detailPane);
-  }
-
-  private renderTimeEntryList(container: HTMLElement): void {
-    container.innerHTML = "";
-    if (this.timeEntries.length === 0) {
-      container.textContent = "Keine Zeiteintraege";
-      return;
-    }
-    for (const e of this.timeEntries) {
-      const item = document.createElement("div");
-      item.className = "mfg-item";
-      if (this.selectedTimeEntry?.id === e.id) item.classList.add("selected");
-
-      const info = document.createElement("div");
-      info.className = "mfg-item-info";
-      const nameEl = document.createElement("span");
-      nameEl.className = "mfg-item-name";
-      nameEl.textContent = e.stepName;
-      info.appendChild(nameEl);
-
-      const sub = document.createElement("span");
-      sub.className = "mfg-item-sub";
-      const planned = e.plannedMinutes ?? 0;
-      const actual = e.actualMinutes ?? 0;
-      sub.textContent = `${this.fmtHours(planned)} geplant / ${this.fmtHours(actual)} tatsaechlich`;
-      info.appendChild(sub);
-
-      if (e.worker) {
-        const workerEl = document.createElement("span");
-        workerEl.className = "mfg-item-sub";
-        workerEl.textContent = e.worker;
-        info.appendChild(workerEl);
-      }
-
-      // Progress bar
-      if (planned > 0) {
-        const bar = document.createElement("div");
-        bar.className = "mfg-tt-bar";
-        const pctRaw = Math.round((actual / planned) * 100);
-        bar.title = `${pctRaw}% (${this.fmtHours(actual)} / ${this.fmtHours(planned)})`;
-        const fill = document.createElement("div");
-        fill.className = "mfg-tt-bar-fill";
-        const pct = Math.min(pctRaw, 100);
-        fill.style.width = pct + "%";
-        if (actual > planned) fill.classList.add("mfg-tt-bar-over");
-        bar.appendChild(fill);
-        info.appendChild(bar);
-      }
-
-      item.appendChild(info);
-      item.addEventListener("click", () => {
-        this.selectedTimeEntry = e;
-        this.renderActiveTab();
-      });
-      container.appendChild(item);
-    }
-  }
-
-  private renderTimeEntryDetail(container: HTMLElement, e: TimeEntry): void {
-    container.innerHTML = "";
-    const form = document.createElement("div");
-    form.className = "mfg-form";
-
-    this.addTextField(form, "Arbeitsschritt", e.stepName, (v) =>
-      this.updateTimeEntry(e.id, { stepName: v })
-    );
-    this.addNumberField(form, "Geplante Minuten", e.plannedMinutes, (v) =>
-      this.updateTimeEntry(e.id, { plannedMinutes: v })
-    );
-    this.addNumberField(form, "Tatsaechliche Minuten", e.actualMinutes, (v) =>
-      this.updateTimeEntry(e.id, { actualMinutes: v })
-    );
-    this.addTextField(form, "Mitarbeiter", e.worker || "", (v) =>
-      this.updateTimeEntry(e.id, { worker: v })
-    );
-    this.addTextField(form, "Maschine", e.machine || "", (v) =>
-      this.updateTimeEntry(e.id, { machine: v })
-    );
-
-    // Summary
-    const planned = e.plannedMinutes ?? 0;
-    const actual = e.actualMinutes ?? 0;
-    const diff = actual - planned;
-    if (planned > 0 || actual > 0) {
-      const summary = document.createElement("div");
-      summary.className = "mfg-tt-summary";
-      const diffLabel = document.createElement("span");
-      diffLabel.className =
-        "mfg-tt-diff" + (diff > 0 ? " mfg-tt-diff-over" : " mfg-tt-diff-under");
-      diffLabel.textContent =
-        diff > 0
-          ? `+${this.fmtHours(diff)} ueber Plan`
-          : diff < 0
-            ? `${this.fmtHours(Math.abs(diff))} unter Plan`
-            : "Im Plan";
-      summary.appendChild(diffLabel);
-      form.appendChild(summary);
-    }
-
-    container.appendChild(form);
-
-    // Actions
-    const actions = document.createElement("div");
-    actions.className = "mfg-actions";
-    const delBtn = document.createElement("button");
-    delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Eintrag loeschen";
-    delBtn.addEventListener("click", async () => {
-      if (!confirm(`Zeiteintrag "${e.stepName}" wirklich loeschen?`)) return;
-      try {
-        await MfgService.deleteTimeEntry(e.id);
-        this.selectedTimeEntry = null;
-        if (this.ttSelectedProjectId) {
-          this.timeEntries = await MfgService.getTimeEntries(
-            this.ttSelectedProjectId
-          );
-        }
-        this.renderActiveTab();
-        ToastContainer.show("success", "Zeiteintrag geloescht");
-      } catch {
-        ToastContainer.show("error", "Loeschen fehlgeschlagen");
-      }
-    });
-    actions.appendChild(delBtn);
-    container.appendChild(actions);
-  }
-
-  private async createTimeEntry(): Promise<void> {
-    if (!this.ttSelectedProjectId) {
-      ToastContainer.show("error", "Bitte zuerst ein Projekt waehlen");
-      return;
-    }
-    try {
-      const entry = await MfgService.createTimeEntry({
-        projectId: this.ttSelectedProjectId,
-        stepName: "Neuer Arbeitsschritt",
-      });
-      this.timeEntries = await MfgService.getTimeEntries(
-        this.ttSelectedProjectId
-      );
-      this.selectedTimeEntry =
-        this.timeEntries.find((x) => x.id === entry.id) || null;
-      this.renderActiveTab();
-      ToastContainer.show("success", "Zeiteintrag erstellt");
-    } catch {
-      ToastContainer.show("error", "Erstellen fehlgeschlagen");
-    }
-  }
-
-  private async updateTimeEntry(
-    id: number,
-    update: {
-      stepName?: string;
-      plannedMinutes?: number;
-      actualMinutes?: number;
-      worker?: string;
-      machine?: string;
-    }
-  ): Promise<void> {
-    try {
-      const updated = await MfgService.updateTimeEntry(
-        id,
-        update.stepName,
-        update.plannedMinutes,
-        update.actualMinutes,
-        update.worker,
-        update.machine
-      );
-      const idx = this.timeEntries.findIndex((x) => x.id === id);
-      if (idx >= 0) this.timeEntries[idx] = updated;
-      this.selectedTimeEntry = updated;
-      this.renderActiveTab();
-    } catch {
-      ToastContainer.show("error", "Speichern fehlgeschlagen");
-    }
-  }
-
-  private fmtHours(minutes: number): string {
-    if (minutes < 60) return `${Math.round(minutes)}min`;
-    const h = Math.floor(minutes / 60);
-    const m = Math.round(minutes % 60);
-    return m > 0 ? `${h}h ${m}min` : `${h}h`;
-  }
-
   // ── Workflow Tab ──────────────────────────────────────────────────
 
   private renderWorkflowDashboard(container: HTMLElement): void {
@@ -1764,234 +1197,6 @@ export class ManufacturingDialog {
       this.selectedStepDef = this.stepDefs.find((x) => x.id === sd.id) || null;
       this.renderActiveTab();
       ToastContainer.show("success", "Schrittvorlage erstellt");
-    } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
-  }
-
-  // ── Orders Tab ───────────────────────────────────────────────────
-
-  private renderOrdersDashboard(container: HTMLElement): void {
-    const open = this.orders.filter((o) => o.status !== "delivered" && o.status !== "cancelled").length;
-    this.addBadge(container, `Gesamt: ${this.orders.length}`, "");
-    if (open > 0) this.addBadge(container, `Offen: ${open}`, "mfg-badge-warn");
-    this.addCreateBtn(container, "Bestellung", () => this.createOrder());
-  }
-
-  private renderOrdersTab(container: HTMLElement): void {
-    const listPane = document.createElement("div");
-    listPane.className = "mfg-list-pane";
-    this.renderOrderList(listPane);
-    container.appendChild(listPane);
-
-    const detailPane = document.createElement("div");
-    detailPane.className = "mfg-detail-pane";
-    if (this.selectedOrder) {
-      this.renderOrderDetail(detailPane, this.selectedOrder);
-    } else {
-      detailPane.textContent = "Bestellung auswaehlen";
-    }
-    container.appendChild(detailPane);
-  }
-
-  private renderOrderList(container: HTMLElement): void {
-    container.innerHTML = "";
-    if (this.orders.length === 0) { container.textContent = "Keine Bestellungen"; return; }
-    const statusLabels: Record<string, string> = {
-      draft: "Entwurf", ordered: "Bestellt", partially_delivered: "Teilgeliefert",
-      delivered: "Geliefert", cancelled: "Storniert",
-    };
-    for (const o of this.orders) {
-      const item = document.createElement("div");
-      item.className = "mfg-item";
-      if (this.selectedOrder?.id === o.id) item.classList.add("selected");
-      const info = document.createElement("div");
-      info.className = "mfg-item-info";
-      const nameEl = document.createElement("span");
-      nameEl.className = "mfg-item-name";
-      nameEl.textContent = o.orderNumber || `#${o.id}`;
-      info.appendChild(nameEl);
-      const sub = document.createElement("span");
-      sub.className = "mfg-item-sub";
-      const supplier = this.suppliers.find((s) => s.id === o.supplierId);
-      const project = o.projectId ? this.allProjects.find((p) => p.id === o.projectId) : null;
-      sub.textContent = `${supplier?.name || "?"} - ${statusLabels[o.status] || o.status}${project ? ` | ${project.name}` : ""}`;
-      info.appendChild(sub);
-      item.appendChild(info);
-      item.addEventListener("click", async () => {
-        try {
-          this.selectedOrder = o;
-          if (!this.orderItems.has(o.id)) {
-            this.orderItems.set(o.id, await ProcService.getOrderItems(o.id));
-          }
-          this.renderActiveTab();
-        } catch { ToastContainer.show("error", "Positionen konnten nicht geladen werden"); }
-      });
-      container.appendChild(item);
-    }
-  }
-
-  private renderOrderDetail(container: HTMLElement, o: PurchaseOrder): void {
-    container.innerHTML = "";
-    const form = document.createElement("div");
-    form.className = "mfg-form";
-
-    this.addTextField(form, "Bestellnummer", o.orderNumber || "", async (v) => {
-      try {
-        const updated = await ProcService.updateOrder(o.id, { orderNumber: v });
-        const idx = this.orders.findIndex((x) => x.id === o.id);
-        if (idx >= 0) this.orders[idx] = updated;
-        this.selectedOrder = updated;
-        this.renderActiveTab();
-      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
-    });
-    this.addSelectField(form, "Status", o.status, [
-      { value: "draft", label: "Entwurf" },
-      { value: "ordered", label: "Bestellt" },
-      { value: "partially_delivered", label: "Teilgeliefert" },
-      { value: "delivered", label: "Geliefert" },
-      { value: "cancelled", label: "Storniert" },
-    ], async (v) => {
-      try {
-        const updated = await ProcService.updateOrder(o.id, { status: v });
-        const idx = this.orders.findIndex((x) => x.id === o.id);
-        if (idx >= 0) this.orders[idx] = updated;
-        this.selectedOrder = updated;
-        this.renderActiveTab();
-      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
-    });
-    // Project selector
-    const projectOptions = [{ value: "", label: "(Kein Projekt)" }, ...this.allProjects.map(p => ({ value: String(p.id), label: p.name }))];
-    this.addSelectField(form, "Projekt", o.projectId ? String(o.projectId) : "", projectOptions, async (v) => {
-      try {
-        const updatePayload = v ? { projectId: Number(v) } : { clearProjectId: true };
-        const updated = await ProcService.updateOrder(o.id, updatePayload);
-        const idx = this.orders.findIndex((x) => x.id === o.id);
-        if (idx >= 0) this.orders[idx] = updated;
-        this.selectedOrder = updated;
-        this.renderActiveTab();
-      } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
-    });
-    this.addTextField(form, "Bestelldatum", o.orderDate || "", async (v) => {
-      try { await ProcService.updateOrder(o.id, { orderDate: v }); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
-    });
-    this.addTextField(form, "Erwartete Lieferung", o.expectedDelivery || "", async (v) => {
-      try { await ProcService.updateOrder(o.id, { expectedDelivery: v }); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
-    });
-    this.addTextArea(form, "Notizen", o.notes || "", async (v) => {
-      try { await ProcService.updateOrder(o.id, { notes: v }); } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
-    });
-    container.appendChild(form);
-
-    // Order items
-    const itemsSection = document.createElement("div");
-    itemsSection.className = "mfg-bom-section";
-    const itemsTitle = document.createElement("h4");
-    itemsTitle.className = "mfg-section-title";
-    itemsTitle.textContent = "Positionen";
-    itemsSection.appendChild(itemsTitle);
-
-    const items = this.orderItems.get(o.id) || [];
-    if (items.length > 0) {
-      const table = document.createElement("table");
-      table.className = "mfg-bom-table";
-      const oThead = document.createElement("thead");
-      const oHeadRow = document.createElement("tr");
-      for (const h of ["Material", "Bestellt", "Geliefert", "Preis", ""]) {
-        const th = document.createElement("th"); th.textContent = h; oHeadRow.appendChild(th);
-      }
-      oThead.appendChild(oHeadRow);
-      table.appendChild(oThead);
-      const tbody = document.createElement("tbody");
-      for (const oi of items) {
-        const mat = this.materials.find((m) => m.id === oi.materialId);
-        const tr = document.createElement("tr");
-        const tdMat = document.createElement("td"); tdMat.textContent = mat?.name || "?";
-        const tdOrd = document.createElement("td"); tdOrd.textContent = String(oi.quantityOrdered);
-        const tdDel = document.createElement("td"); tdDel.textContent = String(oi.quantityDelivered);
-        const tdPrice = document.createElement("td"); tdPrice.textContent = oi.unitPrice != null ? oi.unitPrice.toFixed(2) : "-";
-        const tdAction = document.createElement("td");
-        const rmBtn = document.createElement("button");
-        rmBtn.className = "mfg-bom-remove";
-        rmBtn.textContent = "\u2716";
-        rmBtn.addEventListener("click", async () => {
-          try {
-            await ProcService.deleteOrderItem(oi.id);
-            this.orderItems.set(o.id, await ProcService.getOrderItems(o.id));
-            this.renderActiveTab();
-          } catch { ToastContainer.show("error", "Position konnte nicht entfernt werden"); }
-        });
-        tdAction.appendChild(rmBtn);
-        tr.appendChild(tdMat); tr.appendChild(tdOrd); tr.appendChild(tdDel); tr.appendChild(tdPrice); tr.appendChild(tdAction);
-        tbody.appendChild(tr);
-      }
-      table.appendChild(tbody);
-      itemsSection.appendChild(table);
-    }
-
-    // Add item form
-    const addRow = document.createElement("div");
-    addRow.className = "mfg-bom-add";
-    const matSelect = document.createElement("select");
-    matSelect.className = "mfg-input";
-    const defOpt = document.createElement("option"); defOpt.value = ""; defOpt.textContent = "Material";
-    matSelect.appendChild(defOpt);
-    for (const m of this.materials) {
-      const opt = document.createElement("option"); opt.value = String(m.id); opt.textContent = m.name;
-      matSelect.appendChild(opt);
-    }
-    addRow.appendChild(matSelect);
-    const qtyInput = document.createElement("input"); qtyInput.type = "number"; qtyInput.className = "mfg-input mfg-input-sm"; qtyInput.placeholder = "Menge";
-    addRow.appendChild(qtyInput);
-    const priceInput = document.createElement("input"); priceInput.type = "number"; priceInput.className = "mfg-input mfg-input-sm"; priceInput.placeholder = "Preis";
-    addRow.appendChild(priceInput);
-    const addBtn = document.createElement("button");
-    addBtn.className = "dialog-btn dialog-btn-primary"; addBtn.textContent = "+";
-    addBtn.addEventListener("click", async () => {
-      const matId = Number(matSelect.value);
-      const qty = Number(qtyInput.value);
-      if (!matId || !qty || qty <= 0) { ToastContainer.show("error", "Material und Menge angeben"); return; }
-      try {
-        await ProcService.addOrderItem(o.id, matId, qty, priceInput.value ? Number(priceInput.value) : undefined);
-        this.orderItems.set(o.id, await ProcService.getOrderItems(o.id));
-        this.renderActiveTab();
-      } catch { ToastContainer.show("error", "Position hinzufuegen fehlgeschlagen"); }
-    });
-    addRow.appendChild(addBtn);
-    itemsSection.appendChild(addRow);
-    container.appendChild(itemsSection);
-
-    // Actions
-    const actions = document.createElement("div");
-    actions.className = "mfg-actions";
-    const delBtn = document.createElement("button");
-    delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Bestellung loeschen";
-    delBtn.addEventListener("click", async () => {
-      if (!confirm("Bestellung wirklich loeschen?")) return;
-      try {
-        await ProcService.deleteOrder(o.id);
-        this.selectedOrder = null;
-        this.orders = await ProcService.getOrders();
-        this.renderActiveTab();
-        ToastContainer.show("success", "Bestellung geloescht");
-      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
-    });
-    actions.appendChild(delBtn);
-    container.appendChild(actions);
-
-    this.renderAuditHistory(container, "order", o.id);
-  }
-
-  private async createOrder(): Promise<void> {
-    if (this.suppliers.length === 0) {
-      ToastContainer.show("error", "Bitte zuerst einen Lieferanten anlegen");
-      return;
-    }
-    try {
-      const o = await ProcService.createOrder({ supplierId: this.suppliers[0].id });
-      this.orders = await ProcService.getOrders();
-      this.selectedOrder = this.orders.find((x) => x.id === o.id) || null;
-      this.renderActiveTab();
-      ToastContainer.show("success", "Bestellung erstellt");
     } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
   }
 
@@ -2359,10 +1564,6 @@ export class ManufacturingDialog {
   private renderCostRatesDashboard(container: HTMLElement): void {
     const total = this.costRates.length;
     this.addBadge(container, `Kostensaetze: ${total}`, "");
-    const stitchRates = this.costRates.filter(r => r.rateType === "stitch");
-    if (stitchRates.length > 0) {
-      this.addBadge(container, `Stickrate: ${stitchRates[0].rateValue} ${stitchRates[0].unit || "EUR/1000 Stiche"}`, "");
-    }
     const laborRates = this.costRates.filter(r => r.rateType === "labor");
     if (laborRates.length > 0) {
       this.addBadge(container, `Arbeit: ${laborRates[0].rateValue} EUR/h`, "");
@@ -2534,99 +1735,47 @@ export class ManufacturingDialog {
     renderInlineRates();
     container.appendChild(rateSection);
 
-    // ── Section B: Pattern Cost Calculator ──
+    // ── Section B: Product Cost Calculator ──
     const calcSection = document.createElement("div");
     calcSection.className = "mfg-form";
     calcSection.style.marginTop = "var(--spacing-3)";
 
     const calcTitle = document.createElement("h3");
     calcTitle.style.marginBottom = "var(--spacing-2)";
-    calcTitle.textContent = "Musterkalkulation";
+    calcTitle.textContent = "Produktkalkulation";
     calcSection.appendChild(calcTitle);
 
-    // File selector
-    const fileRow = document.createElement("div");
-    fileRow.className = "mfg-field";
-    const fileLabel = document.createElement("label");
-    fileLabel.className = "mfg-label";
-    fileLabel.textContent = "Stickdatei:";
-    fileRow.appendChild(fileLabel);
+    // Product selector
+    const prodRow = document.createElement("div");
+    prodRow.className = "mfg-field";
+    const prodLabel = document.createElement("label");
+    prodLabel.className = "mfg-label";
+    prodLabel.textContent = "Produkt:";
+    prodRow.appendChild(prodLabel);
 
-    const fileSelect = document.createElement("select");
-    fileSelect.className = "mfg-input";
-    const emptyOpt = document.createElement("option");
-    emptyOpt.value = "";
-    emptyOpt.textContent = "Datei waehlen";
-    fileSelect.appendChild(emptyOpt);
-
-    const files = (appState.getRef("files") as import("../types").EmbroideryFile[]) || [];
-    const stitchFiles = files.filter(f => f.stitchCount && f.stitchCount > 0);
-    for (const f of stitchFiles) {
+    const prodSelect = document.createElement("select");
+    prodSelect.className = "mfg-input";
+    const emptyProdOpt = document.createElement("option");
+    emptyProdOpt.value = "";
+    emptyProdOpt.textContent = "Produkt waehlen";
+    prodSelect.appendChild(emptyProdOpt);
+    for (const p of this.products) {
       const opt = document.createElement("option");
-      opt.value = String(f.id);
-      opt.textContent = `${f.name || f.filename} (${f.stitchCount} Stiche)`;
-      fileSelect.appendChild(opt);
+      opt.value = String(p.id);
+      opt.textContent = p.name;
+      prodSelect.appendChild(opt);
     }
-    fileRow.appendChild(fileSelect);
-    calcSection.appendChild(fileRow);
+    prodRow.appendChild(prodSelect);
+    calcSection.appendChild(prodRow);
 
-    if (stitchFiles.length === 0) {
+    if (this.products.length === 0) {
       const hint = document.createElement("div");
       hint.className = "mfg-tt-hint";
-      hint.textContent = "Bitte zuerst einen Ordner mit Stickdateien waehlen um Dateien anzuzeigen.";
+      hint.textContent = "Bitte zuerst ein Produkt im Produkte-Tab anlegen.";
       calcSection.appendChild(hint);
     }
 
-    // Stitch count display
-    const stitchDisplay = document.createElement("div");
-    stitchDisplay.className = "mfg-field";
-    stitchDisplay.style.fontWeight = "600";
-    stitchDisplay.textContent = "Stichanzahl: --";
-    calcSection.appendChild(stitchDisplay);
-
-    // Input fields
-    const machineHoursRow = document.createElement("div");
-    machineHoursRow.className = "mfg-field";
-    const machineHoursLabel = document.createElement("label");
-    machineHoursLabel.className = "mfg-label";
-    machineHoursLabel.textContent = "Maschinenstunden:";
-    const machineHoursInput = document.createElement("input");
-    machineHoursInput.className = "mfg-input";
-    machineHoursInput.type = "number";
-    machineHoursInput.step = "0.1";
-    machineHoursInput.value = "0";
-    machineHoursRow.appendChild(machineHoursLabel);
-    machineHoursRow.appendChild(machineHoursInput);
-    calcSection.appendChild(machineHoursRow);
-
-    const laborHoursRow = document.createElement("div");
-    laborHoursRow.className = "mfg-field";
-    const laborHoursLabel = document.createElement("label");
-    laborHoursLabel.className = "mfg-label";
-    laborHoursLabel.textContent = "Arbeitsstunden:";
-    const laborHoursInput = document.createElement("input");
-    laborHoursInput.className = "mfg-input";
-    laborHoursInput.type = "number";
-    laborHoursInput.step = "0.1";
-    laborHoursInput.value = "0";
-    laborHoursRow.appendChild(laborHoursLabel);
-    laborHoursRow.appendChild(laborHoursInput);
-    calcSection.appendChild(laborHoursRow);
-
-    const materialCostRow = document.createElement("div");
-    materialCostRow.className = "mfg-field";
-    const materialCostLabel = document.createElement("label");
-    materialCostLabel.className = "mfg-label";
-    materialCostLabel.textContent = "Materialkosten (EUR):";
-    const materialCostInput = document.createElement("input");
-    materialCostInput.className = "mfg-input";
-    materialCostInput.type = "number";
-    materialCostInput.step = "0.01";
-    materialCostInput.value = "0";
-    materialCostRow.appendChild(materialCostLabel);
-    materialCostRow.appendChild(materialCostInput);
-    calcSection.appendChild(materialCostRow);
-
+    // Quantity input
     const qtyRow = document.createElement("div");
     qtyRow.className = "mfg-field";
     const qtyLabel = document.createElement("label");
@@ -2642,73 +1791,235 @@ export class ManufacturingDialog {
     qtyRow.appendChild(qtyInput);
     calcSection.appendChild(qtyRow);
 
-    // Calculation result display
+    // Result card
     const resultCard = document.createElement("div");
     resultCard.className = "mfg-report-card mfg-kalkulation-card";
     resultCard.style.marginTop = "var(--spacing-2)";
     calcSection.appendChild(resultCard);
 
-    // Helper to get rate by type
-    const getRate = (rateType: string): number => {
-      const rate = this.costRates.find(r => r.rateType === rateType);
-      return rate ? rate.rateValue : 0;
+    const recalculate = async () => {
+      const selectedProductId = prodSelect.value ? Number(prodSelect.value) : null;
+      if (!selectedProductId) {
+        resultCard.innerHTML = "";
+        return;
+      }
+      try {
+        const qty = Math.max(1, parseInt(qtyInput.value) || 1);
+        const cb = await ReportService.calculateProductCost(selectedProductId, qty);
+        resultCard.innerHTML = "";
+        const card = this.createKalkulationCard(cb);
+        // Move children from card into resultCard
+        while (card.firstChild) resultCard.appendChild(card.firstChild);
+      } catch {
+        resultCard.innerHTML = "<div class=\"mfg-tt-hint\">Berechnung fehlgeschlagen</div>";
+      }
     };
 
-    const recalculate = () => {
-      const selectedFileId = fileSelect.value ? Number(fileSelect.value) : null;
-      const selectedFile = selectedFileId ? stitchFiles.find(f => f.id === selectedFileId) : null;
-      const stitchCount = selectedFile?.stitchCount || 0;
+    prodSelect.addEventListener("change", recalculate);
+    qtyInput.addEventListener("input", recalculate);
+    container.appendChild(calcSection);
+  }
 
-      stitchDisplay.textContent = `Stichanzahl: ${stitchCount > 0 ? stitchCount.toLocaleString("de-DE") : "--"}`;
+  // ── Reports Tab ─────────────────────────────────────────────────
 
-      const stitchRate = getRate("stitch");
-      const laborRate = getRate("labor");
-      const machineRate = getRate("machine");
-      const overheadPct = getRate("overhead");
-      const profitPct = getRate("profit");
+  private renderReportsDashboard(container: HTMLElement): void {
+    if (this.costBreakdown) {
+      this.addBadge(container, `Selbstkosten: ${this.costBreakdown.selbstkosten.toFixed(2)} EUR`, "");
+      this.addBadge(container, `Verkaufspreis: ${this.costBreakdown.nettoVerkaufspreis.toFixed(2)} EUR`, "");
+    }
+  }
 
-      const machineHours = parseFloat(machineHoursInput.value) || 0;
-      const laborHours = parseFloat(laborHoursInput.value) || 0;
-      const materialCost = parseFloat(materialCostInput.value) || 0;
-      const quantity = Math.max(1, parseInt(qtyInput.value) || 1);
+  private renderReportsTab(container: HTMLElement): void {
+    container.className = "mfg-content mfg-content-single";
 
-      const stitchCostVal = (stitchCount / 1000) * stitchRate;
-      const machineCostVal = machineRate * machineHours;
-      const laborCostVal = laborRate * laborHours;
-      const herstellkosten = stitchCostVal + machineCostVal + laborCostVal + materialCost;
-      const overheadCost = herstellkosten * (overheadPct / 100);
-      const selbstkosten = herstellkosten + overheadCost;
-      const profitAmount = selbstkosten * (profitPct / 100);
-      const unitPrice = selbstkosten + profitAmount;
-      const projectTotal = unitPrice * quantity;
+    // ── Mode selector ──
+    const modeRow = document.createElement("div");
+    modeRow.className = "mfg-tt-selector";
+    modeRow.style.display = "flex";
+    modeRow.style.gap = "var(--spacing-2)";
+    modeRow.style.alignItems = "center";
+    modeRow.style.marginBottom = "var(--spacing-2)";
 
-      resultCard.innerHTML = "";
-      const h = document.createElement("h4");
-      h.className = "mfg-report-card-title";
-      h.textContent = "Kalkulation";
-      resultCard.appendChild(h);
+    const modeLabel = document.createElement("label");
+    modeLabel.className = "mfg-label";
+    modeLabel.textContent = "Modus:";
+    modeRow.appendChild(modeLabel);
 
-      const lines: { label: string; value: string; cls?: string; separator?: boolean }[] = [
-        { label: `Stickkosten (${stitchCount}/${1000} x ${stitchRate.toFixed(2)})`, value: `${stitchCostVal.toFixed(2)} EUR` },
-        { label: `Maschinenkosten (${machineHours}h x ${machineRate.toFixed(2)})`, value: `${machineCostVal.toFixed(2)} EUR` },
-        { label: `Arbeitskosten (${laborHours}h x ${laborRate.toFixed(2)})`, value: `${laborCostVal.toFixed(2)} EUR` },
-        { label: "Materialkosten", value: `${materialCost.toFixed(2)} EUR` },
-        { label: "Herstellkosten", value: `${herstellkosten.toFixed(2)} EUR`, separator: true },
-        { label: `Gemeinkosten (${overheadPct.toFixed(1)}%)`, value: `${overheadCost.toFixed(2)} EUR` },
-        { label: "Selbstkosten", value: `${selbstkosten.toFixed(2)} EUR`, cls: "mfg-kalk-subtotal", separator: true },
-        { label: `Gewinnzuschlag (${profitPct.toFixed(1)}%)`, value: `${profitAmount.toFixed(2)} EUR` },
-        { label: "Netto-Verkaufspreis (Stueck)", value: `${unitPrice.toFixed(2)} EUR`, cls: "mfg-kalk-total", separator: true },
-      ];
+    for (const m of [{ key: "project" as const, label: "Projekt" }, { key: "product" as const, label: "Produkt" }]) {
+      const radioLabel = document.createElement("label");
+      radioLabel.style.display = "flex";
+      radioLabel.style.alignItems = "center";
+      radioLabel.style.gap = "4px";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "report-mode";
+      radio.value = m.key;
+      radio.checked = this.reportMode === m.key;
+      radio.addEventListener("change", () => {
+        this.reportMode = m.key;
+        this.costBreakdown = null;
+        this.currentReport = null;
+        this.renderActiveTab();
+      });
+      radioLabel.appendChild(radio);
+      radioLabel.appendChild(document.createTextNode(m.label));
+      modeRow.appendChild(radioLabel);
+    }
+    container.appendChild(modeRow);
 
-      if (quantity > 1) {
-        lines.push({ label: `Projektkosten (${quantity} Stueck)`, value: `${projectTotal.toFixed(2)} EUR`, cls: "mfg-kalk-total" });
+    // ── Selector row (project or product) ──
+    const selectorRow = document.createElement("div");
+    selectorRow.className = "mfg-tt-selector";
+    selectorRow.style.marginBottom = "var(--spacing-2)";
+
+    if (this.reportMode === "project") {
+      const selectorLabel = document.createElement("label");
+      selectorLabel.className = "mfg-label";
+      selectorLabel.textContent = "Projekt:";
+      selectorRow.appendChild(selectorLabel);
+      const projectSelect = document.createElement("select");
+      projectSelect.className = "mfg-input";
+      const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt waehlen";
+      projectSelect.appendChild(emptyOpt);
+      for (const p of this.allProjects) {
+        const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
+        if (this.reportProjectId === p.id) opt.selected = true;
+        projectSelect.appendChild(opt);
+      }
+      projectSelect.addEventListener("change", async () => {
+        const id = projectSelect.value ? Number(projectSelect.value) : null;
+        this.reportProjectId = id;
+        if (id) {
+          try {
+            this.currentReport = await ReportService.getProjectReport(id);
+            this.costBreakdown = this.currentReport.costBreakdown;
+          } catch {
+            this.currentReport = null;
+            this.costBreakdown = null;
+            ToastContainer.show("error", "Bericht konnte nicht geladen werden");
+          }
+        } else { this.currentReport = null; this.costBreakdown = null; }
+        this.renderActiveTab();
+      });
+      selectorRow.appendChild(projectSelect);
+    } else {
+      const prodLabel = document.createElement("label");
+      prodLabel.className = "mfg-label";
+      prodLabel.textContent = "Produkt:";
+      selectorRow.appendChild(prodLabel);
+      const prodSelect = document.createElement("select");
+      prodSelect.className = "mfg-input";
+      const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Produkt waehlen";
+      prodSelect.appendChild(emptyOpt);
+      for (const p of this.products) {
+        const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
+        if (this.reportProductId === p.id) opt.selected = true;
+        prodSelect.appendChild(opt);
       }
 
+      const qtyLabel = document.createElement("label");
+      qtyLabel.className = "mfg-label";
+      qtyLabel.style.marginLeft = "var(--spacing-2)";
+      qtyLabel.textContent = "Menge:";
+      const qtyInput = document.createElement("input");
+      qtyInput.className = "mfg-input";
+      qtyInput.type = "number";
+      qtyInput.min = "1";
+      qtyInput.step = "1";
+      qtyInput.value = String(this.reportQuantity);
+      qtyInput.style.width = "80px";
+
+      const loadProduct = async () => {
+        const id = prodSelect.value ? Number(prodSelect.value) : null;
+        this.reportProductId = id;
+        this.reportQuantity = Math.max(1, parseInt(qtyInput.value) || 1);
+        if (id) {
+          try {
+            this.costBreakdown = await ReportService.calculateProductCost(id, this.reportQuantity);
+          } catch {
+            this.costBreakdown = null;
+            ToastContainer.show("error", "Berechnung fehlgeschlagen");
+          }
+        } else { this.costBreakdown = null; }
+        this.renderActiveTab();
+      };
+
+      prodSelect.addEventListener("change", loadProduct);
+      qtyInput.addEventListener("change", loadProduct);
+      selectorRow.appendChild(prodSelect);
+      selectorRow.appendChild(qtyLabel);
+      selectorRow.appendChild(qtyInput);
+    }
+    container.appendChild(selectorRow);
+
+    // ── Section 1: Netto-Kosten und Preis ──
+    const cb = this.costBreakdown;
+    if (!cb) {
+      const hint = document.createElement("div");
+      hint.className = "mfg-tt-hint";
+      hint.textContent = this.reportMode === "project"
+        ? (this.reportProjectId ? "Bericht wird geladen..." : "Projekt auswaehlen")
+        : (this.reportProductId ? "Berechnung wird geladen..." : "Produkt auswaehlen");
+      container.appendChild(hint);
+      return;
+    }
+
+    const section1Title = document.createElement("h3");
+    section1Title.style.marginBottom = "var(--spacing-2)";
+    section1Title.textContent = "Netto-Kosten und Preis";
+    container.appendChild(section1Title);
+
+    const kalkCard = this.createKalkulationCard(cb);
+    container.appendChild(kalkCard);
+
+    // ── Section 2: Verkauf ──
+    const section2Title = document.createElement("h3");
+    section2Title.style.margin = "var(--spacing-3) 0 var(--spacing-2)";
+    section2Title.textContent = "Verkauf";
+    container.appendChild(section2Title);
+
+    const verkaufCard = document.createElement("div");
+    verkaufCard.className = "mfg-report-card mfg-kalkulation-card";
+
+    // Profit margin input
+    const marginRow = document.createElement("div");
+    marginRow.style.display = "flex";
+    marginRow.style.gap = "var(--spacing-2)";
+    marginRow.style.alignItems = "center";
+    marginRow.style.marginBottom = "var(--spacing-2)";
+    const marginLabel = document.createElement("label");
+    marginLabel.className = "mfg-label";
+    marginLabel.textContent = "Gewinnspanne (%):";
+    const marginInput = document.createElement("input");
+    marginInput.className = "mfg-input";
+    marginInput.type = "number";
+    marginInput.step = "0.1";
+    marginInput.min = "0";
+    marginInput.value = String(cb.profitMarginPct);
+    marginInput.style.width = "80px";
+    marginRow.appendChild(marginLabel);
+    marginRow.appendChild(marginInput);
+    verkaufCard.appendChild(marginRow);
+
+    // Display selling price
+    const verkaufDisplay = document.createElement("div");
+    const renderVerkauf = (pct: number) => {
+      const profitAmt = cb.selbstkosten * (pct / 100);
+      const nettoVP = cb.selbstkosten + profitAmt;
+      verkaufDisplay.innerHTML = "";
+      const lines: { label: string; value: string; cls?: string; separator?: boolean }[] = [
+        { label: "Selbstkosten netto", value: `${cb.selbstkosten.toFixed(2)} EUR` },
+        { label: `Gewinnzuschlag (${pct.toFixed(1)}%)`, value: `${profitAmt.toFixed(2)} EUR` },
+        { label: "Netto-Verkaufspreis", value: `${nettoVP.toFixed(2)} EUR`, cls: "mfg-kalk-total", separator: true },
+      ];
+      if (cb.quantity > 1) {
+        lines.push({ label: `Verkaufspreis/Stueck (${cb.quantity} St.)`, value: `${(nettoVP / cb.quantity).toFixed(2)} EUR` });
+      }
       for (const line of lines) {
         if (line.separator) {
           const sep = document.createElement("hr");
           sep.className = "mfg-kalk-separator";
-          resultCard.appendChild(sep);
+          verkaufDisplay.appendChild(sep);
         }
         const row = document.createElement("div");
         row.className = "mfg-report-row" + (line.cls ? ` ${line.cls}` : "");
@@ -2720,159 +2031,38 @@ export class ManufacturingDialog {
         val.textContent = line.value;
         row.appendChild(lbl);
         row.appendChild(val);
-        resultCard.appendChild(row);
+        verkaufDisplay.appendChild(row);
       }
     };
-
-    // Bind events
-    fileSelect.addEventListener("change", recalculate);
-    machineHoursInput.addEventListener("input", recalculate);
-    laborHoursInput.addEventListener("input", recalculate);
-    materialCostInput.addEventListener("input", recalculate);
-    qtyInput.addEventListener("input", recalculate);
-
-    // Initial calculation
-    recalculate();
-    container.appendChild(calcSection);
-  }
-
-  // ── Reports Tab ─────────────────────────────────────────────────
-
-  private renderReportsDashboard(container: HTMLElement): void {
-    if (this.currentReport) {
-      const cb = this.currentReport.costBreakdown;
-      if (cb) {
-        this.addBadge(container, `Selbstkosten: ${cb.selbstkosten.toFixed(2)} EUR`, "");
-        this.addBadge(container, `Verkaufspreis: ${cb.nettoVerkaufspreis.toFixed(2)} EUR`, "");
-      } else {
-        this.addBadge(container, `Kosten: ${this.currentReport.totalCost.toFixed(2)} EUR`, "");
-      }
-      const pct = this.currentReport.workflowTotal > 0
-        ? Math.round((this.currentReport.workflowCompleted / this.currentReport.workflowTotal) * 100) : 0;
-      this.addBadge(container, `Fortschritt: ${pct}%`, "");
-    }
-  }
-
-  private renderReportsTab(container: HTMLElement): void {
-    // Project selector
-    const selectorRow = document.createElement("div");
-    selectorRow.className = "mfg-tt-selector";
-    const selectorLabel = document.createElement("label");
-    selectorLabel.className = "mfg-label";
-    selectorLabel.textContent = "Projekt:";
-    selectorRow.appendChild(selectorLabel);
-    const projectSelect = document.createElement("select");
-    projectSelect.className = "mfg-input";
-    const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt waehlen";
-    projectSelect.appendChild(emptyOpt);
-    for (const p of this.allProjects) {
-      const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
-      if (this.reportProjectId === p.id) opt.selected = true;
-      projectSelect.appendChild(opt);
-    }
-    projectSelect.addEventListener("change", async () => {
-      const id = projectSelect.value ? Number(projectSelect.value) : null;
-      this.reportProjectId = id;
-      if (id) {
-        try {
-          this.currentReport = await ReportService.getProjectReport(id);
-          this.costBreakdown = this.currentReport.costBreakdown;
-        } catch {
-          this.currentReport = null;
-          this.costBreakdown = null;
-          ToastContainer.show("error", "Bericht konnte nicht geladen werden");
-        }
-      } else { this.currentReport = null; this.costBreakdown = null; }
-      this.renderActiveTab();
+    renderVerkauf(cb.profitMarginPct);
+    marginInput.addEventListener("input", () => {
+      const pct = parseFloat(marginInput.value) || 0;
+      renderVerkauf(pct);
     });
-    selectorRow.appendChild(projectSelect);
-    container.insertBefore(selectorRow, container.firstChild);
+    verkaufCard.appendChild(verkaufDisplay);
+    container.appendChild(verkaufCard);
 
-    if (!this.currentReport) {
-      const hint = document.createElement("div");
-      hint.className = "mfg-tt-hint";
-      hint.textContent = this.reportProjectId ? "Bericht wird geladen..." : "Projekt auswaehlen";
-      container.appendChild(hint);
-      return;
-    }
-
-    const r = this.currentReport;
-    container.className = "mfg-content mfg-content-single";
-
-    // Report cards
-    const cards = document.createElement("div");
-    cards.className = "mfg-report-cards";
-
-    // Time card
-    const timeCard = this.createReportCard("Zeit", [
-      { label: "Geplant", value: this.fmtHours(r.totalPlannedMinutes) },
-      { label: "Tatsaechlich", value: this.fmtHours(r.totalActualMinutes) },
-      { label: "Differenz", value: this.fmtHours(Math.abs(r.totalActualMinutes - r.totalPlannedMinutes)), cls: r.totalActualMinutes > r.totalPlannedMinutes ? "pl-tc-over" : "pl-tc-under" },
-    ]);
-    cards.appendChild(timeCard);
-
-    // Kalkulation card (full cost breakdown per project.md 7.3)
-    const cb = this.costBreakdown;
-    if (cb) {
-      const kalkCard = this.createKalkulationCard(cb);
-      cards.appendChild(kalkCard);
-    } else {
-      // Fallback simple cost card
-      const costCard = this.createReportCard("Kosten", [
-        { label: "Material", value: `${r.materialCost.toFixed(2)} EUR` },
-        { label: "Arbeit", value: `${r.laborCost.toFixed(2)} EUR` },
-        { label: "Gesamt", value: `${r.totalCost.toFixed(2)} EUR` },
-      ]);
-      cards.appendChild(costCard);
-    }
-
-    // Quality card
-    const passRate = r.inspectionCount > 0 ? Math.round((r.passCount / r.inspectionCount) * 100) : 0;
-    const qualityCard = this.createReportCard("Qualitaet", [
-      { label: "Pruefungen", value: String(r.inspectionCount) },
-      { label: "Bestanden", value: `${r.passCount} (${passRate}%)` },
-      { label: "Fehlgeschlagen", value: String(r.failCount), cls: r.failCount > 0 ? "pl-tc-over" : "" },
-      { label: "Offene Fehler", value: String(r.openDefects), cls: r.openDefects > 0 ? "pl-tc-over" : "" },
-    ]);
-    cards.appendChild(qualityCard);
-
-    // Workflow card
-    const wfPct = r.workflowTotal > 0 ? Math.round((r.workflowCompleted / r.workflowTotal) * 100) : 0;
-    const wfCard = this.createReportCard("Workflow", [
-      { label: "Schritte gesamt", value: String(r.workflowTotal) },
-      { label: "Abgeschlossen", value: String(r.workflowCompleted) },
-      { label: "Fortschritt", value: `${wfPct}%` },
-    ]);
-    cards.appendChild(wfCard);
-
-    container.appendChild(cards);
-
-    // Action buttons row
+    // ── Action buttons ──
     const exportRow = document.createElement("div");
     exportRow.className = "mfg-actions";
+    exportRow.style.marginTop = "var(--spacing-2)";
 
-    // CSV export button
-    const exportBtn = document.createElement("button");
-    exportBtn.className = "dialog-btn dialog-btn-primary";
-    exportBtn.textContent = "CSV Export";
-    exportBtn.addEventListener("click", async () => {
-      if (!this.reportProjectId) return;
-      try {
-        const csv = await ReportService.exportProjectCsv(this.reportProjectId);
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `projekt_${this.reportProjectId}_bericht.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-        ToastContainer.show("success", "CSV exportiert");
-      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
-    });
-    exportRow.appendChild(exportBtn);
+    if (this.reportMode === "project" && this.reportProjectId) {
+      // CSV export
+      const exportBtn = document.createElement("button");
+      exportBtn.className = "dialog-btn dialog-btn-primary";
+      exportBtn.textContent = "CSV Export";
+      exportBtn.addEventListener("click", async () => {
+        if (!this.reportProjectId) return;
+        try {
+          const csv = await ReportService.exportProjectCsv(this.reportProjectId);
+          this.downloadCsv(csv, `projekt_${this.reportProjectId}_bericht.csv`);
+          ToastContainer.show("success", "CSV exportiert");
+        } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+      });
+      exportRow.appendChild(exportBtn);
 
-    // Save cost snapshot button
-    if (cb) {
+      // Save cost snapshot
       const saveBtn = document.createElement("button");
       saveBtn.className = "dialog-btn";
       saveBtn.textContent = "Kalkulation speichern";
@@ -2884,9 +2074,37 @@ export class ManufacturingDialog {
         } catch { ToastContainer.show("error", "Speichern fehlgeschlagen"); }
       });
       exportRow.appendChild(saveBtn);
+
+      // Full project export
+      const fullExportBtn = document.createElement("button");
+      fullExportBtn.className = "dialog-btn";
+      fullExportBtn.textContent = "Vollstaendiger Export";
+      fullExportBtn.addEventListener("click", async () => {
+        if (!this.reportProjectId) return;
+        try {
+          const csv = await ReportService.exportProjectFullCsv(this.reportProjectId);
+          this.downloadCsv(csv, `projekt_${this.reportProjectId}_vollstaendig.csv`);
+          ToastContainer.show("success", "Projekt exportiert");
+        } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+      });
+      exportRow.appendChild(fullExportBtn);
+
+      // Material usage export
+      const usageExportBtn = document.createElement("button");
+      usageExportBtn.className = "dialog-btn";
+      usageExportBtn.textContent = "Materialverbrauch Export";
+      usageExportBtn.addEventListener("click", async () => {
+        if (!this.reportProjectId) return;
+        try {
+          const csv = await ReportService.exportMaterialUsageCsv(this.reportProjectId);
+          this.downloadCsv(csv, `materialverbrauch_${this.reportProjectId}.csv`);
+          ToastContainer.show("success", "Materialverbrauch exportiert");
+        } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
+      });
+      exportRow.appendChild(usageExportBtn);
     }
 
-    // Cost rates config button
+    // Cost rates config button (always visible)
     const ratesBtn = document.createElement("button");
     ratesBtn.className = "dialog-btn";
     ratesBtn.textContent = "Kostensaetze";
@@ -2906,150 +2124,7 @@ export class ManufacturingDialog {
       this.renderActiveTab();
     });
     exportRow.appendChild(ratesBtn);
-
-    // Full project export
-    const fullExportBtn = document.createElement("button");
-    fullExportBtn.className = "dialog-btn";
-    fullExportBtn.textContent = "Vollstaendiger Export";
-    fullExportBtn.addEventListener("click", async () => {
-      if (!this.reportProjectId) return;
-      try {
-        const csv = await ReportService.exportProjectFullCsv(this.reportProjectId);
-        this.downloadCsv(csv, `projekt_${this.reportProjectId}_vollstaendig.csv`);
-        ToastContainer.show("success", "Projekt exportiert");
-      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
-    });
-    exportRow.appendChild(fullExportBtn);
-
-    // Material usage export
-    const usageExportBtn = document.createElement("button");
-    usageExportBtn.className = "dialog-btn";
-    usageExportBtn.textContent = "Materialverbrauch Export";
-    usageExportBtn.addEventListener("click", async () => {
-      if (!this.reportProjectId) return;
-      try {
-        const csv = await ReportService.exportMaterialUsageCsv(this.reportProjectId);
-        this.downloadCsv(csv, `materialverbrauch_${this.reportProjectId}.csv`);
-        ToastContainer.show("success", "Materialverbrauch exportiert");
-      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
-    });
-    exportRow.appendChild(usageExportBtn);
-
-    // Orders export
-    const ordersExportBtn = document.createElement("button");
-    ordersExportBtn.className = "dialog-btn";
-    ordersExportBtn.textContent = "Bestellungen Export";
-    ordersExportBtn.addEventListener("click", async () => {
-      try {
-        const csv = await ReportService.exportOrdersCsv(this.reportProjectId || undefined);
-        this.downloadCsv(csv, `bestellungen${this.reportProjectId ? `_projekt_${this.reportProjectId}` : ""}.csv`);
-        ToastContainer.show("success", "Bestellungen exportiert");
-      } catch { ToastContainer.show("error", "Export fehlgeschlagen"); }
-    });
-    exportRow.appendChild(ordersExportBtn);
-
     container.appendChild(exportRow);
-
-    // Nachkalkulation section
-    if (this.reportProjectId) {
-      const nachkalkSection = document.createElement("div");
-      nachkalkSection.style.marginTop = "var(--spacing-3)";
-
-      const nachkalkBtn = document.createElement("button");
-      nachkalkBtn.className = "dialog-btn";
-      nachkalkBtn.textContent = "Nachkalkulation laden";
-      nachkalkBtn.addEventListener("click", async () => {
-        if (!this.reportProjectId) return;
-        try {
-          const lines = await MfgService.getNachkalkulation(this.reportProjectId);
-          nachkalkBtn.style.display = "none";
-          this.renderNachkalkulationTable(nachkalkSection, lines);
-        } catch {
-          ToastContainer.show("error", "Nachkalkulation fehlgeschlagen");
-        }
-      });
-      nachkalkSection.appendChild(nachkalkBtn);
-      container.appendChild(nachkalkSection);
-    }
-  }
-
-  private renderNachkalkulationTable(container: HTMLElement, lines: import("../types/index").NachkalkulationLine[]): void {
-    if (lines.length === 0) {
-      const hint = document.createElement("div");
-      hint.className = "mfg-tt-hint";
-      hint.textContent = "Keine Daten fuer Nachkalkulation (keine BOM oder Verbraeuche)";
-      container.appendChild(hint);
-      return;
-    }
-
-    const card = document.createElement("div");
-    card.className = "mfg-report-card mfg-kalkulation-card";
-
-    const h = document.createElement("h4");
-    h.className = "mfg-report-card-title";
-    h.textContent = "Nachkalkulation: Soll vs Ist";
-    card.appendChild(h);
-
-    const table = document.createElement("table");
-    table.className = "mfg-inv-table";
-    table.style.fontSize = "var(--font-size-caption)";
-    table.innerHTML =
-      "<thead><tr>" +
-      "<th>Material</th><th>Einheit</th><th>Soll</th><th>Ist</th><th>Diff</th>" +
-      "<th>Soll-Kosten</th><th>Ist-Kosten</th><th>Kosten-Diff</th>" +
-      "</tr></thead>";
-
-    const tbody = document.createElement("tbody");
-    let totalPlannedCost = 0;
-    let totalActualCost = 0;
-
-    for (const line of lines) {
-      totalPlannedCost += line.plannedCost;
-      totalActualCost += line.actualCost;
-
-      const tr = document.createElement("tr");
-      if (line.difference > 0) tr.className = "mfg-inv-low";
-
-      const cells = [
-        line.materialName,
-        line.unit || "-",
-        line.plannedQuantity.toFixed(2),
-        line.actualQuantity.toFixed(2),
-        (line.difference >= 0 ? "+" : "") + line.difference.toFixed(2),
-        line.plannedCost.toFixed(2) + " EUR",
-        line.actualCost.toFixed(2) + " EUR",
-        (line.costDifference >= 0 ? "+" : "") + line.costDifference.toFixed(2) + " EUR",
-      ];
-      for (const c of cells) {
-        const td = document.createElement("td");
-        td.textContent = c;
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-    }
-
-    // Total row
-    const totalDiff = totalActualCost - totalPlannedCost;
-    const tfoot = document.createElement("tfoot");
-    const totalRow = document.createElement("tr");
-    totalRow.style.fontWeight = "600";
-    const totalCells = [
-      "Gesamt", "", "", "", "",
-      totalPlannedCost.toFixed(2) + " EUR",
-      totalActualCost.toFixed(2) + " EUR",
-      (totalDiff >= 0 ? "+" : "") + totalDiff.toFixed(2) + " EUR",
-    ];
-    for (const c of totalCells) {
-      const td = document.createElement("td");
-      td.textContent = c;
-      totalRow.appendChild(td);
-    }
-    tfoot.appendChild(totalRow);
-
-    table.appendChild(tbody);
-    table.appendChild(tfoot);
-    card.appendChild(table);
-    container.appendChild(card);
   }
 
   private createKalkulationCard(cb: CostBreakdown): HTMLElement {
@@ -3067,8 +2142,6 @@ export class ManufacturingDialog {
       { label: "Stickkosten netto", value: `${cb.stitchCost.toFixed(2)} EUR` },
       { label: "Arbeitskosten netto", value: `${cb.laborCost.toFixed(2)} EUR` },
       { label: "Maschinenkosten netto", value: `${cb.machineCost.toFixed(2)} EUR` },
-      { label: "Beschaffungskosten netto", value: `${cb.procurementCost.toFixed(2)} EUR` },
-      { label: "Verpackungskosten netto", value: "(in Materialkosten)" },
       { label: "Herstellkosten", value: `${cb.herstellkosten.toFixed(2)} EUR`, separator: true },
       { label: `Gemeinkosten (${cb.overheadPct.toFixed(1)}%)`, value: `${cb.overheadCost.toFixed(2)} EUR` },
       { label: "Selbstkosten netto", value: `${cb.selbstkosten.toFixed(2)} EUR`, cls: "mfg-kalk-subtotal", separator: true },
@@ -3100,29 +2173,6 @@ export class ManufacturingDialog {
       card.appendChild(row);
     }
 
-    return card;
-  }
-
-  private createReportCard(title: string, rows: { label: string; value: string; cls?: string }[]): HTMLElement {
-    const card = document.createElement("div");
-    card.className = "mfg-report-card";
-    const h = document.createElement("h4");
-    h.className = "mfg-report-card-title";
-    h.textContent = title;
-    card.appendChild(h);
-    for (const row of rows) {
-      const r = document.createElement("div");
-      r.className = "mfg-report-row";
-      const lbl = document.createElement("span");
-      lbl.className = "mfg-report-label";
-      lbl.textContent = row.label;
-      const val = document.createElement("span");
-      val.className = "mfg-report-value" + (row.cls ? ` ${row.cls}` : "");
-      val.textContent = row.value;
-      r.appendChild(lbl);
-      r.appendChild(val);
-      card.appendChild(r);
-    }
     return card;
   }
 

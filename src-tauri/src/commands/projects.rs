@@ -243,21 +243,7 @@ pub fn update_project(
         }
     }
 
-    // Auto-reservation: if approval_status changed to 'approved'
-    let new_approval = update.approval_status.as_deref().unwrap_or(&old_approval);
-    if new_approval == "approved" && old_approval != "approved" {
-        if let Err(e) = crate::commands::manufacturing::reserve_materials_for_project_inner(&conn, project_id) {
-            log::warn!("Auto-Reservierung fehlgeschlagen fuer Projekt {project_id}: {e}");
-        }
-    }
-
-    // Auto-release: if status changed to 'completed' or 'archived'
-    let new_status = update.status.as_deref().unwrap_or(&old_status);
-    if (new_status == "completed" || new_status == "archived") && old_status != "completed" && old_status != "archived" {
-        if let Err(e) = crate::commands::manufacturing::release_project_reservations_inner(&conn, project_id) {
-            log::warn!("Auto-Freigabe fehlgeschlagen fuer Projekt {project_id}: {e}");
-        }
-    }
+    // Auto-reservation/release removed (#118: inventory UI disabled)
 
     conn.query_row(
         "SELECT id, name, pattern_file_id, status, notes, order_number, customer, priority, deadline, responsible_person, approval_status, quantity, created_at, updated_at FROM projects WHERE id = ?1 AND deleted_at IS NULL",
@@ -272,8 +258,6 @@ pub fn delete_project(
     project_id: i64,
 ) -> Result<(), AppError> {
     let conn = lock_db(&db)?;
-    // Release any reserved inventory before deleting
-    let _ = crate::commands::manufacturing::release_project_reservations_inner(&conn, project_id);
     let changes = conn.execute("DELETE FROM projects WHERE id = ?1 AND deleted_at IS NULL", [project_id])?;
     if changes == 0 {
         return Err(AppError::NotFound(format!("Projekt {project_id} nicht gefunden")));

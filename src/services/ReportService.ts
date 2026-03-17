@@ -98,8 +98,12 @@ export async function exportBomCsv(productId: number): Promise<string> {
   return invoke("export_bom_csv", { productId });
 }
 
-export async function exportOrdersCsv(projectId?: number): Promise<string> {
-  return invoke("export_orders_csv", { projectId });
+export async function calculateProductCost(
+  productId: number,
+  quantity?: number,
+  overrideProfitPct?: number
+): Promise<CostBreakdown> {
+  return invoke("calculate_product_cost_cmd", { productId, quantity, overrideProfitPct });
 }
 
 export async function exportProjectFullCsv(projectId: number): Promise<string> {
