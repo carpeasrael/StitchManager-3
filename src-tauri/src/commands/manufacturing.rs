@@ -500,9 +500,7 @@ pub fn reserve_materials_for_project_inner(conn: &rusqlite::Connection, project_
             "SELECT b.material_id, SUM(b.quantity) \
              FROM bill_of_materials b \
              WHERE b.product_id IN ( \
-                 SELECT DISTINCT ps.product_id FROM product_steps ps \
-                 JOIN workflow_steps ws ON ws.step_definition_id = ps.step_definition_id \
-                 WHERE ws.project_id = ?1 \
+                 SELECT pp.product_id FROM project_products pp WHERE pp.project_id = ?1 \
              ) \
              GROUP BY b.material_id"
         )?;
@@ -2238,6 +2236,10 @@ mod tests {
 
         conn.execute("INSERT INTO bill_of_materials (product_id, material_id, quantity) VALUES (?1, ?2, 3.0)",
             rusqlite::params![prod_id, mat_id]).unwrap();
+
+        // Link product to project via project_products
+        conn.execute("INSERT INTO project_products (project_id, product_id) VALUES (?1, ?2)",
+            rusqlite::params![pid, prod_id]).unwrap();
 
         conn.execute("INSERT INTO step_definitions (name) VALUES ('Naehen')", []).unwrap();
         let step_id = conn.last_insert_rowid();

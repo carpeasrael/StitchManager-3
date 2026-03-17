@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 21;
+const CURRENT_VERSION: i32 = 22;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -127,6 +127,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 21 {
         apply_v21(conn)?;
+    }
+
+    if current < 22 {
+        apply_v22(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1195,6 +1199,55 @@ fn apply_v21(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v22(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS project_products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            quantity REAL NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, product_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_products_project ON project_products(project_id);
+        CREATE INDEX IF NOT EXISTS idx_project_products_product ON project_products(product_id);
+
+        CREATE TABLE IF NOT EXISTS project_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            file_id INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            role TEXT NOT NULL DEFAULT 'pattern',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, file_id, role)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_files_project ON project_files(project_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (22, 'Add project_products and project_files junction tables, add product_id to time_entries');
+
+        COMMIT;"
+    )?;
+
+    // ALTER TABLE must run outside the transaction that creates tables
+    let has_col: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('time_entries') WHERE name = 'product_id'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_col {
+        conn.execute_batch(
+            "ALTER TABLE time_entries ADD COLUMN product_id INTEGER REFERENCES products(id) ON DELETE SET NULL;
+             CREATE INDEX IF NOT EXISTS idx_time_entries_product_id ON time_entries(product_id);"
+        )?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1250,7 +1303,9 @@ mod tests {
             "products",
             "project_cost_items",
             "project_details",
+            "project_files",
             "project_license_links",
+            "project_products",
             "projects",
             "purchase_orders",
             "quality_inspections",
@@ -1277,7 +1332,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 21, "Schema version must be 17");
+        assert_eq!(version, 22, "Schema version must be 22");
     }
 
     #[test]
@@ -1300,22 +1355,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_twentyone() {
+    fn test_schema_version_is_twentytwo() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 21);
+        assert_eq!(version, 22);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 21",
+                "SELECT description FROM schema_version WHERE version = 22",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("audit"), "v21 description should mention audit");
+        assert!(desc.contains("project_products"), "v22 description should mention project_products");
     }
 
     #[test]

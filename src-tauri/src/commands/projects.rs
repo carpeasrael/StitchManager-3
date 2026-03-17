@@ -504,6 +504,258 @@ pub fn get_collection_files(
     Ok(ids)
 }
 
+// --- Project Products ---
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectProduct {
+    pub id: i64,
+    pub project_id: i64,
+    pub product_id: i64,
+    pub product_name: String,
+    pub quantity: f64,
+    pub sort_order: i64,
+}
+
+#[tauri::command]
+pub fn link_product_to_project(
+    db: State<'_, DbState>,
+    project_id: i64,
+    product_id: i64,
+    quantity: Option<f64>,
+) -> Result<ProjectProduct, AppError> {
+    let conn = lock_db(&db)?;
+    // Verify both exist
+    let p_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        [project_id],
+        |r| r.get(0),
+    )?;
+    if !p_exists {
+        return Err(AppError::NotFound(format!(
+            "Projekt {project_id} nicht gefunden"
+        )));
+    }
+    let prod_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM products WHERE id = ?1 AND deleted_at IS NULL",
+        [product_id],
+        |r| r.get(0),
+    )?;
+    if !prod_exists {
+        return Err(AppError::NotFound(format!(
+            "Produkt {product_id} nicht gefunden"
+        )));
+    }
+
+    let qty = quantity.unwrap_or(1.0);
+    conn.execute(
+        "INSERT OR REPLACE INTO project_products (project_id, product_id, quantity) VALUES (?1, ?2, ?3)",
+        rusqlite::params![project_id, product_id, qty],
+    )?;
+
+    // Also create workflow steps from product if not already present
+    let has_steps: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM workflow_steps WHERE project_id = ?1 AND step_definition_id IN (SELECT step_definition_id FROM product_steps WHERE product_id = ?2)",
+        rusqlite::params![project_id, product_id],
+        |r| r.get(0),
+    )?;
+    if !has_steps {
+        // Copy product steps as workflow steps
+        conn.execute(
+            "INSERT INTO workflow_steps (project_id, step_definition_id, sort_order, status) \
+             SELECT ?1, ps.step_definition_id, ps.sort_order, 'pending' FROM product_steps ps WHERE ps.product_id = ?2",
+            rusqlite::params![project_id, product_id],
+        )?;
+    }
+
+    // Update project timestamp
+    conn.execute(
+        "UPDATE projects SET updated_at = datetime('now') WHERE id = ?1",
+        [project_id],
+    )?;
+
+    let product_name: String = conn.query_row(
+        "SELECT name FROM products WHERE id = ?1",
+        [product_id],
+        |r| r.get(0),
+    )?;
+    conn.query_row(
+        "SELECT id, project_id, product_id, quantity, sort_order FROM project_products WHERE project_id = ?1 AND product_id = ?2",
+        rusqlite::params![project_id, product_id],
+        |row| {
+            Ok(ProjectProduct {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                product_id: row.get(2)?,
+                product_name: product_name.clone(),
+                quantity: row.get(3)?,
+                sort_order: row.get(4)?,
+            })
+        },
+    )
+    .map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn unlink_product_from_project(
+    db: State<'_, DbState>,
+    project_id: i64,
+    product_id: i64,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "DELETE FROM project_products WHERE project_id = ?1 AND product_id = ?2",
+        rusqlite::params![project_id, product_id],
+    )?;
+    conn.execute(
+        "UPDATE projects SET updated_at = datetime('now') WHERE id = ?1",
+        [project_id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_project_products(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<ProjectProduct>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT pp.id, pp.project_id, pp.product_id, p.name, pp.quantity, pp.sort_order \
+         FROM project_products pp JOIN products p ON p.id = pp.product_id \
+         WHERE pp.project_id = ?1 AND p.deleted_at IS NULL ORDER BY pp.sort_order, p.name",
+    )?;
+    let results = stmt
+        .query_map([project_id], |row| {
+            Ok(ProjectProduct {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                product_id: row.get(2)?,
+                product_name: row.get(3)?,
+                quantity: row.get(4)?,
+                sort_order: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(results)
+}
+
+// --- Project Files ---
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectFile {
+    pub id: i64,
+    pub project_id: i64,
+    pub file_id: i64,
+    pub filename: String,
+    pub role: String,
+    pub sort_order: i64,
+}
+
+#[tauri::command]
+pub fn add_file_to_project(
+    db: State<'_, DbState>,
+    project_id: i64,
+    file_id: i64,
+    role: String,
+) -> Result<ProjectFile, AppError> {
+    let valid_roles = ["pattern", "instruction", "reference"];
+    if !valid_roles.contains(&role.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Ungueltige Rolle: {role}. Erlaubt: pattern, instruction, reference"
+        )));
+    }
+    let conn = lock_db(&db)?;
+    let p_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        [project_id],
+        |r| r.get(0),
+    )?;
+    if !p_exists {
+        return Err(AppError::NotFound(format!(
+            "Projekt {project_id} nicht gefunden"
+        )));
+    }
+    let f_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
+        [file_id],
+        |r| r.get(0),
+    )?;
+    if !f_exists {
+        return Err(AppError::NotFound(format!(
+            "Datei {file_id} nicht gefunden"
+        )));
+    }
+
+    conn.execute(
+        "INSERT OR IGNORE INTO project_files (project_id, file_id, role) VALUES (?1, ?2, ?3)",
+        rusqlite::params![project_id, file_id, role],
+    )?;
+
+    let filename: String = conn.query_row(
+        "SELECT filename FROM embroidery_files WHERE id = ?1",
+        [file_id],
+        |r| r.get(0),
+    )?;
+    conn.query_row(
+        "SELECT id, project_id, file_id, role, sort_order FROM project_files WHERE project_id = ?1 AND file_id = ?2 AND role = ?3",
+        rusqlite::params![project_id, file_id, role],
+        |row| {
+            Ok(ProjectFile {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                file_id: row.get(2)?,
+                filename: filename.clone(),
+                role: row.get(3)?,
+                sort_order: row.get(4)?,
+            })
+        },
+    )
+    .map_err(AppError::Database)
+}
+
+#[tauri::command]
+pub fn remove_file_from_project(
+    db: State<'_, DbState>,
+    project_id: i64,
+    file_id: i64,
+    role: String,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "DELETE FROM project_files WHERE project_id = ?1 AND file_id = ?2 AND role = ?3",
+        rusqlite::params![project_id, file_id, role],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_project_files(
+    db: State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<ProjectFile>, AppError> {
+    let conn = lock_db(&db)?;
+    let mut stmt = conn.prepare(
+        "SELECT pf.id, pf.project_id, pf.file_id, e.filename, pf.role, pf.sort_order \
+         FROM project_files pf JOIN embroidery_files e ON e.id = pf.file_id \
+         WHERE pf.project_id = ?1 AND e.deleted_at IS NULL ORDER BY pf.role, pf.sort_order, e.filename",
+    )?;
+    let results = stmt
+        .query_map([project_id], |row| {
+            Ok(ProjectFile {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                file_id: row.get(2)?,
+                filename: row.get(3)?,
+                role: row.get(4)?,
+                sort_order: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(results)
+}
+
 // --- Row mappers ---
 
 fn row_to_project(row: &rusqlite::Row) -> rusqlite::Result<Project> {

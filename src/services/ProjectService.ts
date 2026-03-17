@@ -109,3 +109,72 @@ export async function getCollectionFiles(
 ): Promise<number[]> {
   return invoke("get_collection_files", { collectionId });
 }
+
+// --- Project Products ---
+
+export interface ProjectProduct {
+  id: number;
+  projectId: number;
+  productId: number;
+  productName: string;
+  quantity: number;
+  sortOrder: number;
+}
+
+export async function linkProductToProject(
+  projectId: number,
+  productId: number,
+  quantity?: number
+): Promise<ProjectProduct> {
+  return invoke("link_product_to_project", {
+    projectId,
+    productId,
+    quantity: quantity ?? null,
+  });
+}
+
+export async function unlinkProductFromProject(
+  projectId: number,
+  productId: number
+): Promise<void> {
+  return invoke("unlink_product_from_project", { projectId, productId });
+}
+
+export async function getProjectProducts(
+  projectId: number
+): Promise<ProjectProduct[]> {
+  return invoke("get_project_products", { projectId });
+}
+
+// --- Project Files ---
+
+export interface ProjectFile {
+  id: number;
+  projectId: number;
+  fileId: number;
+  filename: string;
+  role: string;
+  sortOrder: number;
+}
+
+export async function addFileToProject(
+  projectId: number,
+  fileId: number,
+  role: string
+): Promise<ProjectFile> {
+  return invoke("add_file_to_project", { projectId, fileId, role });
+}
+
+export async function removeFileFromProject(
+  projectId: number,
+  fileId: number,
+  role: string
+): Promise<void> {
+  return invoke("remove_file_from_project", { projectId, fileId, role });
+}
+
+export async function getProjectFiles(
+  projectId: number
+): Promise<ProjectFile[]> {
+  return invoke("get_project_files", { projectId });
+}
