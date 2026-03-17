@@ -172,7 +172,7 @@ async function revealSelectedFile(): Promise<void> {
   const fileId = appState.get("selectedFileId");
   if (fileId === null) return;
 
-  const files = appState.get("files");
+  const files = appState.getRef("files");
   const file = files.find((f) => f.id === fileId);
   if (!file?.filepath) return;
 
@@ -278,7 +278,7 @@ async function deleteSelectedFiles(): Promise<void> {
   const fileIds = multiIds.length > 1 ? multiIds : singleId !== null ? [singleId] : [];
   if (fileIds.length === 0) return;
 
-  const files = appState.get("files");
+  const files = appState.getRef("files");
 
   if (fileIds.length === 1) {
     const file = files.find((f) => f.id === fileIds[0]);
@@ -318,7 +318,7 @@ function initEventHandlers(): () => void {
       const fileId = appState.get("selectedFileId");
       if (fileId === null) return;
 
-      const files = appState.get("files");
+      const files = appState.getRef("files");
       const file = files.find((f) => f.id === fileId);
       if (!file) return;
 
@@ -353,7 +353,7 @@ function initEventHandlers(): () => void {
     EventBus.on("toolbar:print", async () => {
       const fileId = appState.get("selectedFileId");
       if (fileId === null) return;
-      const files = appState.get("files");
+      const files = appState.getRef("files");
       const file = files.find((f) => f.id === fileId);
       if (!file?.filepath) return;
       const ext = file.filepath.split(".").pop()?.toLowerCase() || "";
@@ -691,7 +691,7 @@ function initEventHandlers(): () => void {
     EventBus.on("toolbar:versions", async () => {
       const fileId = appState.get("selectedFileId");
       if (fileId === null) return;
-      const files = appState.get("files");
+      const files = appState.getRef("files");
       const file = files.find((f) => f.id === fileId);
       if (!file) return;
 
@@ -714,7 +714,7 @@ function initEventHandlers(): () => void {
     EventBus.on("toolbar:edit-transform", async () => {
       const fileId = appState.get("selectedFileId");
       if (fileId === null) return;
-      const files = appState.get("files");
+      const files = appState.getRef("files");
       const file = files.find((f) => f.id === fileId);
       if (!file) return;
       await EditDialog.open(fileId, file.name || file.filename);
@@ -991,7 +991,7 @@ async function reloadFilesAndCounts(): Promise<void> {
 }
 
 function navigateFile(direction: number): void {
-  const files = appState.get("files");
+  const files = appState.getRef("files");
   if (files.length === 0) return;
 
   const currentId = appState.get("selectedFileId");
