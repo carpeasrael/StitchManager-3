@@ -1,11 +1,38 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::db::models::EmbroideryFile;
-use crate::db::queries::{FILE_SELECT_LIVE_BY_ID, row_to_file};
+use crate::db::queries::{FILE_SELECT, FILE_SELECT_LIVE_BY_ID, row_to_file};
 use crate::error::{lock_db, AppError};
 use crate::DbState;
+
+/// Load multiple files by ID in a single query instead of per-file queries.
+fn batch_load_files(
+    conn: &rusqlite::Connection,
+    ids: &[i64],
+) -> Result<HashMap<i64, EmbroideryFile>, AppError> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "{FILE_SELECT} WHERE id IN ({}) AND deleted_at IS NULL",
+        placeholders.join(", ")
+    );
+    let params: Vec<Box<dyn rusqlite::types::ToSql>> =
+        ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params.iter().map(|p| p.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let files = stmt
+        .query_map(param_refs.as_slice(), |row| row_to_file(row))?
+        .filter_map(|r| r.ok())
+        .map(|f| (f.id, f))
+        .collect();
+    Ok(files)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,27 +147,13 @@ pub async fn batch_rename(
     let pattern_has_format = pattern.contains("{format}");
     let mut claimed: HashSet<std::path::PathBuf> = HashSet::new();
 
-    // Phase 1: Load all file metadata in a single DB lock
+    // Phase 1: Load all file metadata in a single batch query
     let files: Vec<(i64, Option<EmbroideryFile>)> = {
         let conn = lock_db(&db)?;
-        file_ids
-            .iter()
-            .map(|id| {
-                let file = match conn.query_row(
-                    &format!("{FILE_SELECT_LIVE_BY_ID}"),
-                    [id],
-                    |row| row_to_file(row),
-                ) {
-                    Ok(f) => Some(f),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
-                    Err(e) => {
-                        log::warn!("batch_rename: DB error loading file {id}: {e}");
-                        None
-                    }
-                };
-                (*id, file)
-            })
-            .collect()
+        let loaded = batch_load_files(&conn, &file_ids)?;
+        file_ids.iter().map(|id| {
+            (*id, loaded.get(id).cloned())
+        }).collect()
     };
 
     // Phase 2: Perform filesystem renames without holding the DB lock.
@@ -300,24 +313,8 @@ pub async fn batch_organize(
                 |row| row.get::<_, String>(0),
             )
             .map_err(|_| AppError::Validation("library_root ist nicht konfiguriert".into()))?;
-        let file_list = file_ids
-            .iter()
-            .map(|id| {
-                let file = match conn.query_row(
-                    &format!("{FILE_SELECT_LIVE_BY_ID}"),
-                    [id],
-                    |row| row_to_file(row),
-                ) {
-                    Ok(f) => Some(f),
-                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
-                    Err(e) => {
-                        log::warn!("batch_organize: DB error loading file {id}: {e}");
-                        None
-                    }
-                };
-                (*id, file)
-            })
-            .collect();
+        let loaded = batch_load_files(&conn, &file_ids)?;
+        let file_list = file_ids.iter().map(|id| (*id, loaded.get(id).cloned())).collect();
         (root, file_list)
     };
 
