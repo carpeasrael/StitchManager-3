@@ -43,6 +43,7 @@ printpdf = "0.7"
 lopdf = "0.34"
 zip = "8.2.0"
 csv = "1.4.0"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile = "3"

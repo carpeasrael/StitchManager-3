@@ -74,7 +74,6 @@ fn load_ai_config(conn: &rusqlite::Connection) -> Result<AiConfig, AppError> {
 
     let provider_str = get("ai_provider")?;
     let url = get("ai_url")?;
-    let api_key = get("ai_api_key").ok().filter(|k| !k.trim().is_empty());
     let model = get("ai_model")?;
     let temperature: f64 = get("ai_temperature")?
         .parse()
@@ -82,6 +81,9 @@ fn load_ai_config(conn: &rusqlite::Connection) -> Result<AiConfig, AppError> {
     let timeout_ms: u64 = get("ai_timeout_ms")?
         .parse()
         .unwrap_or(30000);
+
+    // Read API key from OS keychain, with legacy SQLite fallback + auto-migration
+    let api_key = load_api_key_from_keychain(conn);
 
     Ok(AiConfig {
         provider: AiProvider::from_label(&provider_str),
@@ -91,6 +93,47 @@ fn load_ai_config(conn: &rusqlite::Connection) -> Result<AiConfig, AppError> {
         temperature,
         timeout_ms,
     })
+}
+
+/// Read the AI API key from the OS keychain. Falls back to the SQLite settings
+/// table for legacy installs and auto-migrates the value to the keychain.
+fn load_api_key_from_keychain(conn: &rusqlite::Connection) -> Option<String> {
+    use super::settings::KEYRING_SERVICE;
+
+    const KEY: &str = "ai_api_key";
+
+    // Try keychain first
+    match keyring::Entry::new(KEYRING_SERVICE, KEY) {
+        Ok(entry) => match entry.get_password() {
+            Ok(secret) if !secret.trim().is_empty() => return Some(secret),
+            Ok(_) => {} // empty secret, fall through
+            Err(keyring::Error::NoEntry) => {} // not stored yet
+            Err(e) => log::warn!("Keyring read failed for '{KEY}': {e}"),
+        },
+        Err(e) => log::warn!("Keyring init failed for '{KEY}': {e}"),
+    }
+
+    // Legacy fallback: read from SQLite
+    let legacy: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [KEY],
+            |row| row.get(0),
+        )
+        .ok()
+        .filter(|v: &String| !v.trim().is_empty());
+
+    if let Some(ref value) = legacy {
+        // Auto-migrate to keychain and remove from SQLite
+        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEY) {
+            if entry.set_password(value).is_ok() {
+                let _ = conn.execute("DELETE FROM settings WHERE key = ?1", [KEY]);
+                log::info!("Auto-migrated ai_api_key from SQLite to OS keychain");
+            }
+        }
+    }
+
+    legacy
 }
 
 /// Shared helper to build an AI analysis prompt from file metadata and tags.
@@ -821,20 +864,31 @@ mod tests {
              INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_timeout_ms', '30000');",
         ).unwrap();
 
-        // Set a non-empty API key first
+        // With no ai_api_key in DB and no keychain, api_key should be None
+        let config = load_ai_config(&conn).unwrap();
+        assert_eq!(config.api_key, None);
+
+        // Legacy fallback: if key exists in SQLite, load_api_key_from_keychain
+        // will find it (and attempt migration which may fail in test env — that's OK)
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('ai_api_key', 'sk-test123', datetime('now'))",
             [],
         ).unwrap();
 
         let config = load_ai_config(&conn).unwrap();
+        // The key should be found either from keychain (if migration succeeded)
+        // or from the SQLite legacy fallback
         assert_eq!(config.api_key, Some("sk-test123".to_string()));
 
         // Clear the API key (simulates switching away from OpenAI)
         conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('ai_api_key', '', datetime('now'))",
+            "DELETE FROM settings WHERE key = 'ai_api_key'",
             [],
         ).unwrap();
+        // Also clean up keychain if migration succeeded
+        if let Ok(entry) = keyring::Entry::new("de.carpeasrael.stichman", "ai_api_key") {
+            let _ = entry.delete_credential();
+        }
 
         let config = load_ai_config(&conn).unwrap();
         assert_eq!(config.api_key, None);

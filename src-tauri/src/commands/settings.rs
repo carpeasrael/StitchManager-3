@@ -6,8 +6,133 @@ use crate::DbState;
 use crate::db::models::CustomFieldDefinition;
 use crate::error::{lock_db, AppError};
 
+/// Keyring service identifier — shared with `ai.rs` for consistency.
+pub const KEYRING_SERVICE: &str = "de.carpeasrael.stichman";
+
+/// Store a secret in the OS keychain. Returns an error if the keychain is
+/// unavailable — never persists secrets to SQLite.
+#[tauri::command]
+pub fn set_secret(
+    db: State<'_, DbState>,
+    key: String,
+    value: String,
+) -> Result<(), AppError> {
+    // Always clear from SQLite if it exists there (migration cleanup)
+    {
+        let conn = lock_db(&db)?;
+        conn.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+        )?;
+    }
+
+    if value.trim().is_empty() {
+        // Delete from keychain too
+        let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+            .map_err(|e| AppError::Internal(format!("Keyring-Fehler: {e}")))?;
+        // Ignore "not found" errors on delete
+        match entry.delete_credential() {
+            Ok(()) => {}
+            Err(keyring::Error::NoEntry) => {}
+            Err(e) => {
+                log::warn!("Failed to delete keyring entry '{key}': {e}");
+            }
+        }
+        return Ok(());
+    }
+
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| AppError::Internal(format!("Keyring-Fehler: {e}")))?;
+    entry
+        .set_password(&value)
+        .map_err(|e| AppError::Internal(format!("Keyring konnte Schluessel nicht speichern: {e}")))?;
+
+    Ok(())
+}
+
+/// Retrieve a secret from the OS keychain. Also checks SQLite for legacy
+/// plaintext values and migrates them to the keychain automatically.
+#[tauri::command]
+pub fn get_secret(
+    db: State<'_, DbState>,
+    key: String,
+) -> Result<String, AppError> {
+    // First try keychain
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| AppError::Internal(format!("Keyring-Fehler: {e}")))?;
+
+    match entry.get_password() {
+        Ok(secret) => return Ok(secret),
+        Err(keyring::Error::NoEntry) => {} // Fall through to legacy check
+        Err(e) => {
+            log::warn!("Keyring read failed for '{key}': {e}");
+            // Fall through to legacy check
+        }
+    }
+
+    // Legacy migration: check if key exists in SQLite settings table.
+    // Hold the lock across both the read and the delete to avoid races.
+    let conn = lock_db(&db)?;
+    let legacy_value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [&key],
+            |row| row.get(0),
+        )
+        .ok()
+        .filter(|v: &String| !v.trim().is_empty());
+
+    if let Some(ref value) = legacy_value {
+        // Migrate to keychain and remove from SQLite atomically
+        if let Ok(new_entry) = keyring::Entry::new(KEYRING_SERVICE, &key) {
+            if new_entry.set_password(value).is_ok() {
+                let _ = conn.execute(
+                    "DELETE FROM settings WHERE key = ?1",
+                    rusqlite::params![key],
+                );
+                log::info!("Migrated secret '{key}' from SQLite to OS keychain");
+            }
+        }
+        return Ok(value.clone());
+    }
+
+    drop(conn);
+    Ok(String::new())
+}
+
+/// Delete a secret from the OS keychain and SQLite (cleanup).
+#[tauri::command]
+pub fn delete_secret(
+    db: State<'_, DbState>,
+    key: String,
+) -> Result<(), AppError> {
+    // Remove from keychain
+    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &key) {
+        match entry.delete_credential() {
+            Ok(()) => {}
+            Err(keyring::Error::NoEntry) => {}
+            Err(e) => log::warn!("Failed to delete keyring entry '{key}': {e}"),
+        }
+    }
+
+    // Remove from SQLite too (legacy cleanup)
+    let conn = lock_db(&db)?;
+    conn.execute(
+        "DELETE FROM settings WHERE key = ?1",
+        rusqlite::params![key],
+    )?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_setting(db: State<'_, DbState>, key: String) -> Result<String, AppError> {
+    if SECRET_KEYS.contains(&key.as_str()) {
+        return Err(AppError::Validation(
+            format!("Einstellung '{key}' ist ein Geheimnis — verwende get_secret")
+        ));
+    }
+
     let conn = lock_db(&db)?;
 
     conn.query_row(
@@ -29,6 +154,12 @@ pub fn set_setting(
     key: String,
     value: String,
 ) -> Result<(), AppError> {
+    if SECRET_KEYS.contains(&key.as_str()) {
+        return Err(AppError::Validation(
+            format!("Einstellung '{key}' ist ein Geheimnis — verwende set_secret")
+        ));
+    }
+
     let conn = lock_db(&db)?;
 
     conn.execute(
@@ -38,6 +169,9 @@ pub fn set_setting(
 
     Ok(())
 }
+
+/// Secret keys that must never be returned via get_all_settings.
+const SECRET_KEYS: &[&str] = &["ai_api_key"];
 
 #[tauri::command]
 pub fn get_all_settings(db: State<'_, DbState>) -> Result<HashMap<String, String>, AppError> {
@@ -52,7 +186,9 @@ pub fn get_all_settings(db: State<'_, DbState>) -> Result<HashMap<String, String
 
     let mut map = HashMap::new();
     for (key, value) in rows {
-        map.insert(key, value);
+        if !SECRET_KEYS.contains(&key.as_str()) {
+            map.insert(key, value);
+        }
     }
 
     Ok(map)
@@ -437,5 +573,47 @@ mod tests {
         assert!(valid_types.contains(&"date"));
         assert!(valid_types.contains(&"select"));
         assert!(!valid_types.contains(&"invalid"));
+    }
+
+    #[test]
+    fn test_secret_keys_filtered_from_get_all_settings() {
+        let conn = init_database_in_memory().unwrap();
+
+        // Insert a secret key into the settings table (simulating legacy data)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('ai_api_key', 'sk-secret', datetime('now'))",
+            [],
+        ).unwrap();
+
+        // Also insert a normal key
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('ai_provider', 'openai', datetime('now'))",
+            [],
+        ).unwrap();
+
+        // Simulate get_all_settings filtering
+        let mut stmt = conn.prepare("SELECT key, value FROM settings").unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut map = std::collections::HashMap::new();
+        for (key, value) in rows {
+            if !super::SECRET_KEYS.contains(&key.as_str()) {
+                map.insert(key, value);
+            }
+        }
+
+        assert!(!map.contains_key("ai_api_key"), "Secret key must be filtered");
+        assert!(map.contains_key("ai_provider"), "Normal key must be present");
+    }
+
+    #[test]
+    fn test_secret_keys_constant_contains_api_key() {
+        assert!(super::SECRET_KEYS.contains(&"ai_api_key"));
     }
 }

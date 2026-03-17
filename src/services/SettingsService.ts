@@ -52,3 +52,15 @@ export async function removeBackgroundImage(): Promise<void> {
 export async function getBackgroundImage(): Promise<string> {
   return invoke<string>("get_background_image");
 }
+
+export async function setSecret(key: string, value: string): Promise<void> {
+  return invoke<void>("set_secret", { key, value });
+}
+
+export async function getSecret(key: string): Promise<string> {
+  return invoke<string>("get_secret", { key });
+}
+
+export async function deleteSecret(key: string): Promise<void> {
+  return invoke<void>("delete_secret", { key });
+}
