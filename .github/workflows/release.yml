@@ -66,6 +66,13 @@ jobs:
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y flathub org.gnome.Platform//46 org.gnome.Sdk//46
 
+      - name: Pre-download AppImage runtime (x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          mkdir -p "$HOME/.cache/tauri"
+          curl -L -o /tmp/runtime-x86_64 \
+            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64"
+
       - name: Install Linux dependencies (aarch64 cross-compilation)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -90,6 +97,13 @@ jobs:
         env:
           PKG_CONFIG_ALLOW_CROSS: 1
 
+      - name: Pre-download AppImage runtime (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p "$HOME/.cache/tauri"
+          curl -L -o /tmp/runtime-aarch64 \
+            "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-aarch64"
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -101,6 +115,11 @@ jobs:
           PKG_CONFIG_PATH: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
           PKG_CONFIG_SYSROOT_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/' || '' }}
           PKG_CONFIG_ALLOW_CROSS: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
+          # Fix AppImage bundling: linuxdeploy's strip is too old for newer .relr.dyn ELF sections
+          NO_STRIP: ${{ contains(matrix.target, 'linux') && 'true' || '' }}
+          # Pre-downloaded runtime avoids flaky GitHub download during bundling
+          LDAI_RUNTIME_FILE: ${{ matrix.target == 'x86_64-unknown-linux-gnu' && '/tmp/runtime-x86_64' || matrix.target == 'aarch64-unknown-linux-gnu' && '/tmp/runtime-aarch64' || '' }}
+          APPIMAGE_EXTRACT_AND_RUN: ${{ contains(matrix.target, 'linux') && '1' || '' }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'StichMan ${{ github.ref_name }}'
