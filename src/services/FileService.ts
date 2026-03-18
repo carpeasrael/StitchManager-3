@@ -127,6 +127,13 @@ export async function getAttachments(
   return invoke<FileAttachment[]>("get_attachments", { fileId });
 }
 
+export async function saveThumbnailData(
+  fileId: number,
+  pngBase64: string
+): Promise<void> {
+  return invoke("save_thumbnail_data", { fileId, pngBase64 });
+}
+
 export async function uploadSewingPattern(
   sourcePath: string,
   collectionId: number | null,

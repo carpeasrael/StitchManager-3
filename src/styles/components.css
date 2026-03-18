@@ -4185,5 +4185,28 @@ a:focus:not(:focus-visible),
 }
 .rt-editor:focus { border-color: var(--color-accent); outline: none; }
 
+/* Pattern Preview (#120) */
+.pattern-preview-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pattern-preview-img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+.pattern-preview-canvas {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+.pattern-preview-loading {
+  padding: var(--spacing-3);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+}
+
 /* Pattern Upload Dialog */
 .pattern-upload-dialog { max-height: 90vh; display: flex; flex-direction: column; }

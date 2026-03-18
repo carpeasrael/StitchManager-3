@@ -169,6 +169,7 @@ pub fn run() {
             commands::scanner::watcher_remove_by_paths,
             commands::migration::migrate_from_2stitch,
             commands::files::generate_qr_code,
+            commands::files::save_thumbnail_data,
             commands::files::upload_sewing_pattern,
             commands::files::attach_file,
             commands::files::get_attachments,

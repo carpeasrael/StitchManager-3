@@ -1083,6 +1083,55 @@ pub fn generate_qr_code(unique_id: String) -> Result<Vec<u8>, AppError> {
     Ok(buf.into_inner())
 }
 
+// ── Pattern Thumbnail from Preview (#120) ────────────────────────────
+
+/// Save a base64-encoded PNG as the thumbnail for a file.
+/// Used by the frontend after rendering a PDF first page or loading an image preview.
+#[tauri::command]
+pub fn save_thumbnail_data(
+    db: State<'_, DbState>,
+    thumb_state: State<'_, ThumbnailState>,
+    file_id: i64,
+    png_base64: String,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
+        [file_id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Err(AppError::NotFound(format!("Datei {file_id} nicht gefunden")));
+    }
+
+    // Decode base64
+    let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &png_base64)
+        .map_err(|e| AppError::Validation(format!("Ungueltige Base64-Daten: {e}")))?;
+
+    // Load and resize to 192x192
+    let img = image::load_from_memory(&data)
+        .map_err(|e| AppError::Internal(format!("Bild konnte nicht geladen werden: {e}")))?;
+    let thumb = img.thumbnail(192, 192);
+
+    // Save to thumbnail cache
+    let thumb_path = thumb_state.0.thumbnail_path(file_id);
+    if let Some(parent) = thumb_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    thumb.save_with_format(&thumb_path, image::ImageFormat::Png)
+        .map_err(|e| AppError::Internal(format!("Thumbnail konnte nicht gespeichert werden: {e}")))?;
+
+    let thumb_path_str = thumb_path.to_string_lossy().to_string();
+
+    // Update DB
+    conn.execute(
+        "UPDATE embroidery_files SET thumbnail_path = ?1, updated_at = datetime('now') WHERE id = ?2 AND deleted_at IS NULL",
+        rusqlite::params![thumb_path_str, file_id],
+    )?;
+
+    Ok(())
+}
+
 // ── Sewing Pattern Upload (#119) ─────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
