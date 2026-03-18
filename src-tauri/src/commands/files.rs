@@ -1150,27 +1150,48 @@ pub struct PatternMetadata {
 
 const PATTERN_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg", "bmp"];
 
-/// Basic HTML sanitization: strip script/style tags.
+/// Allowlist-based HTML sanitization for rich text instructions (#124).
+/// Only permits safe formatting tags; strips all attributes except harmless ones.
 fn sanitize_html(html: &str) -> String {
-    let mut result = html.to_string();
-    // Remove <script>...</script> blocks
-    while let Some(start) = result.to_lowercase().find("<script") {
-        if let Some(end) = result.to_lowercase()[start..].find("</script>") {
-            result.replace_range(start..start + end + 9, "");
+    const ALLOWED_TAGS: &[&str] = &[
+        "b", "i", "u", "strong", "em", "ul", "ol", "li", "p", "br", "div", "span",
+    ];
+
+    let mut result = String::with_capacity(html.len());
+    let mut chars = html.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            // Collect the full tag content until '>'
+            let mut tag_content = String::new();
+            for tc in chars.by_ref() {
+                if tc == '>' { break; }
+                tag_content.push(tc);
+            }
+
+            let trimmed = tag_content.trim().to_lowercase();
+            let is_closing = trimmed.starts_with('/');
+            let tag_body = if is_closing { &trimmed[1..] } else { &trimmed };
+
+            // Extract just the tag name (before any space or /)
+            let tag_name = tag_body.split(|c: char| c.is_whitespace() || c == '/').next().unwrap_or("");
+
+            if ALLOWED_TAGS.contains(&tag_name) {
+                // Emit the tag WITHOUT any attributes (strips all on* handlers, href, src, etc.)
+                if is_closing {
+                    result.push_str(&format!("</{tag_name}>"));
+                } else if trimmed.ends_with('/') {
+                    result.push_str(&format!("<{tag_name} />"));
+                } else {
+                    result.push_str(&format!("<{tag_name}>"));
+                }
+            }
+            // Non-allowed tags (script, style, img, a, iframe, etc.) are silently dropped
         } else {
-            result.truncate(start);
-            break;
+            result.push(ch);
         }
     }
-    // Remove <style>...</style> blocks
-    while let Some(start) = result.to_lowercase().find("<style") {
-        if let Some(end) = result.to_lowercase()[start..].find("</style>") {
-            result.replace_range(start..start + end + 8, "");
-        } else {
-            result.truncate(start);
-            break;
-        }
-    }
+
     result
 }
 
