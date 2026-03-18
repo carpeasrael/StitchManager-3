@@ -12,7 +12,6 @@ import * as ProjectService from "../services/ProjectService";
 import type { Project } from "../types";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as ThreadColorService from "../services/ThreadColorService";
-import * as ViewerService from "../services/ViewerService";
 import type {
   EmbroideryFile,
   FileAttachment,
@@ -257,71 +256,67 @@ export class MetadataPanel extends Component {
     const wrapper = document.createElement("div");
     wrapper.className = "metadata-panel";
 
-    // Preview section — conditional on file type
-    if (file.fileType === "sewing_pattern") {
-      this.renderPatternPreview(wrapper, file);
-    } else {
-      // Stitch preview section — interactive canvas with zoom/pan
-      const previewSection = document.createElement("div");
-      previewSection.className = "stitch-preview-section";
+    // Stitch preview section — interactive canvas with zoom/pan
+    const previewSection = document.createElement("div");
+    previewSection.className = "stitch-preview-section";
 
-      const previewContainer = document.createElement("div");
-      previewContainer.className = "stitch-preview-container";
+    const previewContainer = document.createElement("div");
+    previewContainer.className = "stitch-preview-container";
 
-      const canvas = document.createElement("canvas");
-      canvas.className = "stitch-preview-canvas";
-      previewContainer.appendChild(canvas);
+    const canvas = document.createElement("canvas");
+    canvas.className = "stitch-preview-canvas";
+    previewContainer.appendChild(canvas);
 
-      // Zoom controls overlay
-      const controls = document.createElement("div");
-      controls.className = "stitch-preview-controls";
-      const zoomInBtn = document.createElement("button");
-      zoomInBtn.className = "stitch-preview-btn";
-      zoomInBtn.textContent = "+";
-      zoomInBtn.title = "Vergr\u00F6\u00DFern";
-      zoomInBtn.setAttribute("aria-label", "Vergr\u00F6\u00DFern");
-      const zoomOutBtn = document.createElement("button");
-      zoomOutBtn.className = "stitch-preview-btn";
-      zoomOutBtn.textContent = "\u2212";
-      zoomOutBtn.title = "Verkleinern";
-      zoomOutBtn.setAttribute("aria-label", "Verkleinern");
-      const zoomResetBtn = document.createElement("button");
-      zoomResetBtn.className = "stitch-preview-btn";
-      zoomResetBtn.textContent = "\u21BA";
-      zoomResetBtn.title = "Zur\u00FCcksetzen";
-      zoomResetBtn.setAttribute("aria-label", "Zur\u00FCcksetzen");
-      const zoomLabel = document.createElement("span");
-      zoomLabel.className = "stitch-preview-zoom-label";
-      zoomLabel.textContent = "100%";
-      controls.appendChild(zoomInBtn);
-      controls.appendChild(zoomOutBtn);
-      controls.appendChild(zoomResetBtn);
-      controls.appendChild(zoomLabel);
-      previewContainer.appendChild(controls);
+    // Zoom controls overlay
+    const controls = document.createElement("div");
+    controls.className = "stitch-preview-controls";
+    const zoomInBtn = document.createElement("button");
+    zoomInBtn.className = "stitch-preview-btn";
+    zoomInBtn.textContent = "+";
+    zoomInBtn.title = "Vergr\u00F6\u00DFern";
+    zoomInBtn.setAttribute("aria-label", "Vergr\u00F6\u00DFern");
+    const zoomOutBtn = document.createElement("button");
+    zoomOutBtn.className = "stitch-preview-btn";
+    zoomOutBtn.textContent = "\u2212";
+    zoomOutBtn.title = "Verkleinern";
+    zoomOutBtn.setAttribute("aria-label", "Verkleinern");
+    const zoomResetBtn = document.createElement("button");
+    zoomResetBtn.className = "stitch-preview-btn";
+    zoomResetBtn.textContent = "\u21BA";
+    zoomResetBtn.title = "Zur\u00FCcksetzen";
+    zoomResetBtn.setAttribute("aria-label", "Zur\u00FCcksetzen");
+    const zoomLabel = document.createElement("span");
+    zoomLabel.className = "stitch-preview-zoom-label";
+    zoomLabel.textContent = "100%";
+    controls.appendChild(zoomInBtn);
+    controls.appendChild(zoomOutBtn);
+    controls.appendChild(zoomResetBtn);
+    controls.appendChild(zoomLabel);
+    previewContainer.appendChild(controls);
 
-      const expandBtn = document.createElement("button");
-      expandBtn.className = "stitch-preview-btn stitch-preview-expand";
-      expandBtn.textContent = "\u2922";
-      expandBtn.title = "Vollbild";
-      expandBtn.setAttribute("aria-label", "Vollbild");
-      expandBtn.addEventListener("click", () => {
-        if (this.currentSegments.length > 0) {
-          ImagePreviewDialog.open(this.currentSegments);
-        }
-      });
-      controls.appendChild(expandBtn);
-
-      previewSection.appendChild(previewContainer);
-      wrapper.appendChild(previewSection);
-
-      // Load stitch segments and render on canvas
-      this.currentSegments = [];
-      const previewFileId = file.id;
-      if (file.filepath) {
-        this.loadStitchPreview(canvas, file.filepath, previewFileId, zoomLabel, {
-          zoomInBtn, zoomOutBtn, zoomResetBtn,
-        }).catch(() => { /* keep empty canvas */ });
+    // Click on preview to open full-screen image dialog
+    const expandBtn = document.createElement("button");
+    expandBtn.className = "stitch-preview-btn stitch-preview-expand";
+    expandBtn.textContent = "\u2922";
+    expandBtn.title = "Vollbild";
+    expandBtn.setAttribute("aria-label", "Vollbild");
+    expandBtn.addEventListener("click", () => {
+      if (this.currentSegments.length > 0) {
+        ImagePreviewDialog.open(this.currentSegments);
       }
+    });
+    controls.appendChild(expandBtn);
+
+    previewSection.appendChild(previewContainer);
+    wrapper.appendChild(previewSection);
+
+    // Load stitch segments and render on canvas
+    this.currentSegments = [];
+    const previewFileId = file.id;
+    if (file.filepath) {
+      this.loadStitchPreview(canvas, file.filepath, previewFileId, zoomLabel, {
+        zoomInBtn, zoomOutBtn, zoomResetBtn,
+      }).catch(() => { /* keep empty canvas */ });
     }
 
     // "View document" button for PDFs and viewable files
@@ -1295,118 +1290,6 @@ export class MetadataPanel extends Component {
     }
 
     container.appendChild(group);
-  }
-
-  private renderPatternPreview(wrapper: HTMLElement, file: EmbroideryFile): void {
-    const previewSection = document.createElement("div");
-    previewSection.className = "stitch-preview-section pattern-preview-section";
-
-    const previewContainer = document.createElement("div");
-    previewContainer.className = "stitch-preview-container pattern-preview-container";
-
-    const fileExt = file.filepath?.split(".").pop()?.toLowerCase() || "";
-    const gen = ++this.previewGeneration;
-
-    if (fileExt === "pdf") {
-      // PDF: render first page with pdfjs
-      const pdfCanvas = document.createElement("canvas");
-      pdfCanvas.className = "pattern-preview-canvas";
-      previewContainer.appendChild(pdfCanvas);
-
-      const loadingHint = document.createElement("div");
-      loadingHint.className = "pattern-preview-loading";
-      loadingHint.textContent = "PDF wird geladen...";
-      previewContainer.appendChild(loadingHint);
-
-      (async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let doc: any = null;
-        try {
-          const pdfjs = await import("pdfjs-dist");
-          pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-            "pdfjs-dist/build/pdf.worker.min.mjs",
-            import.meta.url
-          ).href;
-          if (gen !== this.previewGeneration) return;
-
-          const bytes = await ViewerService.readFileBytes(file.filepath);
-          if (gen !== this.previewGeneration) return;
-
-          doc = await pdfjs.getDocument({ data: bytes }).promise;
-          if (gen !== this.previewGeneration) return;
-
-          const page = await doc.getPage(1);
-          if (gen !== this.previewGeneration) return;
-
-          const containerWidth = previewContainer.clientWidth || 380;
-          const viewport = page.getViewport({ scale: 1 });
-          const scale = containerWidth / viewport.width;
-          const scaledViewport = page.getViewport({ scale });
-
-          pdfCanvas.width = scaledViewport.width;
-          pdfCanvas.height = scaledViewport.height;
-          const ctx = pdfCanvas.getContext("2d");
-          if (ctx) {
-            await page.render({ canvasContext: ctx, viewport: scaledViewport, canvas: pdfCanvas }).promise;
-          }
-          loadingHint.remove();
-        } catch {
-          loadingHint.textContent = "PDF-Vorschau fehlgeschlagen";
-        } finally {
-          if (doc) doc.destroy();
-        }
-      })();
-    } else if (["png", "jpg", "jpeg", "bmp", "gif", "webp"].includes(fileExt)) {
-      // Image: show directly
-      const img = document.createElement("img");
-      img.className = "pattern-preview-img";
-      img.alt = file.name || file.filename;
-      previewContainer.appendChild(img);
-
-      (async () => {
-        try {
-          const b64 = await ViewerService.readFileBase64(file.filepath);
-          if (gen !== this.previewGeneration) return;
-          const mimeMap: Record<string, string> = { png: "image/png", bmp: "image/bmp", gif: "image/gif", webp: "image/webp" };
-          const mime = mimeMap[fileExt] || "image/jpeg";
-          img.src = `data:${mime};base64,${b64}`;
-        } catch {
-          img.alt = "Vorschau fehlgeschlagen";
-        }
-      })();
-    } else {
-      const hint = document.createElement("div");
-      hint.className = "pattern-preview-loading";
-      hint.textContent = "Keine Vorschau verfuegbar";
-      previewContainer.appendChild(hint);
-    }
-
-    previewSection.appendChild(previewContainer);
-
-    // Upload thumbnail button
-    const thumbBar = document.createElement("div");
-    thumbBar.className = "metadata-view-bar";
-    const thumbBtn = document.createElement("button");
-    thumbBtn.className = "metadata-view-btn";
-    thumbBtn.textContent = "Thumbnail hochladen";
-    thumbBtn.addEventListener("click", async () => {
-      const result = await open({
-        multiple: false,
-        filters: [{ name: "Bilder", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "webp"] }],
-      });
-      if (!result || !this.currentFile) return;
-      try {
-        await FileService.uploadThumbnail(this.currentFile.id, result as string);
-        ToastContainer.show("success", "Thumbnail hochgeladen");
-        EventBus.emit("file:refresh");
-      } catch {
-        ToastContainer.show("error", "Thumbnail-Upload fehlgeschlagen");
-      }
-    });
-    thumbBar.appendChild(thumbBtn);
-    previewSection.appendChild(thumbBar);
-
-    wrapper.appendChild(previewSection);
   }
 
   private async loadStitchPreview(

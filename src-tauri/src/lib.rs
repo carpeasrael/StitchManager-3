@@ -170,7 +170,6 @@ pub fn run() {
             commands::migration::migrate_from_2stitch,
             commands::files::generate_qr_code,
             commands::files::upload_sewing_pattern,
-            commands::files::upload_thumbnail,
             commands::files::attach_file,
             commands::files::get_attachments,
             commands::files::delete_attachment,

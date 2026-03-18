@@ -340,7 +340,7 @@ export class PatternUploadDialog {
           const col = this.collections.find((c) => c.id === colId);
           EventBus.emit("collection:selected", { collectionId: colId, collectionName: col?.name || "" });
         } else {
-          EventBus.emit("file:refresh");
+          EventBus.emit("files:refresh");
         }
 
         PatternUploadDialog.dismiss();
