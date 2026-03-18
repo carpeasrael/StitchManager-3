@@ -341,10 +341,14 @@ export class MetadataPanel extends Component {
       wrapper.appendChild(viewBar);
     }
 
-    // "New project from pattern" button (sewing patterns and PDFs only)
-    if (file.fileType === "sewing_pattern" || fileExt === "pdf") {
+    // Project actions: "Projekt starten" + "Zu Projekt hinzufuegen" (all file types)
+    {
       const projectBar = document.createElement("div");
       projectBar.className = "metadata-view-bar";
+      projectBar.style.flexWrap = "wrap";
+      projectBar.style.gap = "var(--spacing-1)";
+
+      // "Projekt starten" button
       const projectBtn = document.createElement("button");
       projectBtn.className = "metadata-project-btn";
       projectBtn.textContent = "+ Neues Projekt";
@@ -355,6 +359,52 @@ export class MetadataPanel extends Component {
         });
       });
       projectBar.appendChild(projectBtn);
+
+      // "Zu Projekt hinzufuegen" dropdown
+      const addSelect = document.createElement("select");
+      addSelect.className = "metadata-form-input";
+      addSelect.style.flex = "1";
+      addSelect.style.minWidth = "140px";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Zu Projekt hinzufuegen...";
+      addSelect.appendChild(placeholder);
+      addSelect.disabled = true;
+
+      // Load active projects asynchronously
+      ProjectService.getProjects().then((projects) => {
+        const active = projects.filter(
+          (p) => p.status !== "completed" && p.status !== "archived"
+        );
+        if (active.length === 0) {
+          placeholder.textContent = "Keine aktiven Projekte";
+          return;
+        }
+        addSelect.disabled = false;
+        for (const p of active) {
+          const opt = document.createElement("option");
+          opt.value = String(p.id);
+          opt.textContent = p.name;
+          addSelect.appendChild(opt);
+        }
+      }).catch(() => {
+        placeholder.textContent = "Projekte konnten nicht geladen werden";
+      });
+
+      addSelect.addEventListener("change", async () => {
+        const projectId = Number(addSelect.value);
+        if (!projectId || !this.currentFile) return;
+        const role = "pattern";
+        try {
+          await ProjectService.addFileToProject(projectId, this.currentFile.id, role);
+          ToastContainer.show("success", "Datei zum Projekt hinzugefuegt");
+        } catch {
+          ToastContainer.show("error", "Hinzufuegen fehlgeschlagen");
+        }
+        addSelect.value = "";
+      });
+
+      projectBar.appendChild(addSelect);
       wrapper.appendChild(projectBar);
     }
 
