@@ -54,9 +54,18 @@ pub fn create_folder(
 
     let conn = lock_db(&db)?;
 
+    // Place new folder at the end of the sort order
+    let max_order: i32 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM folders",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
     conn.execute(
-        "INSERT INTO folders (name, path, parent_id) VALUES (?1, ?2, ?3)",
-        rusqlite::params![name.trim(), path, parent_id],
+        "INSERT INTO folders (name, path, parent_id, sort_order) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![name.trim(), path, parent_id, max_order + 10],
     )?;
 
     let id = conn.last_insert_rowid();
@@ -163,6 +172,21 @@ pub fn update_folder_sort_orders(
     db: State<'_, DbState>,
     folder_orders: Vec<(i64, i32)>,
 ) -> Result<(), AppError> {
+    // Validate: no duplicate IDs
+    let mut seen_ids = std::collections::HashSet::new();
+    for (folder_id, order) in &folder_orders {
+        if *order < 0 {
+            return Err(AppError::Validation(format!(
+                "sort_order darf nicht negativ sein: {order}"
+            )));
+        }
+        if !seen_ids.insert(folder_id) {
+            return Err(AppError::Validation(format!(
+                "Doppelte Ordner-ID: {folder_id}"
+            )));
+        }
+    }
+
     let conn = lock_db(&db)?;
 
     let tx = conn.unchecked_transaction()?;
