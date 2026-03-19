@@ -2,6 +2,7 @@ import { ToastContainer } from "./Toast";
 import { trapFocus } from "../utils/focus-trap";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appState } from "../state/AppState";
+import { buildFolderTree, flattenVisibleTree } from "../utils/tree";
 import * as FolderService from "../services/FolderService";
 import type { FolderType } from "../types/index";
 
@@ -137,11 +138,15 @@ export class FolderDialog {
     noneOption.textContent = "-- Keiner --";
     parentSelect.appendChild(noneOption);
 
+    // Show folders in tree order with indentation
     const folders = appState.get("folders");
-    for (const f of folders) {
+    const tree = buildFolderTree(folders);
+    const allIds = new Set(folders.map((f) => f.id));
+    const flatTree = flattenVisibleTree(tree, allIds);
+    for (const entry of flatTree) {
       const opt = document.createElement("option");
-      opt.value = String(f.id);
-      opt.textContent = f.name;
+      opt.value = String(entry.folder.id);
+      opt.textContent = "\u00A0\u00A0".repeat(entry.depth) + entry.folder.name;
       parentSelect.appendChild(opt);
     }
 

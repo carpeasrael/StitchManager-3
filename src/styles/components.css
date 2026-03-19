@@ -512,6 +512,89 @@
   border-top: 2px solid var(--color-accent);
 }
 
+.folder-item.drop-into {
+  background: var(--color-accent-20);
+  border: 1px dashed var(--color-accent);
+}
+
+/* Tree expand/collapse toggle */
+.folder-toggle {
+  width: 16px;
+  font-size: 10px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--color-muted);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+  user-select: none;
+}
+
+.folder-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.folder-toggle.leaf {
+  visibility: hidden;
+}
+
+/* Context menu */
+.folder-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-md);
+  min-width: 160px;
+  padding: var(--spacing-1) 0;
+}
+
+.folder-context-menu-item {
+  padding: var(--spacing-2) var(--spacing-3);
+  cursor: pointer;
+  font-size: var(--font-size-body);
+  color: var(--color-text);
+}
+
+.folder-context-menu-item:hover {
+  background: var(--color-accent-10);
+}
+
+/* Folder move dialog */
+.dialog-folder-move {
+  width: 400px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+
+.dialog-folder-move-body {
+  padding: var(--spacing-2);
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.folder-move-item {
+  padding: var(--spacing-2) var(--spacing-3);
+  cursor: pointer;
+  border-radius: var(--radius-card);
+  font-size: var(--font-size-body);
+}
+
+.folder-move-item:hover:not(.disabled) {
+  background: var(--color-accent-10);
+}
+
+.folder-move-item.selected {
+  background: var(--color-accent-10);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.folder-move-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Toolbar sections */
 .toolbar-search {
   flex: 1;

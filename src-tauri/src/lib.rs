@@ -123,6 +123,7 @@ pub fn run() {
             commands::folders::update_folder_sort_orders,
             commands::folders::get_folder_file_count,
             commands::folders::get_all_folder_file_counts,
+            commands::folders::move_folder,
             commands::scanner::scan_directory,
             commands::scanner::import_files,
             commands::files::get_files,

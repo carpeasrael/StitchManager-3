@@ -41,6 +41,16 @@ export async function updateSortOrders(
   return invoke<void>("update_folder_sort_orders", { folderOrders });
 }
 
+export async function moveFolder(
+  folderId: number,
+  newParentId: number | null
+): Promise<Folder> {
+  return invoke<Folder>("move_folder", {
+    folderId,
+    newParentId: newParentId ?? null,
+  });
+}
+
 export async function getFileCount(folderId: number): Promise<number> {
   return invoke<number>("get_folder_file_count", { folderId });
 }

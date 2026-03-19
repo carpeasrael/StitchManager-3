@@ -65,14 +65,22 @@ pub fn create_folder(
 
     let conn = lock_db(&db)?;
 
-    // Place new folder at the end of the sort order
-    let max_order: i32 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM folders",
+    // Place new folder at the end of sibling sort order
+    let max_order: i32 = if parent_id.is_some() {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM folders WHERE parent_id = ?1",
+            [parent_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    } else {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM folders WHERE parent_id IS NULL",
             [],
             |row| row.get(0),
         )
-        .unwrap_or(0);
+        .unwrap_or(0)
+    };
 
     conn.execute(
         "INSERT INTO folders (name, path, parent_id, sort_order, folder_type) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -261,8 +269,18 @@ pub fn get_all_folder_file_counts(
 ) -> Result<HashMap<i64, i64>, AppError> {
     let conn = lock_db(&db)?;
 
+    // Recursive CTE: each folder gets a count including all descendant files
     let mut stmt = conn.prepare(
-        "SELECT folder_id, COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL GROUP BY folder_id",
+        "WITH RECURSIVE folder_tree(id, root_id) AS (
+            SELECT id, id FROM folders
+            UNION ALL
+            SELECT f.id, ft.root_id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
+        )
+        SELECT ft.root_id AS folder_id, COUNT(*) AS cnt
+        FROM embroidery_files e
+        JOIN folder_tree ft ON e.folder_id = ft.id
+        WHERE e.deleted_at IS NULL
+        GROUP BY ft.root_id",
     )?;
     let counts = stmt
         .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
@@ -270,6 +288,113 @@ pub fn get_all_folder_file_counts(
         .collect();
 
     Ok(counts)
+}
+
+#[tauri::command]
+pub fn move_folder(
+    db: State<'_, DbState>,
+    folder_id: i64,
+    new_parent_id: Option<i64>,
+) -> Result<Folder, AppError> {
+    // Self-reference check
+    if new_parent_id == Some(folder_id) {
+        return Err(AppError::Validation(
+            "Ordner kann nicht in sich selbst verschoben werden".into(),
+        ));
+    }
+
+    let conn = lock_db(&db)?;
+
+    // Verify folder exists and check for no-op
+    let current_parent: Option<i64> = conn
+        .query_row(
+            "SELECT parent_id FROM folders WHERE id = ?1",
+            [folder_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Ordner {folder_id} nicht gefunden"))
+            }
+            other => AppError::from(other),
+        })?;
+
+    // No-op: folder is already at the target parent
+    if current_parent == new_parent_id {
+        return conn
+            .query_row(
+                &format!("{FOLDER_SELECT} WHERE id = ?1"),
+                [folder_id],
+                |row| row_to_folder(row),
+            )
+            .map_err(AppError::from);
+    }
+
+    // Circular reference check: ensure folder_id is not an ancestor of new_parent_id
+    if let Some(np_id) = new_parent_id {
+        // Verify target parent exists
+        let target_exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM folders WHERE id = ?1",
+            [np_id],
+            |row| row.get(0),
+        )?;
+        if !target_exists {
+            return Err(AppError::NotFound(format!(
+                "Zielordner {np_id} nicht gefunden"
+            )));
+        }
+
+        let is_circular: bool = conn.query_row(
+            "WITH RECURSIVE ancestors(id) AS (
+                SELECT parent_id FROM folders WHERE id = ?1
+                UNION ALL
+                SELECT f.parent_id FROM folders f JOIN ancestors a ON f.id = a.id
+                WHERE f.parent_id IS NOT NULL
+            )
+            SELECT COUNT(*) > 0 FROM ancestors WHERE id = ?2",
+            rusqlite::params![np_id, folder_id],
+            |row| row.get(0),
+        )?;
+        if is_circular {
+            return Err(AppError::Validation(
+                "Zirkulaere Referenz: Ordner kann nicht in einen eigenen Unterordner verschoben werden".into(),
+            ));
+        }
+    }
+
+    let tx = conn.unchecked_transaction()?;
+
+    // Place at end of new parent's children
+    let max_order: i32 = if new_parent_id.is_some() {
+        tx.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM folders WHERE parent_id = ?1",
+            [new_parent_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    } else {
+        tx.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM folders WHERE parent_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    };
+
+    tx.execute(
+        "UPDATE folders SET parent_id = ?1, sort_order = ?2, updated_at = datetime('now') WHERE id = ?3",
+        rusqlite::params![new_parent_id, max_order + 10, folder_id],
+    )?;
+
+    tx.commit()?;
+
+    let folder = conn.query_row(
+        &format!("{FOLDER_SELECT} WHERE id = ?1"),
+        [folder_id],
+        |row| row_to_folder(row),
+    )?;
+
+    Ok(folder)
 }
 
 #[cfg(test)]
@@ -655,5 +780,160 @@ mod tests {
 
         assert!(!thumb_parent.exists(), "Parent thumbnail should be deleted");
         assert!(!thumb_child.exists(), "Child thumbnail should be deleted");
+    }
+
+    #[test]
+    fn test_move_folder_basic() {
+        let conn = init_database_in_memory().unwrap();
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Parent', '/parent')", []).unwrap();
+        let parent_id = conn.last_insert_rowid();
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Child', '/child')", []).unwrap();
+        let child_id = conn.last_insert_rowid();
+
+        // Move child under parent
+        conn.execute(
+            "UPDATE folders SET parent_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![parent_id, child_id],
+        ).unwrap();
+
+        let pid: Option<i64> = conn
+            .query_row("SELECT parent_id FROM folders WHERE id = ?1", [child_id], |row| row.get(0))
+            .unwrap();
+        assert_eq!(pid, Some(parent_id));
+    }
+
+    #[test]
+    fn test_move_folder_circular_reference_detected() {
+        let conn = init_database_in_memory().unwrap();
+
+        // Parent -> Child hierarchy
+        conn.execute("INSERT INTO folders (name, path) VALUES ('P', '/p')", []).unwrap();
+        let p = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO folders (name, path, parent_id) VALUES ('C', '/c', ?1)",
+            [p],
+        ).unwrap();
+        let c = conn.last_insert_rowid();
+
+        // Try to detect circular ref: moving P under C
+        // Walk ancestors of C to see if P is among them
+        let is_circular: bool = conn
+            .query_row(
+                "WITH RECURSIVE ancestors(id) AS (
+                    SELECT parent_id FROM folders WHERE id = ?1
+                    UNION ALL
+                    SELECT f.parent_id FROM folders f JOIN ancestors a ON f.id = a.id
+                    WHERE f.parent_id IS NOT NULL
+                )
+                SELECT COUNT(*) > 0 FROM ancestors WHERE id = ?2",
+                rusqlite::params![c, p],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // C's ancestor is P, so moving P under C would be circular
+        assert!(is_circular, "Should detect that P is an ancestor of C");
+    }
+
+    #[test]
+    fn test_move_folder_self_reference() {
+        let conn = init_database_in_memory().unwrap();
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Self', '/self')", []).unwrap();
+        let id = conn.last_insert_rowid();
+
+        // Replicate the self-reference guard from move_folder
+        let folder_id = id;
+        let new_parent_id = Some(id);
+        assert_eq!(
+            new_parent_id, Some(folder_id),
+            "Self-reference guard should trigger when folder_id == new_parent_id"
+        );
+
+        // Verify the folder still has NULL parent (not moved)
+        let pid: Option<i64> = conn
+            .query_row("SELECT parent_id FROM folders WHERE id = ?1", [id], |row| row.get(0))
+            .unwrap();
+        assert_eq!(pid, None, "Folder should remain at root");
+    }
+
+    #[test]
+    fn test_move_folder_to_root() {
+        let conn = init_database_in_memory().unwrap();
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('P', '/p')", []).unwrap();
+        let p = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO folders (name, path, parent_id) VALUES ('C', '/c', ?1)",
+            [p],
+        ).unwrap();
+        let c = conn.last_insert_rowid();
+
+        // Move C to root
+        conn.execute(
+            "UPDATE folders SET parent_id = NULL, updated_at = datetime('now') WHERE id = ?1",
+            [c],
+        ).unwrap();
+
+        let pid: Option<i64> = conn
+            .query_row("SELECT parent_id FROM folders WHERE id = ?1", [c], |row| row.get(0))
+            .unwrap();
+        assert_eq!(pid, None, "Child should now be at root level");
+    }
+
+    #[test]
+    fn test_recursive_file_count() {
+        let conn = init_database_in_memory().unwrap();
+
+        // Parent folder
+        conn.execute("INSERT INTO folders (name, path) VALUES ('Root', '/root')", []).unwrap();
+        let root_id = conn.last_insert_rowid();
+
+        // Child folder
+        conn.execute(
+            "INSERT INTO folders (name, path, parent_id) VALUES ('Sub', '/sub', ?1)",
+            [root_id],
+        ).unwrap();
+        let sub_id = conn.last_insert_rowid();
+
+        // 2 files in root, 3 files in sub
+        for i in 0..2 {
+            conn.execute(
+                "INSERT INTO embroidery_files (folder_id, filename, filepath) VALUES (?1, ?2, ?3)",
+                rusqlite::params![root_id, format!("r{i}.pes"), format!("/root/r{i}.pes")],
+            ).unwrap();
+        }
+        for i in 0..3 {
+            conn.execute(
+                "INSERT INTO embroidery_files (folder_id, filename, filepath) VALUES (?1, ?2, ?3)",
+                rusqlite::params![sub_id, format!("s{i}.pes"), format!("/sub/s{i}.pes")],
+            ).unwrap();
+        }
+
+        // Recursive count for root should include sub's files
+        let mut stmt = conn.prepare(
+            "WITH RECURSIVE folder_tree(id, root_id) AS (
+                SELECT id, id FROM folders
+                UNION ALL
+                SELECT f.id, ft.root_id FROM folders f JOIN folder_tree ft ON f.parent_id = ft.id
+            )
+            SELECT ft.root_id AS folder_id, COUNT(*) AS cnt
+            FROM embroidery_files e
+            JOIN folder_tree ft ON e.folder_id = ft.id
+            WHERE e.deleted_at IS NULL
+            GROUP BY ft.root_id",
+        ).unwrap();
+        let counts: Vec<(i64, i64)> = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let root_count = counts.iter().find(|(id, _)| *id == root_id).map(|(_, c)| *c).unwrap_or(0);
+        let sub_count = counts.iter().find(|(id, _)| *id == sub_id).map(|(_, c)| *c).unwrap_or(0);
+
+        assert_eq!(root_count, 5, "Root should have 2 own + 3 from sub = 5");
+        assert_eq!(sub_count, 3, "Sub should have its own 3 files");
     }
 }

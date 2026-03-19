@@ -3,6 +3,8 @@ import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import { FolderDialog } from "./FolderDialog";
+import { FolderMoveDialog } from "./FolderMoveDialog";
+import { buildFolderTree, flattenVisibleTree } from "../utils/tree";
 import * as FolderService from "../services/FolderService";
 import * as ProjectService from "../services/ProjectService";
 import type { Collection } from "../types";
@@ -12,6 +14,8 @@ export class Sidebar extends Component {
   private collections: Collection[] = [];
   private dragSrcId: number | null = null;
   private reordering = false;
+  private contextMenu: HTMLElement | null = null;
+  private contextMenuCloseHandler: ((e: Event) => void) | null = null;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -20,6 +24,9 @@ export class Sidebar extends Component {
     );
     this.subscribe(
       appState.on("selectedFolderId", () => this.render())
+    );
+    this.subscribe(
+      appState.on("expandedFolderIds", () => this.render())
     );
     this.loadFolders();
     this.loadCollections();
@@ -52,6 +59,7 @@ export class Sidebar extends Component {
   render(): void {
     const folders = appState.get("folders");
     const selectedId = appState.get("selectedFolderId");
+    const expandedIds = new Set(appState.get("expandedFolderIds"));
 
     this.el.innerHTML = "";
 
@@ -88,7 +96,11 @@ export class Sidebar extends Component {
     const allCount = document.createElement("span");
     allCount.className = "folder-count";
     let totalCount = 0;
-    for (const c of this.folderCounts.values()) totalCount += c;
+    // Sum only root-level counts (recursive counts already include descendants)
+    const tree = buildFolderTree(folders);
+    for (const node of tree) {
+      totalCount += this.folderCounts.get(node.folder.id) ?? 0;
+    }
     allCount.textContent = String(totalCount);
     allLi.appendChild(allName);
     allLi.appendChild(allCount);
@@ -108,14 +120,38 @@ export class Sidebar extends Component {
       return;
     }
 
-    for (const folder of folders) {
+    // Build tree and flatten visible nodes
+    const visible = flattenVisibleTree(tree, expandedIds);
+
+    for (const entry of visible) {
+      const { folder, depth, hasChildren } = entry;
       const li = document.createElement("li");
       li.className = "folder-item";
       li.setAttribute("draggable", "true");
       li.dataset.folderId = String(folder.id);
+      li.dataset.depth = String(depth);
+      li.style.paddingLeft = `${depth * 16 + 8}px`;
       if (folder.id === selectedId) {
         li.classList.add("selected");
       }
+
+      // Expand/collapse toggle
+      const toggle = document.createElement("span");
+      toggle.className = "folder-toggle";
+      if (hasChildren) {
+        toggle.textContent = "\u25B6";
+        if (expandedIds.has(folder.id)) {
+          toggle.classList.add("expanded");
+        }
+        toggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.toggleExpand(folder.id);
+        });
+      } else {
+        toggle.classList.add("leaf");
+        toggle.textContent = "\u25B6";
+      }
+      li.appendChild(toggle);
 
       const nameSpan = document.createElement("span");
       nameSpan.className = "folder-name";
@@ -166,7 +202,14 @@ export class Sidebar extends Component {
         }
       });
 
-      // Drag-and-drop reorder
+      // Context menu
+      li.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showContextMenu(e.clientX, e.clientY, folder.id);
+      });
+
+      // Drag-and-drop: sibling reorder (drag between) or reparent (drag onto)
       li.addEventListener("dragstart", (e) => {
         this.dragSrcId = folder.id;
         li.classList.add("dragging");
@@ -175,36 +218,58 @@ export class Sidebar extends Component {
       li.addEventListener("dragend", () => {
         this.dragSrcId = null;
         li.classList.remove("dragging");
-        list.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+        list.querySelectorAll(".drag-over, .drop-into").forEach((el) => {
+          el.classList.remove("drag-over", "drop-into");
+        });
       });
       li.addEventListener("dragover", (e) => {
         e.preventDefault();
-        if (this.dragSrcId !== null && this.dragSrcId !== folder.id) {
+        if (this.dragSrcId === null || this.dragSrcId === folder.id) return;
+        // Determine drop position: top half = reorder, bottom half = reparent
+        const rect = li.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
           li.classList.add("drag-over");
+          li.classList.remove("drop-into");
+        } else {
+          li.classList.add("drop-into");
+          li.classList.remove("drag-over");
         }
       });
       li.addEventListener("dragleave", () => {
-        li.classList.remove("drag-over");
+        li.classList.remove("drag-over", "drop-into");
       });
       li.addEventListener("drop", (e) => {
         e.preventDefault();
-        li.classList.remove("drag-over");
-        if (this.dragSrcId !== null && this.dragSrcId !== folder.id) {
-          this.reorderFolder(this.dragSrcId, folder.id);
+        const wasDropInto = li.classList.contains("drop-into");
+        li.classList.remove("drag-over", "drop-into");
+        if (this.dragSrcId === null || this.dragSrcId === folder.id) return;
+
+        if (wasDropInto) {
+          // Reparent: make dragged folder a child of this folder
+          this.moveFolderTo(this.dragSrcId, folder.id);
+        } else {
+          // Sibling reorder — only if same parent
+          const srcFolder = folders.find((f) => f.id === this.dragSrcId);
+          if (srcFolder && srcFolder.parentId === folder.parentId) {
+            this.reorderFolder(this.dragSrcId, folder.id);
+          }
+          // Non-siblings in reorder zone: ignore (use drop-into or context menu to reparent)
         }
       });
 
-      // Keyboard reorder: Alt+Up/Down
+      // Keyboard reorder: Alt+Up/Down among siblings
       li.tabIndex = 0;
       li.addEventListener("keydown", (e) => {
         if (!e.altKey) return;
-        const idx = folders.findIndex((f) => f.id === folder.id);
+        const siblings = visible.filter((v) => v.folder.parentId === folder.parentId);
+        const idx = siblings.findIndex((s) => s.folder.id === folder.id);
         if (e.key === "ArrowUp" && idx > 0) {
           e.preventDefault();
-          this.reorderFolder(folder.id, folders[idx - 1].id);
-        } else if (e.key === "ArrowDown" && idx < folders.length - 1) {
+          this.reorderFolder(folder.id, siblings[idx - 1].folder.id);
+        } else if (e.key === "ArrowDown" && idx < siblings.length - 1) {
           e.preventDefault();
-          this.reorderFolder(folder.id, folders[idx + 1].id);
+          this.reorderFolder(folder.id, siblings[idx + 1].folder.id);
         }
       });
 
@@ -215,6 +280,92 @@ export class Sidebar extends Component {
 
     // Collections section
     this.renderCollections();
+  }
+
+  private toggleExpand(folderId: number): void {
+    const current = appState.get("expandedFolderIds");
+    const idx = current.indexOf(folderId);
+    if (idx >= 0) {
+      appState.set("expandedFolderIds", current.filter((id) => id !== folderId));
+    } else {
+      appState.set("expandedFolderIds", [...current, folderId]);
+    }
+  }
+
+  private showContextMenu(x: number, y: number, folderId: number): void {
+    this.closeContextMenu();
+
+    const menu = document.createElement("div");
+    menu.className = "folder-context-menu";
+    document.body.appendChild(menu);
+
+    // Build content first so we can measure dimensions
+    const moveItem = document.createElement("div");
+    moveItem.className = "folder-context-menu-item";
+    moveItem.textContent = "Verschieben nach\u2026";
+    moveItem.addEventListener("click", () => {
+      this.closeContextMenu();
+      FolderMoveDialog.open(folderId);
+    });
+    menu.appendChild(moveItem);
+
+    // Clamp to viewport bounds
+    const menuRect = menu.getBoundingClientRect();
+    const clampedX = Math.min(x, window.innerWidth - menuRect.width - 4);
+    const clampedY = Math.min(y, window.innerHeight - menuRect.height - 4);
+    menu.style.left = `${Math.max(0, clampedX)}px`;
+    menu.style.top = `${Math.max(0, clampedY)}px`;
+
+    this.contextMenu = menu;
+
+    // Close on click or Escape
+    this.contextMenuCloseHandler = (e: Event) => {
+      if (e.type === "keydown" && (e as KeyboardEvent).key !== "Escape") return;
+      this.closeContextMenu();
+    };
+    requestAnimationFrame(() => {
+      if (this.contextMenuCloseHandler) {
+        document.addEventListener("click", this.contextMenuCloseHandler);
+        document.addEventListener("keydown", this.contextMenuCloseHandler);
+      }
+    });
+  }
+
+  private closeContextMenu(): void {
+    if (this.contextMenuCloseHandler) {
+      document.removeEventListener("click", this.contextMenuCloseHandler);
+      document.removeEventListener("keydown", this.contextMenuCloseHandler);
+      this.contextMenuCloseHandler = null;
+    }
+    if (this.contextMenu) {
+      this.contextMenu.remove();
+      this.contextMenu = null;
+    }
+  }
+
+  private async moveFolderTo(srcId: number, targetParentId: number | null): Promise<void> {
+    if (this.reordering) return;
+    this.reordering = true;
+    try {
+      await FolderService.moveFolder(srcId, targetParentId);
+      const updated = await FolderService.getAll();
+      appState.set("folders", updated);
+      // Auto-expand the target parent so moved folder is visible
+      if (targetParentId !== null) {
+        const expanded = appState.get("expandedFolderIds");
+        if (!expanded.includes(targetParentId)) {
+          appState.set("expandedFolderIds", [...expanded, targetParentId]);
+        }
+      }
+    } catch (e) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? (e as { message: string }).message
+          : String(e);
+      ToastContainer.show("error", `Verschieben fehlgeschlagen: ${msg}`);
+    } finally {
+      this.reordering = false;
+    }
   }
 
   private async loadCollections(): Promise<void> {
@@ -320,21 +471,27 @@ export class Sidebar extends Component {
 
   private async reorderFolderInner(srcId: number, targetId: number): Promise<void> {
     const folders = appState.get("folders");
-    const srcIdx = folders.findIndex((f) => f.id === srcId);
-    const targetIdx = folders.findIndex((f) => f.id === targetId);
+    const src = folders.find((f) => f.id === srcId);
+    const target = folders.find((f) => f.id === targetId);
+    if (!src || !target) return;
+
+    // Only reorder among siblings (same parentId)
+    if (src.parentId !== target.parentId) return;
+
+    const siblings = folders.filter((f) => f.parentId === target.parentId);
+    const srcIdx = siblings.findIndex((f) => f.id === srcId);
+    const targetIdx = siblings.findIndex((f) => f.id === targetId);
     if (srcIdx === -1 || targetIdx === -1) return;
 
-    // Move src to target position
-    const reordered = [...folders];
+    // Reorder siblings
+    const reordered = [...siblings];
     const [moved] = reordered.splice(srcIdx, 1);
     reordered.splice(targetIdx, 0, moved);
 
-    // Assign sort_order with gaps of 10
     const orders: [number, number][] = reordered.map((f, i) => [f.id, (i + 1) * 10]);
 
     try {
       await FolderService.updateSortOrders(orders);
-      // Reload to get fresh order from backend
       const updated = await FolderService.getAll();
       appState.set("folders", updated);
     } catch (e) {
@@ -353,5 +510,10 @@ export class Sidebar extends Component {
 
   private createFolder(): void {
     FolderDialog.open();
+  }
+
+  destroy(): void {
+    this.closeContextMenu();
+    super.destroy();
   }
 }

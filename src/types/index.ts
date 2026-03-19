@@ -678,4 +678,5 @@ export interface State {
   theme: ThemeMode;
   toasts: Toast[];
   usbDevices: UsbDevice[];
+  expandedFolderIds: number[];
 }
