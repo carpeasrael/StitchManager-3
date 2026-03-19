@@ -1,9 +1,12 @@
+export type FolderType = 'embroidery' | 'sewing_pattern' | 'mixed';
+
 export interface Folder {
   id: number;
   name: string;
   path: string;
   parentId: number | null;
   sortOrder: number;
+  folderType: FolderType;
   createdAt: string;
   updatedAt: string;
 }

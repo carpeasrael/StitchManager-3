@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 24;
+const CURRENT_VERSION: i32 = 25;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -139,6 +139,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 24 {
         apply_v24(conn)?;
+    }
+
+    if current < 25 {
+        apply_v25(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1314,6 +1318,21 @@ fn apply_v24(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v25(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE folders ADD COLUMN folder_type TEXT NOT NULL DEFAULT 'mixed'
+            CHECK(folder_type IN ('embroidery', 'sewing_pattern', 'mixed'));
+
+        INSERT INTO schema_version (version, description)
+        VALUES (25, 'Add folder_type column to folders');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1398,7 +1417,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 24, "Schema version must be 24");
+        assert_eq!(version, 25, "Schema version must be 25");
     }
 
     #[test]
@@ -1427,16 +1446,16 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 24);
+        assert_eq!(version, 25);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 24",
+                "SELECT description FROM schema_version WHERE version = 25",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("sewing pattern"), "v24 description should mention sewing pattern");
+        assert!(desc.contains("folder_type"), "v25 description should mention folder_type");
     }
 
     #[test]

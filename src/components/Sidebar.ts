@@ -2,6 +2,7 @@ import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
+import { FolderDialog } from "./FolderDialog";
 import * as FolderService from "../services/FolderService";
 import * as ProjectService from "../services/ProjectService";
 import type { Collection } from "../types";
@@ -119,6 +120,21 @@ export class Sidebar extends Component {
       const nameSpan = document.createElement("span");
       nameSpan.className = "folder-name";
       nameSpan.textContent = folder.name;
+
+      // Folder type badge
+      if (folder.folderType) {
+        const badge = document.createElement("span");
+        badge.className = `folder-type-badge folder-type-${folder.folderType}`;
+        const typeLabels: Record<string, { short: string; full: string }> = {
+          embroidery: { short: "S", full: "Stickmuster" },
+          sewing_pattern: { short: "N", full: "Schnittmuster" },
+          mixed: { short: "G", full: "Gemischt" },
+        };
+        const info = typeLabels[folder.folderType] ?? { short: "?", full: folder.folderType };
+        badge.textContent = info.short;
+        badge.title = info.full;
+        nameSpan.appendChild(badge);
+      }
 
       const countSpan = document.createElement("span");
       countSpan.className = "folder-count";
@@ -335,20 +351,7 @@ export class Sidebar extends Component {
     EventBus.emit("toolbar:delete-folder");
   }
 
-  private async createFolder(): Promise<void> {
-    const name = prompt("Ordnername:");
-    if (!name || !name.trim()) return;
-
-    const path = prompt("Pfad zum Ordner:");
-    if (!path || !path.trim()) return;
-
-    try {
-      await FolderService.create(name.trim(), path.trim());
-      await this.loadFolders();
-    } catch (e) {
-      console.warn("Failed to create folder:", e);
-      const msg = e && typeof e === "object" && "message" in e ? (e as { message: string }).message : String(e);
-      ToastContainer.show("error", `Ordner konnte nicht erstellt werden: ${msg}`);
-    }
+  private createFolder(): void {
+    FolderDialog.open();
   }
 }

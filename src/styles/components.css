@@ -273,6 +273,58 @@
   padding: var(--spacing-4);
 }
 
+.dialog-folder {
+  width: 480px;
+  max-width: 90vw;
+}
+
+.dialog-folder-body {
+  padding: var(--spacing-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.folder-dialog-browse-row {
+  display: flex;
+  gap: var(--spacing-2);
+}
+
+.folder-dialog-browse-row .settings-input {
+  flex: 1;
+}
+
+.folder-type-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: var(--radius-pill);
+  margin-left: var(--spacing-1);
+  vertical-align: middle;
+}
+
+.folder-type-embroidery {
+  background: var(--color-accent-10);
+  color: var(--color-accent);
+}
+
+.folder-type-sewing_pattern {
+  background: #f0e6ff;
+  color: #7c3aed;
+}
+
+[data-theme="dunkel"] .folder-type-sewing_pattern {
+  background: #3b235c;
+  color: #c4b5fd;
+}
+
+.folder-type-mixed {
+  background: var(--color-bg);
+  color: var(--color-muted);
+}
+
 .dialog-edit-title {
   font-size: var(--font-size-body);
   font-weight: 600;

@@ -21,6 +21,7 @@ pub struct Folder {
     pub path: String,
     pub parent_id: Option<i64>,
     pub sort_order: i32,
+    pub folder_type: String,
     pub created_at: String,
     pub updated_at: String,
 }

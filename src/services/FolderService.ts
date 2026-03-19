@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Folder } from "../types/index";
+import type { Folder, FolderType } from "../types/index";
 
 export async function getAll(): Promise<Folder[]> {
   return invoke<Folder[]>("get_folders");
@@ -8,22 +8,26 @@ export async function getAll(): Promise<Folder[]> {
 export async function create(
   name: string,
   path: string,
-  parentId?: number | null
+  parentId?: number | null,
+  folderType?: FolderType
 ): Promise<Folder> {
   return invoke<Folder>("create_folder", {
     name,
     path,
     parentId: parentId ?? null,
+    folderType: folderType ?? null,
   });
 }
 
 export async function update(
   folderId: number,
-  name?: string
+  name?: string,
+  folderType?: FolderType
 ): Promise<Folder> {
   return invoke<Folder>("update_folder", {
     folderId,
     name: name ?? null,
+    folderType: folderType ?? null,
   });
 }
 

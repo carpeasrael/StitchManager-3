@@ -11,13 +11,16 @@ fn row_to_folder(row: &rusqlite::Row) -> rusqlite::Result<Folder> {
         path: row.get(2)?,
         parent_id: row.get(3)?,
         sort_order: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        folder_type: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
 const FOLDER_SELECT: &str =
-    "SELECT id, name, path, parent_id, sort_order, created_at, updated_at FROM folders";
+    "SELECT id, name, path, parent_id, sort_order, folder_type, created_at, updated_at FROM folders";
+
+const VALID_FOLDER_TYPES: &[&str] = &["embroidery", "sewing_pattern", "mixed"];
 
 #[tauri::command]
 pub fn get_folders(db: State<'_, DbState>) -> Result<Vec<Folder>, AppError> {
@@ -37,11 +40,19 @@ pub fn create_folder(
     name: String,
     path: String,
     parent_id: Option<i64>,
+    folder_type: Option<String>,
 ) -> Result<Folder, AppError> {
     if name.trim().is_empty() {
         return Err(AppError::Validation(
             "Ordnername darf nicht leer sein".into(),
         ));
+    }
+
+    let ft = folder_type.as_deref().unwrap_or("mixed");
+    if !VALID_FOLDER_TYPES.contains(&ft) {
+        return Err(AppError::Validation(format!(
+            "Ungueltiger Ordnertyp: {ft}"
+        )));
     }
 
     // Note: TOCTOU race possible (path could be removed after check). Acceptable for MVP;
@@ -64,8 +75,8 @@ pub fn create_folder(
         .unwrap_or(0);
 
     conn.execute(
-        "INSERT INTO folders (name, path, parent_id, sort_order) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![name.trim(), path, parent_id, max_order + 10],
+        "INSERT INTO folders (name, path, parent_id, sort_order, folder_type) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![name.trim(), path, parent_id, max_order + 10, ft],
     )?;
 
     let id = conn.last_insert_rowid();
@@ -83,14 +94,13 @@ pub fn update_folder(
     db: State<'_, DbState>,
     folder_id: i64,
     name: Option<String>,
+    folder_type: Option<String>,
 ) -> Result<Folder, AppError> {
-    if name.is_none() {
+    if name.is_none() && folder_type.is_none() {
         return Err(AppError::Validation(
             "Mindestens ein Feld muss aktualisiert werden".into(),
         ));
     }
-
-    let conn = lock_db(&db)?;
 
     if let Some(ref new_name) = name {
         if new_name.trim().is_empty() {
@@ -98,11 +108,34 @@ pub fn update_folder(
                 "Ordnername darf nicht leer sein".into(),
             ));
         }
-        conn.execute(
+    }
+
+    if let Some(ref ft) = folder_type {
+        if !VALID_FOLDER_TYPES.contains(&ft.as_str()) {
+            return Err(AppError::Validation(format!(
+                "Ungueltiger Ordnertyp: {ft}"
+            )));
+        }
+    }
+
+    let conn = lock_db(&db)?;
+    let tx = conn.unchecked_transaction()?;
+
+    if let Some(ref new_name) = name {
+        tx.execute(
             "UPDATE folders SET name = ?1, updated_at = datetime('now') WHERE id = ?2",
             rusqlite::params![new_name.trim(), folder_id],
         )?;
     }
+
+    if let Some(ref ft) = folder_type {
+        tx.execute(
+            "UPDATE folders SET folder_type = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![ft, folder_id],
+        )?;
+    }
+
+    tx.commit()?;
 
     let folder = conn
         .query_row(
@@ -263,6 +296,14 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Test");
 
+        // Default folder_type should be 'mixed'
+        let folder_type: String = conn
+            .query_row("SELECT folder_type FROM folders WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(folder_type, "mixed");
+
         // Update
         conn.execute(
             "UPDATE folders SET name = 'Updated', updated_at = datetime('now') WHERE id = ?1",
@@ -301,6 +342,73 @@ mod tests {
             )
             .unwrap();
         assert!(!exists);
+    }
+
+    #[test]
+    fn test_folder_type_default() {
+        let conn = init_database_in_memory().unwrap();
+
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('NoType', '/tmp/notype')",
+            [],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+
+        let folder_type: String = conn
+            .query_row("SELECT folder_type FROM folders WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(folder_type, "mixed");
+    }
+
+    #[test]
+    fn test_folder_type_create_and_update() {
+        let conn = init_database_in_memory().unwrap();
+
+        // Create with explicit type
+        conn.execute(
+            "INSERT INTO folders (name, path, folder_type) VALUES ('Emb', '/tmp/emb', 'embroidery')",
+            [],
+        )
+        .unwrap();
+        let id = conn.last_insert_rowid();
+
+        let ft: String = conn
+            .query_row("SELECT folder_type FROM folders WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(ft, "embroidery");
+
+        // Update folder_type
+        conn.execute(
+            "UPDATE folders SET folder_type = 'sewing_pattern', updated_at = datetime('now') WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+
+        let ft: String = conn
+            .query_row("SELECT folder_type FROM folders WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(ft, "sewing_pattern");
+
+        // Update back to mixed
+        conn.execute(
+            "UPDATE folders SET folder_type = 'mixed', updated_at = datetime('now') WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+
+        let ft: String = conn
+            .query_row("SELECT folder_type FROM folders WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(ft, "mixed");
     }
 
     #[test]
