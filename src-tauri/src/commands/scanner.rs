@@ -1,5 +1,5 @@
 use std::time::Instant;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
 
@@ -222,7 +222,19 @@ pub fn import_files(
     thumb_state: State<'_, ThumbnailState>,
     file_paths: Vec<String>,
     folder_id: i64,
+    bulk_metadata: Option<BulkMetadata>,
 ) -> Result<Vec<EmbroideryFile>, AppError> {
+    // Validate bulk metadata early (before any I/O or DB work)
+    if let Some(ref meta) = bulk_metadata {
+        if let Some(rating) = meta.rating {
+            if !(1..=5).contains(&rating) {
+                return Err(AppError::Validation(format!(
+                    "Bewertung muss zwischen 1 und 5 liegen, war: {rating}"
+                )));
+            }
+        }
+    }
+
     // Collect filesystem metadata and parse files before acquiring the DB lock
     // to avoid holding the mutex during potentially slow I/O.
     let file_info: Vec<PreParsedFile> = file_paths
@@ -244,7 +256,7 @@ pub fn import_files(
         )));
     }
 
-    let mut imported_ids: Vec<(i64, String, String)> = Vec::new(); // (id, filepath, ext)
+    let mut imported_ids: Vec<(i64, String, String, String)> = Vec::new(); // (id, filepath, ext, file_type)
     let mut imported = Vec::new();
 
     // Transaction for DB inserts only — no file I/O inside
@@ -272,7 +284,7 @@ pub fn import_files(
                     }
 
                     if let Some(ext) = &info.ext {
-                        imported_ids.push((id, info.filepath.clone(), ext.clone()));
+                        imported_ids.push((id, info.filepath.clone(), ext.clone(), file_type.to_string()));
                     }
                 }
                 Ok(_) => {
@@ -280,6 +292,76 @@ pub fn import_files(
                 }
                 Err(e) => {
                     log::warn!("Failed to import {}: {e}", info.filepath);
+                }
+            }
+        }
+
+        // Apply bulk metadata to newly imported files
+        if let Some(ref meta) = bulk_metadata {
+            for (id, filepath, _, file_type) in &imported_ids {
+                if let Some(ref theme) = meta.theme {
+                    if let Err(e) = tx.execute(
+                        "UPDATE embroidery_files SET theme = ?1 WHERE id = ?2",
+                        rusqlite::params![theme, id],
+                    ) {
+                        log::warn!("Failed to set theme for {filepath}: {e}");
+                    }
+                }
+                if let Some(rating) = meta.rating {
+                    if let Err(e) = tx.execute(
+                        "UPDATE embroidery_files SET rating = ?1 WHERE id = ?2",
+                        rusqlite::params![rating, id],
+                    ) {
+                        log::warn!("Failed to set rating for {filepath}: {e}");
+                    }
+                }
+                // Apply author and skill_level only to sewing_pattern files
+                if file_type == "sewing_pattern" {
+                    if let Some(ref author) = meta.author {
+                        if let Err(e) = tx.execute(
+                            "UPDATE embroidery_files SET author = ?1 WHERE id = ?2",
+                            rusqlite::params![author, id],
+                        ) {
+                            log::warn!("Failed to set author for {filepath}: {e}");
+                        }
+                    }
+                    if let Some(ref skill) = meta.skill_level {
+                        if let Err(e) = tx.execute(
+                            "UPDATE embroidery_files SET skill_level = ?1 WHERE id = ?2",
+                            rusqlite::params![skill, id],
+                        ) {
+                            log::warn!("Failed to set skill_level for {filepath}: {e}");
+                        }
+                    }
+                }
+            }
+            // Create and link tags
+            if let Some(ref tags) = meta.tags {
+                for tag_name in tags {
+                    let trimmed = tag_name.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if let Err(e) = tx.execute(
+                        "INSERT OR IGNORE INTO tags (name) VALUES (?1)",
+                        [trimmed],
+                    ) {
+                        log::warn!("Failed to create tag '{trimmed}': {e}");
+                    }
+                    if let Ok(tid) = tx.query_row(
+                        "SELECT id FROM tags WHERE name = ?1",
+                        [trimmed],
+                        |row| row.get::<_, i64>(0),
+                    ) {
+                        for (id, filepath, _, _) in &imported_ids {
+                            if let Err(e) = tx.execute(
+                                "INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
+                                rusqlite::params![id, tid],
+                            ) {
+                                log::warn!("Failed to link tag '{trimmed}' to {filepath}: {e}");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -292,7 +374,7 @@ pub fn import_files(
 
     // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
     let mut thumb_failures: u32 = 0;
-    for (id, filepath, ext) in &imported_ids {
+    for (id, filepath, ext, _) in &imported_ids {
         match std::fs::read(std::path::Path::new(filepath)) {
             Ok(data) => {
                 match thumb_state.0.generate(*id, &data, ext) {
@@ -333,7 +415,7 @@ pub fn import_files(
     // Fetch final state of imported files (with thumbnail_path set)
     {
         let conn = lock_db(&db)?;
-        for (id, _, _) in &imported_ids {
+        for (id, _, _, _) in &imported_ids {
             match conn.query_row(
                 &format!("{FILE_SELECT_LIVE_BY_ID}"),
                 [id],
@@ -346,6 +428,146 @@ pub fn import_files(
     }
 
     Ok(imported)
+}
+
+// --- Scan-only (preview before import) ---
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScannedFileInfo {
+    pub filepath: String,
+    pub filename: String,
+    pub file_size: Option<i64>,
+    pub extension: Option<String>,
+    pub file_type: String,
+    pub already_imported: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanOnlyResult {
+    pub files: Vec<ScannedFileInfo>,
+    pub total_scanned: u32,
+    pub errors: Vec<String>,
+}
+
+#[tauri::command]
+pub fn scan_only(
+    db: State<'_, DbState>,
+    path: String,
+    app_handle: AppHandle,
+) -> Result<ScanOnlyResult, AppError> {
+    let dir = std::path::Path::new(&path);
+    if !dir.is_dir() {
+        return Err(AppError::Validation(format!(
+            "Pfad ist kein Verzeichnis: {path}"
+        )));
+    }
+
+    let mut files = Vec::new();
+    let mut total_scanned: u32 = 0;
+    let mut errors = Vec::new();
+
+    for entry in WalkDir::new(dir).follow_links(false) {
+        match entry {
+            Ok(e) => {
+                if !e.file_type().is_file() {
+                    continue;
+                }
+                total_scanned += 1;
+                let file_path = e.path();
+                if total_scanned % 50 == 0 {
+                    let _ = app_handle.emit(
+                        "scan:progress",
+                        ScanProgress {
+                            current: total_scanned,
+                            file: file_path.to_string_lossy().to_string(),
+                        },
+                    );
+                }
+                if !is_supported_file(file_path) {
+                    continue;
+                }
+
+                let filepath_str = file_path.to_string_lossy().to_string();
+                let filename = file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let meta = std::fs::metadata(file_path).ok();
+                let file_size = meta.as_ref().and_then(|m| i64::try_from(m.len()).ok());
+                let extension = file_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_lowercase());
+                let file_type = if extension.as_deref().map(is_document_extension).unwrap_or(false) {
+                    "sewing_pattern"
+                } else {
+                    "embroidery"
+                };
+
+                files.push(ScannedFileInfo {
+                    filepath: filepath_str,
+                    filename,
+                    file_size,
+                    extension,
+                    file_type: file_type.to_string(),
+                    already_imported: false, // set below in batch
+                });
+            }
+            Err(e) => {
+                errors.push(e.to_string());
+            }
+        }
+    }
+
+    // Batch check for already-imported files
+    if !files.is_empty() {
+        let conn = lock_db(&db)?;
+        // Collect all filepaths and check in batches
+        let all_paths: Vec<&str> = files.iter().map(|f| f.filepath.as_str()).collect();
+        let mut imported_set = std::collections::HashSet::new();
+        for chunk in all_paths.chunks(500) {
+            let placeholders: Vec<String> = (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+            let sql = format!(
+                "SELECT filepath FROM embroidery_files WHERE filepath IN ({}) AND deleted_at IS NULL",
+                placeholders.join(", ")
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk
+                .iter()
+                .map(|p| p as &dyn rusqlite::types::ToSql)
+                .collect();
+            let rows = stmt
+                .query_map(params.as_slice(), |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok());
+            for path in rows {
+                imported_set.insert(path);
+            }
+        }
+        for file in &mut files {
+            file.already_imported = imported_set.contains(&file.filepath);
+        }
+    }
+
+    Ok(ScanOnlyResult {
+        files,
+        total_scanned,
+        errors,
+    })
+}
+
+// --- Bulk metadata for import ---
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkMetadata {
+    pub tags: Option<Vec<String>>,
+    pub rating: Option<i32>,
+    pub theme: Option<String>,
+    pub author: Option<String>,
+    pub skill_level: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1025,5 +1247,170 @@ mod tests {
         }
 
         assert!(!thumb.exists(), "Thumbnail should be deleted from disk after watcher remove");
+    }
+
+    #[test]
+    fn test_scan_only_mixed_types_and_already_imported() {
+        let conn = init_database_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        // Create test files
+        fs::write(base.join("a.pes"), b"fake pes").unwrap();
+        fs::write(base.join("b.pdf"), b"fake pdf").unwrap();
+        fs::write(base.join("c.txt"), b"text file").unwrap();
+        fs::write(base.join("d.dst"), b"fake dst").unwrap();
+
+        // Pre-import a.pes to test already_imported detection
+        conn.execute("INSERT INTO folders (name, path) VALUES ('F', '/f')", []).unwrap();
+        let folder_id = conn.last_insert_rowid();
+        let a_path = base.join("a.pes").to_string_lossy().to_string();
+        conn.execute(
+            "INSERT INTO embroidery_files (folder_id, filename, filepath) VALUES (?1, 'a.pes', ?2)",
+            rusqlite::params![folder_id, &a_path],
+        ).unwrap();
+
+        // Scan the directory
+        let mut files = Vec::new();
+        let mut total_scanned: u32 = 0;
+        for entry in WalkDir::new(base).follow_links(false) {
+            if let Ok(e) = entry {
+                if !e.file_type().is_file() { continue; }
+                total_scanned += 1;
+                let fp = e.path();
+                if !is_supported_file(fp) { continue; }
+
+                let filepath_str = fp.to_string_lossy().to_string();
+                let filename = fp.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                let extension = fp.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase());
+                let file_type = if extension.as_deref().map(is_document_extension).unwrap_or(false) {
+                    "sewing_pattern"
+                } else {
+                    "embroidery"
+                };
+                files.push(ScannedFileInfo {
+                    filepath: filepath_str, filename,
+                    file_size: None, extension,
+                    file_type: file_type.to_string(),
+                    already_imported: false,
+                });
+            }
+        }
+
+        // Check already-imported
+        let all_paths: Vec<&str> = files.iter().map(|f| f.filepath.as_str()).collect();
+        let mut imported_set = std::collections::HashSet::new();
+        for chunk in all_paths.chunks(500) {
+            let placeholders: Vec<String> = (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+            let sql = format!(
+                "SELECT filepath FROM embroidery_files WHERE filepath IN ({}) AND deleted_at IS NULL",
+                placeholders.join(", ")
+            );
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let params: Vec<&dyn rusqlite::types::ToSql> = chunk.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
+            let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0)).unwrap().filter_map(|r| r.ok());
+            for path in rows { imported_set.insert(path); }
+        }
+        for file in &mut files { file.already_imported = imported_set.contains(&file.filepath); }
+
+        // Verify results
+        assert_eq!(files.len(), 3, "Should find 3 supported files (a.pes, b.pdf, d.dst), not c.txt");
+        assert_eq!(total_scanned, 4, "Should have scanned all 4 files");
+
+        let pes = files.iter().find(|f| f.filename == "a.pes").unwrap();
+        assert_eq!(pes.file_type, "embroidery");
+        assert!(pes.already_imported, "a.pes should be already imported");
+
+        let pdf = files.iter().find(|f| f.filename == "b.pdf").unwrap();
+        assert_eq!(pdf.file_type, "sewing_pattern");
+        assert!(!pdf.already_imported);
+
+        let dst = files.iter().find(|f| f.filename == "d.dst").unwrap();
+        assert_eq!(dst.file_type, "embroidery");
+        assert!(!dst.already_imported);
+    }
+
+    #[test]
+    fn test_import_files_with_bulk_metadata() {
+        let conn = init_database_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        conn.execute("INSERT INTO folders (name, path) VALUES ('M', '/m')", []).unwrap();
+        let folder_id = conn.last_insert_rowid();
+
+        // Create test files on disk
+        let emb_path = tmp.path().join("test.pes");
+        let sew_path = tmp.path().join("test.pdf");
+        fs::write(&emb_path, b"fake pes").unwrap();
+        fs::write(&sew_path, b"fake pdf").unwrap();
+
+        let emb_str = emb_path.to_string_lossy().to_string();
+        let sew_str = sew_path.to_string_lossy().to_string();
+
+        // Import with bulk metadata (simulate what import_files does)
+        let uid1 = crate::db::migrations::generate_unique_id();
+        let uid2 = crate::db::migrations::generate_unique_id();
+        let tx = conn.unchecked_transaction().unwrap();
+        tx.execute(
+            "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, unique_id, file_type) \
+             VALUES (?1, 'test.pes', ?2, ?3, 'embroidery')",
+            rusqlite::params![folder_id, &emb_str, uid1],
+        ).unwrap();
+        let emb_id = tx.last_insert_rowid();
+        tx.execute(
+            "INSERT OR IGNORE INTO embroidery_files (folder_id, filename, filepath, unique_id, file_type) \
+             VALUES (?1, 'test.pdf', ?2, ?3, 'sewing_pattern')",
+            rusqlite::params![folder_id, &sew_str, uid2],
+        ).unwrap();
+        let sew_id = tx.last_insert_rowid();
+
+        // Apply bulk metadata (mirrors import_files logic)
+        let meta = BulkMetadata {
+            tags: Some(vec!["Weihnachten".to_string(), "Blumen".to_string()]),
+            rating: Some(4),
+            theme: Some("Winter".to_string()),
+            author: Some("Designer X".to_string()),
+            skill_level: Some("intermediate".to_string()),
+        };
+
+        // Theme and rating applied to all
+        tx.execute("UPDATE embroidery_files SET theme = ?1 WHERE id = ?2", rusqlite::params![&meta.theme, emb_id]).unwrap();
+        tx.execute("UPDATE embroidery_files SET theme = ?1 WHERE id = ?2", rusqlite::params![&meta.theme, sew_id]).unwrap();
+        tx.execute("UPDATE embroidery_files SET rating = ?1 WHERE id = ?2", rusqlite::params![meta.rating, emb_id]).unwrap();
+        tx.execute("UPDATE embroidery_files SET rating = ?1 WHERE id = ?2", rusqlite::params![meta.rating, sew_id]).unwrap();
+        // Author/skill_level only for sewing_pattern
+        tx.execute("UPDATE embroidery_files SET author = ?1 WHERE id = ?2", rusqlite::params![&meta.author, sew_id]).unwrap();
+        tx.execute("UPDATE embroidery_files SET skill_level = ?1 WHERE id = ?2", rusqlite::params![&meta.skill_level, sew_id]).unwrap();
+
+        // Tags
+        for tag in meta.tags.as_ref().unwrap() {
+            tx.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [tag.as_str()]).unwrap();
+            let tid: i64 = tx.query_row("SELECT id FROM tags WHERE name = ?1", [tag.as_str()], |r| r.get(0)).unwrap();
+            tx.execute("INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?1, ?2)", rusqlite::params![emb_id, tid]).unwrap();
+            tx.execute("INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?1, ?2)", rusqlite::params![sew_id, tid]).unwrap();
+        }
+        tx.commit().unwrap();
+
+        // Verify theme/rating applied to both
+        let emb_theme: Option<String> = conn.query_row("SELECT theme FROM embroidery_files WHERE id = ?1", [emb_id], |r| r.get(0)).unwrap();
+        assert_eq!(emb_theme.as_deref(), Some("Winter"));
+        let emb_rating: Option<i32> = conn.query_row("SELECT rating FROM embroidery_files WHERE id = ?1", [emb_id], |r| r.get(0)).unwrap();
+        assert_eq!(emb_rating, Some(4));
+
+        // Verify author only on sewing_pattern
+        let emb_author: Option<String> = conn.query_row("SELECT author FROM embroidery_files WHERE id = ?1", [emb_id], |r| r.get(0)).unwrap();
+        assert_eq!(emb_author, None, "Embroidery file should NOT have author from bulk metadata");
+        let sew_author: Option<String> = conn.query_row("SELECT author FROM embroidery_files WHERE id = ?1", [sew_id], |r| r.get(0)).unwrap();
+        assert_eq!(sew_author.as_deref(), Some("Designer X"));
+
+        // Verify tags
+        let tag_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM file_tags WHERE file_id = ?1", [emb_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(tag_count, 2, "Embroidery file should have 2 tags");
+        let sew_tag_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM file_tags WHERE file_id = ?1", [sew_id], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(sew_tag_count, 2, "Sewing pattern should have 2 tags");
     }
 }

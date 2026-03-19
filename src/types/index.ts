@@ -198,6 +198,29 @@ export interface MassImportResult {
   elapsedMs: number;
 }
 
+export interface ScannedFileInfo {
+  filepath: string;
+  filename: string;
+  fileSize: number | null;
+  extension: string | null;
+  fileType: string;
+  alreadyImported: boolean;
+}
+
+export interface ScanOnlyResult {
+  files: ScannedFileInfo[];
+  totalScanned: number;
+  errors: string[];
+}
+
+export interface BulkImportMetadata {
+  tags?: string[];
+  rating?: number;
+  theme?: string;
+  author?: string;
+  skillLevel?: string;
+}
+
 export interface MigrationResult {
   foldersCreated: number;
   filesImported: number;

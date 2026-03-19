@@ -3,9 +3,8 @@ import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import { FolderDialog } from "./FolderDialog";
-import * as FolderService from "../services/FolderService";
+import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import * as ScannerService from "../services/ScannerService";
-import * as FileService from "../services/FileService";
 
 interface MenuItem {
   className: string;
@@ -380,23 +379,12 @@ export class Toolbar extends Component {
     if (!folder) return;
 
     try {
-      const result = await ScannerService.scanDirectory(folder.path);
-
-      if (result.foundFiles.length > 0) {
-        await ScannerService.importFiles(result.foundFiles, folderId);
+      const result = await ScannerService.scanOnly(folder.path);
+      if (result.files.length === 0) {
+        ToastContainer.show("info", "Keine unterstuetzten Dateien gefunden");
+        return;
       }
-
-      EventBus.emit("scan:complete", {
-        folderId,
-        foundFiles: result.foundFiles.length,
-      });
-
-      const files = await FileService.getFiles(folderId);
-      appState.set("files", files);
-
-      // Refresh folder counts after scan/import
-      const updatedFolders = await FolderService.getAll();
-      appState.set("folders", updatedFolders);
+      ImportPreviewDialog.open(result.files, folderId);
     } catch (e) {
       console.warn("Failed to scan folder:", e);
       ToastContainer.show("error", "Ordner konnte nicht gescannt werden");

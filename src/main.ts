@@ -24,6 +24,7 @@ import { PrintPreviewDialog } from "./components/PrintPreviewDialog";
 import * as ProjectService from "./services/ProjectService";
 import { ProjectListDialog } from "./components/ProjectListDialog";
 import { ManufacturingDialog } from "./components/ManufacturingDialog";
+import { ImportPreviewDialog } from "./components/ImportPreviewDialog";
 import * as BackupService from "./services/BackupService";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
@@ -627,36 +628,23 @@ function initEventHandlers(): () => void {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: "Ordner f\u00FCr Massenimport w\u00E4hlen",
+        title: "Ordner fuer Import waehlen",
       });
       if (!selected) return;
 
       const path = typeof selected === "string" ? selected : String(selected);
       if (!path) return;
 
-      BatchDialog.open("Massenimport", 0, "import");
-
       try {
-        const result = await ScannerService.massImport(path);
-
-        // Reload folders (new folder may have been created)
-        const folders = await FolderService.getAll();
-        appState.set("folders", folders);
-
-        // Select the imported folder and reload files
-        appState.set("selectedFileIds", []);
-        appState.set("selectedFileId", null);
-        appState.set("selectedFolderId", result.folderId);
-        await reloadFiles();
-
-        const elapsed = (result.elapsedMs / 1000).toFixed(1);
-        ToastContainer.show(
-          "success",
-          `${result.importedCount} Dateien importiert, ${result.skippedCount} übersprungen (${elapsed}s)`
-        );
+        const result = await ScannerService.scanOnly(path);
+        if (result.files.length === 0) {
+          ToastContainer.show("info", "Keine unterstuetzten Dateien gefunden");
+          return;
+        }
+        ImportPreviewDialog.open(result.files, null, path);
       } catch (e) {
-        console.warn("Mass import failed:", e);
-        ToastContainer.show("error", "Massenimport fehlgeschlagen");
+        console.warn("Scan failed:", e);
+        ToastContainer.show("error", "Scan fehlgeschlagen");
       }
     }),
 
@@ -911,7 +899,7 @@ function initEventHandlers(): () => void {
       try {
         const imported = await invoke<number>("watcher_auto_import", { filePaths: data.paths });
         if (imported > 0) {
-          ToastContainer.show("info", `${imported} neue Datei(en) importiert`);
+          ToastContainer.show("info", `${imported} neue Datei(en) importiert — Metadaten im Panel bearbeiten`);
           await reloadFilesAndCounts();
         }
       } catch (e) {
@@ -1138,17 +1126,39 @@ function setupDragDrop(): () => void {
 
     const folderId = appState.get("selectedFolderId");
     if (!folderId) {
-      ToastContainer.show("error", "Bitte zuerst einen Ordner auswählen");
+      ToastContainer.show("error", "Bitte zuerst einen Ordner auswaehlen");
       return;
     }
 
-    try {
-      const result = await ScannerService.importFiles(paths, folderId);
-      ToastContainer.show("success", `${result.length} Datei(en) importiert`);
-      await reloadFilesAndCounts();
-    } catch (e) {
-      console.warn("Drop import failed:", e);
-      ToastContainer.show("error", "Import fehlgeschlagen");
+    if (paths.length <= 3) {
+      // Quick import for small drops
+      try {
+        const result = await ScannerService.importFiles(paths, folderId);
+        ToastContainer.show("success", `${result.length} Datei(en) importiert`);
+        await reloadFilesAndCounts();
+      } catch (e) {
+        console.warn("Drop import failed:", e);
+        ToastContainer.show("error", "Import fehlgeschlagen");
+      }
+    } else {
+      // Preview for larger drops — build ScannedFileInfo from paths with proper extension filtering
+      const supportedExts = ["pes", "dst", "jef", "vp3", "pdf", "png", "jpg", "jpeg", "bmp"];
+      const docExts = ["pdf", "png", "jpg", "jpeg", "bmp"];
+      const files = paths
+        .map((p) => {
+          const parts = p.replace(/\\/g, "/").split("/");
+          const filename = parts[parts.length - 1] || p;
+          const ext = filename.includes(".") ? filename.split(".").pop()?.toLowerCase() ?? null : null;
+          if (!ext || !supportedExts.includes(ext)) return null;
+          const fileType = docExts.includes(ext) ? "sewing_pattern" : "embroidery";
+          return { filepath: p, filename, fileSize: null as number | null, extension: ext, fileType, alreadyImported: false };
+        })
+        .filter((f): f is NonNullable<typeof f> => f !== null);
+      if (files.length === 0) {
+        ToastContainer.show("info", "Keine unterstuetzten Dateien gefunden");
+        return;
+      }
+      ImportPreviewDialog.open(files, folderId);
     }
   }
 

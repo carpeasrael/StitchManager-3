@@ -125,6 +125,7 @@ pub fn run() {
             commands::folders::get_all_folder_file_counts,
             commands::folders::move_folder,
             commands::scanner::scan_directory,
+            commands::scanner::scan_only,
             commands::scanner::import_files,
             commands::files::get_files,
             commands::files::get_files_by_ids,
