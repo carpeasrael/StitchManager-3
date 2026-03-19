@@ -448,6 +448,18 @@
   color: var(--color-error);
 }
 
+.folder-item[draggable="true"] {
+  cursor: grab;
+}
+
+.folder-item.dragging {
+  opacity: 0.4;
+}
+
+.folder-item.drag-over {
+  border-top: 2px solid var(--color-accent);
+}
+
 /* Toolbar sections */
 .toolbar-search {
   flex: 1;
@@ -457,6 +469,62 @@
 
 .toolbar-filters {
   flex-shrink: 0;
+}
+
+/* SortControl */
+.toolbar-sort {
+  flex-shrink: 0;
+}
+
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.sort-select {
+  height: 28px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.sort-select:hover {
+  border-color: var(--color-accent);
+}
+
+.sort-select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.sort-dir-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sort-dir-btn:hover {
+  background: var(--color-accent-10);
+  color: var(--color-accent);
+}
+
+.sort-dir-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 /* SearchBar */

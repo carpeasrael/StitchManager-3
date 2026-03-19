@@ -159,6 +159,30 @@ pub fn delete_folder(db: State<'_, DbState>, folder_id: i64) -> Result<(), AppEr
 }
 
 #[tauri::command]
+pub fn update_folder_sort_orders(
+    db: State<'_, DbState>,
+    folder_orders: Vec<(i64, i32)>,
+) -> Result<(), AppError> {
+    let conn = lock_db(&db)?;
+
+    let tx = conn.unchecked_transaction()?;
+    for (folder_id, order) in &folder_orders {
+        let changes = tx.execute(
+            "UPDATE folders SET sort_order = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![order, folder_id],
+        )?;
+        if changes == 0 {
+            return Err(AppError::NotFound(format!(
+                "Ordner {folder_id} nicht gefunden"
+            )));
+        }
+    }
+    tx.commit()?;
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_folder_file_count(
     db: State<'_, DbState>,
     folder_id: i64,
@@ -300,6 +324,64 @@ mod tests {
             .collect();
 
         assert_eq!(names, vec!["Alpha", "Beta", "Zebra"]);
+    }
+
+    #[test]
+    fn test_update_folder_sort_orders() {
+        let conn = init_database_in_memory().unwrap();
+
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('Charlie', '/c')",
+            [],
+        )
+        .unwrap();
+        let id_c = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('Alpha', '/a')",
+            [],
+        )
+        .unwrap();
+        let id_a = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO folders (name, path) VALUES ('Beta', '/b')",
+            [],
+        )
+        .unwrap();
+        let id_b = conn.last_insert_rowid();
+
+        // Reorder: Beta first, then Charlie, then Alpha
+        // Mirrors update_folder_sort_orders logic including row-count validation
+        let orders: Vec<(i64, i32)> = vec![(id_b, 10), (id_c, 20), (id_a, 30)];
+        let tx = conn.unchecked_transaction().unwrap();
+        for (folder_id, order) in &orders {
+            let changes = tx.execute(
+                "UPDATE folders SET sort_order = ?1, updated_at = datetime('now') WHERE id = ?2",
+                rusqlite::params![order, folder_id],
+            )
+            .unwrap();
+            assert_eq!(changes, 1, "Each folder update should affect exactly 1 row");
+        }
+        tx.commit().unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT name FROM folders ORDER BY sort_order, name")
+            .unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert_eq!(names, vec!["Beta", "Charlie", "Alpha"]);
+
+        // Verify non-existent folder ID returns 0 changes (command would error)
+        let changes = conn.execute(
+            "UPDATE folders SET sort_order = 99, updated_at = datetime('now') WHERE id = 99999",
+            [],
+        ).unwrap();
+        assert_eq!(changes, 0, "Non-existent folder should affect 0 rows");
     }
 
     #[test]

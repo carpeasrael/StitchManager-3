@@ -120,6 +120,7 @@ pub fn run() {
             commands::folders::create_folder,
             commands::folders::update_folder,
             commands::folders::delete_folder,
+            commands::folders::update_folder_sort_orders,
             commands::folders::get_folder_file_count,
             commands::folders::get_all_folder_file_counts,
             commands::scanner::scan_directory,

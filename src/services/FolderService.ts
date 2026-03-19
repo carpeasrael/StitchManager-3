@@ -31,6 +31,12 @@ export async function remove(folderId: number): Promise<void> {
   return invoke<void>("delete_folder", { folderId });
 }
 
+export async function updateSortOrders(
+  folderOrders: [number, number][]
+): Promise<void> {
+  return invoke<void>("update_folder_sort_orders", { folderOrders });
+}
+
 export async function getFileCount(folderId: number): Promise<number> {
   return invoke<number>("get_folder_file_count", { folderId });
 }

@@ -26,7 +26,6 @@ function activeFilterCount(sp: SearchParams): number {
   if (sp.category) count++;
   if (sp.author) count++;
   if (sp.sizeRange) count++;
-  if (sp.sortField) count++;
   return count;
 }
 
@@ -211,7 +210,12 @@ export class SearchBar extends Component {
     resetBtn.className = "search-advanced-reset";
     resetBtn.textContent = "Alle zur\u00FCcksetzen";
     resetBtn.addEventListener("click", () => {
-      appState.set("searchParams", {});
+      const current = appState.get("searchParams");
+      // Preserve sort settings when resetting filters
+      const preserved: Record<string, unknown> = {};
+      if (current.sortField) preserved.sortField = current.sortField;
+      if (current.sortDirection) preserved.sortDirection = current.sortDirection;
+      appState.set("searchParams", preserved);
       this.renderPanel();
     });
     header.appendChild(resetBtn);
@@ -271,58 +275,6 @@ export class SearchBar extends Component {
     grid.appendChild(this.buildTextFilter("Kategorie", "category", "z.B. Kleid, Rock\u2026", sp));
     grid.appendChild(this.buildTextFilter("Designer", "author", "z.B. Burda\u2026", sp));
     grid.appendChild(this.buildTextFilter("Groesse", "sizeRange", "z.B. 36-42, M\u2026", sp));
-
-    // Sort controls
-    const sortGroup = document.createElement("div");
-    sortGroup.className = "search-advanced-group";
-    const sortLabel = document.createElement("label");
-    sortLabel.className = "search-advanced-label";
-    sortLabel.textContent = "Sortierung";
-    sortGroup.appendChild(sortLabel);
-
-    const sortRow = document.createElement("div");
-    sortRow.style.display = "flex";
-    sortRow.style.gap = "var(--spacing-1)";
-
-    const sortSelect = document.createElement("select");
-    sortSelect.className = "search-filter-select";
-    const sortOptions = [
-      { value: "", label: "Standard (Dateiname)" },
-      { value: "name", label: "Name" },
-      { value: "created_at", label: "Hinzugefuegt" },
-      { value: "updated_at", label: "Geaendert" },
-      { value: "author", label: "Designer" },
-      { value: "category", label: "Kategorie" },
-      { value: "stitch_count", label: "Stichanzahl" },
-    ];
-    for (const opt of sortOptions) {
-      const o = document.createElement("option");
-      o.value = opt.value;
-      o.textContent = opt.label;
-      if (opt.value === (sp.sortField || "")) o.selected = true;
-      sortSelect.appendChild(o);
-    }
-    sortSelect.addEventListener("change", () => {
-      const updated = { ...appState.get("searchParams") };
-      updated.sortField = sortSelect.value || undefined;
-      appState.set("searchParams", updated);
-    });
-    sortRow.appendChild(sortSelect);
-
-    const dirBtn = document.createElement("button");
-    dirBtn.className = "search-sort-dir-btn";
-    dirBtn.textContent = sp.sortDirection === "desc" ? "\u2193" : "\u2191";
-    dirBtn.title = sp.sortDirection === "desc" ? "Absteigend" : "Aufsteigend";
-    dirBtn.addEventListener("click", () => {
-      const updated = { ...appState.get("searchParams") };
-      updated.sortDirection = updated.sortDirection === "desc" ? "asc" : "desc";
-      dirBtn.textContent = updated.sortDirection === "desc" ? "\u2193" : "\u2191";
-      appState.set("searchParams", updated);
-    });
-    sortRow.appendChild(dirBtn);
-
-    sortGroup.appendChild(sortRow);
-    grid.appendChild(sortGroup);
 
     this.panelEl.appendChild(grid);
 

@@ -5,6 +5,7 @@ import { Component } from "./components/Component";
 import { Sidebar } from "./components/Sidebar";
 import { SearchBar } from "./components/SearchBar";
 import { FilterChips } from "./components/FilterChips";
+import { SortControl } from "./components/SortControl";
 import { FileList } from "./components/FileList";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { Toolbar } from "./components/Toolbar";
@@ -50,6 +51,16 @@ async function initTheme(): Promise<void> {
     // Apply persisted font size
     const fontSize = settings.font_size || "medium";
     applyFontSize(fontSize);
+
+    // Restore persisted sort preference
+    const sortField = settings.file_sort_field;
+    const sortDirection = settings.file_sort_direction;
+    if (sortField || sortDirection) {
+      const sp = { ...appState.get("searchParams") };
+      if (sortField) sp.sortField = sortField;
+      if (sortDirection) sp.sortDirection = sortDirection;
+      appState.set("searchParams", sp);
+    }
 
     // Apply background image
     await applyBackground(settings);
@@ -1051,6 +1062,12 @@ function initComponents(): AppInstances {
     searchContainer.className = "toolbar-search";
     menuEl.appendChild(searchContainer);
     components.push(new SearchBar(searchContainer));
+
+    // Sort control in the menu
+    const sortContainer = document.createElement("div");
+    sortContainer.className = "toolbar-sort";
+    menuEl.appendChild(sortContainer);
+    components.push(new SortControl(sortContainer));
 
     // Format filter chips in the menu
     const filterContainer = document.createElement("div");

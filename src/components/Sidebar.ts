@@ -9,6 +9,8 @@ import type { Collection } from "../types";
 export class Sidebar extends Component {
   private folderCounts = new Map<number, number>();
   private collections: Collection[] = [];
+  private dragSrcId: number | null = null;
+  private reordering = false;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -108,6 +110,8 @@ export class Sidebar extends Component {
     for (const folder of folders) {
       const li = document.createElement("li");
       li.className = "folder-item";
+      li.setAttribute("draggable", "true");
+      li.dataset.folderId = String(folder.id);
       if (folder.id === selectedId) {
         li.classList.add("selected");
       }
@@ -136,7 +140,6 @@ export class Sidebar extends Component {
 
       li.addEventListener("click", () => {
         if (folder.id === appState.get("selectedFolderId")) {
-          // Re-click: deselect → go to "Alle Ordner"
           appState.set("selectedFileIds", []);
           appState.set("selectedFileId", null);
           appState.set("selectedFolderId", null);
@@ -144,6 +147,48 @@ export class Sidebar extends Component {
           appState.set("selectedFileIds", []);
           appState.set("selectedFileId", null);
           appState.set("selectedFolderId", folder.id);
+        }
+      });
+
+      // Drag-and-drop reorder
+      li.addEventListener("dragstart", (e) => {
+        this.dragSrcId = folder.id;
+        li.classList.add("dragging");
+        e.dataTransfer?.setData("text/plain", String(folder.id));
+      });
+      li.addEventListener("dragend", () => {
+        this.dragSrcId = null;
+        li.classList.remove("dragging");
+        list.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+      });
+      li.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        if (this.dragSrcId !== null && this.dragSrcId !== folder.id) {
+          li.classList.add("drag-over");
+        }
+      });
+      li.addEventListener("dragleave", () => {
+        li.classList.remove("drag-over");
+      });
+      li.addEventListener("drop", (e) => {
+        e.preventDefault();
+        li.classList.remove("drag-over");
+        if (this.dragSrcId !== null && this.dragSrcId !== folder.id) {
+          this.reorderFolder(this.dragSrcId, folder.id);
+        }
+      });
+
+      // Keyboard reorder: Alt+Up/Down
+      li.tabIndex = 0;
+      li.addEventListener("keydown", (e) => {
+        if (!e.altKey) return;
+        const idx = folders.findIndex((f) => f.id === folder.id);
+        if (e.key === "ArrowUp" && idx > 0) {
+          e.preventDefault();
+          this.reorderFolder(folder.id, folders[idx - 1].id);
+        } else if (e.key === "ArrowDown" && idx < folders.length - 1) {
+          e.preventDefault();
+          this.reorderFolder(folder.id, folders[idx + 1].id);
         }
       });
 
@@ -245,6 +290,41 @@ export class Sidebar extends Component {
     }
 
     this.el.appendChild(section);
+  }
+
+  private async reorderFolder(srcId: number, targetId: number): Promise<void> {
+    if (this.reordering) return;
+    this.reordering = true;
+    try {
+      await this.reorderFolderInner(srcId, targetId);
+    } finally {
+      this.reordering = false;
+    }
+  }
+
+  private async reorderFolderInner(srcId: number, targetId: number): Promise<void> {
+    const folders = appState.get("folders");
+    const srcIdx = folders.findIndex((f) => f.id === srcId);
+    const targetIdx = folders.findIndex((f) => f.id === targetId);
+    if (srcIdx === -1 || targetIdx === -1) return;
+
+    // Move src to target position
+    const reordered = [...folders];
+    const [moved] = reordered.splice(srcIdx, 1);
+    reordered.splice(targetIdx, 0, moved);
+
+    // Assign sort_order with gaps of 10
+    const orders: [number, number][] = reordered.map((f, i) => [f.id, (i + 1) * 10]);
+
+    try {
+      await FolderService.updateSortOrders(orders);
+      // Reload to get fresh order from backend
+      const updated = await FolderService.getAll();
+      appState.set("folders", updated);
+    } catch (e) {
+      console.warn("Failed to reorder folders:", e);
+      ToastContainer.show("error", "Ordner konnten nicht umsortiert werden");
+    }
   }
 
   private deleteFolder(folderId: number): void {
