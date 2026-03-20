@@ -40,6 +40,9 @@ export class FileList extends Component {
       appState.on("formatFilter", () => this.loadFiles())
     );
     this.subscribe(
+      appState.on("selectedSmartFolderId", () => this.loadFiles())
+    );
+    this.subscribe(
       appState.on("files", () => this.render())
     );
     this.subscribe(
@@ -63,10 +66,28 @@ export class FileList extends Component {
     const folderId = appState.get("selectedFolderId");
     const search = appState.get("searchQuery");
     const formatFilter = appState.get("formatFilter");
-    const searchParams = appState.get("searchParams");
+    let searchParams = appState.get("searchParams");
+
+    // Apply smart folder filter if selected
+    const smartFolderId = appState.get("selectedSmartFolderId");
+    if (smartFolderId !== null) {
+      const smartFolders = appState.get("smartFolders");
+      const sf = smartFolders.find((f) => f.id === smartFolderId);
+      if (sf) {
+        try {
+          const parsed = JSON.parse(sf.filterJson);
+          searchParams = { ...searchParams, ...parsed };
+        } catch {
+          // Invalid JSON, ignore
+        }
+      }
+    }
 
     try {
-      const result = await FileService.getFilesPaginated(folderId, search, formatFilter, searchParams, 0, PAGE_SIZE);
+      const result = await FileService.getFilesPaginated(
+        smartFolderId !== null ? null : folderId,
+        search, formatFilter, searchParams, 0, PAGE_SIZE
+      );
       if (gen !== this.generation) return;
       this.totalCount = result.totalCount;
       this.currentPage = 0;
@@ -85,11 +106,27 @@ export class FileList extends Component {
     const folderId = appState.get("selectedFolderId");
     const search = appState.get("searchQuery");
     const formatFilter = appState.get("formatFilter");
-    const searchParams = appState.get("searchParams");
+    let searchParams = appState.get("searchParams");
+
+    // Apply smart folder filter for pagination consistency
+    const smartFolderId = appState.get("selectedSmartFolderId");
+    if (smartFolderId !== null) {
+      const smartFolders = appState.get("smartFolders");
+      const sf = smartFolders.find((f) => f.id === smartFolderId);
+      if (sf) {
+        try {
+          const parsed = JSON.parse(sf.filterJson);
+          searchParams = { ...searchParams, ...parsed };
+        } catch { /* ignore */ }
+      }
+    }
 
     try {
       const nextPage = this.currentPage + 1;
-      const result = await FileService.getFilesPaginated(folderId, search, formatFilter, searchParams, nextPage, PAGE_SIZE);
+      const result = await FileService.getFilesPaginated(
+        smartFolderId !== null ? null : folderId,
+        search, formatFilter, searchParams, nextPage, PAGE_SIZE
+      );
       if (gen !== this.generation) return;
       if (result.files.length > 0) {
         this.currentPage = nextPage;

@@ -249,6 +249,21 @@ fn build_query_conditions(
                 *param_idx += 1;
             }
         }
+        if let Some(rating_min) = sp.rating_min {
+            conditions.push(format!("e.rating >= ?{}", *param_idx));
+            params.push(Box::new(rating_min));
+            *param_idx += 1;
+        }
+        if let Some(rating_max) = sp.rating_max {
+            conditions.push(format!("e.rating <= ?{}", *param_idx));
+            params.push(Box::new(rating_max));
+            *param_idx += 1;
+        }
+        if let Some(is_fav) = sp.is_favorite {
+            conditions.push(format!("e.is_favorite = ?{}", *param_idx));
+            params.push(Box::new(is_fav as i32));
+            *param_idx += 1;
+        }
     }
 }
 

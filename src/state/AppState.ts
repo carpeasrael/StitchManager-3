@@ -16,6 +16,8 @@ const initialState: State = {
   toasts: [],
   usbDevices: [],
   expandedFolderIds: [],
+  smartFolders: [],
+  selectedSmartFolderId: null,
 };
 
 class AppStateClass {

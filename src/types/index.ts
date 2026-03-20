@@ -169,8 +169,29 @@ export interface SearchParams {
   category?: string;
   author?: string;
   sizeRange?: string;
+  ratingMin?: number;
+  ratingMax?: number;
+  isFavorite?: boolean;
   sortField?: string;
   sortDirection?: string;
+}
+
+export interface SmartFolder {
+  id: number;
+  name: string;
+  icon: string;
+  filterJson: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface DashboardStats {
+  filesByType: Record<string, number>;
+  aiStatus: { none: number; analyzed: number; confirmed: number };
+  topFolders: { folderName: string; value: number }[];
+  missingMetadata: { noTags: number; noRating: number; noDescription: number };
+  storageByFolder: { folderName: string; value: number }[];
+  recentImports: number;
 }
 
 export interface SelectedFields {
@@ -702,4 +723,6 @@ export interface State {
   toasts: Toast[];
   usbDevices: UsbDevice[];
   expandedFolderIds: number[];
+  smartFolders: SmartFolder[];
+  selectedSmartFolderId: number | null;
 }

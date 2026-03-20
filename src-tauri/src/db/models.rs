@@ -671,8 +671,24 @@ pub struct SearchParams {
     pub author: Option<String>,
     /// Size range text match filter
     pub size_range: Option<String>,
+    /// Rating range filters
+    pub rating_min: Option<i32>,
+    pub rating_max: Option<i32>,
+    /// Favorite filter
+    pub is_favorite: Option<bool>,
     /// Sort field: filename, name, created_at, updated_at, author, category
     pub sort_field: Option<String>,
     /// Sort direction: asc or desc (default: asc)
     pub sort_direction: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolder {
+    pub id: i64,
+    pub name: String,
+    pub icon: String,
+    pub filter_json: String,
+    pub sort_order: i32,
+    pub created_at: String,
 }

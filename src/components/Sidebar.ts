@@ -4,14 +4,17 @@ import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import { FolderDialog } from "./FolderDialog";
 import { FolderMoveDialog } from "./FolderMoveDialog";
+import { SmartFolderDialog } from "./SmartFolderDialog";
 import { buildFolderTree, flattenVisibleTree } from "../utils/tree";
 import * as FolderService from "../services/FolderService";
 import * as ProjectService from "../services/ProjectService";
-import type { Collection } from "../types";
+import * as SmartFolderService from "../services/SmartFolderService";
+import type { Collection, SmartFolder } from "../types";
 
 export class Sidebar extends Component {
   private folderCounts = new Map<number, number>();
   private collections: Collection[] = [];
+  private smartFoldersList: SmartFolder[] = [];
   private dragSrcId: number | null = null;
   private reordering = false;
   private contextMenu: HTMLElement | null = null;
@@ -28,8 +31,18 @@ export class Sidebar extends Component {
     this.subscribe(
       appState.on("expandedFolderIds", () => this.render())
     );
+    this.subscribe(
+      appState.on("smartFolders", () => {
+        this.smartFoldersList = appState.get("smartFolders");
+        this.render();
+      })
+    );
+    this.subscribe(
+      appState.on("selectedSmartFolderId", () => this.render())
+    );
     this.loadFolders();
     this.loadCollections();
+    this.loadSmartFolders();
   }
 
   private async loadFolders(): Promise<void> {
@@ -108,6 +121,7 @@ export class Sidebar extends Component {
       appState.set("selectedFileIds", []);
       appState.set("selectedFileId", null);
       appState.set("selectedFolderId", null);
+      appState.set("selectedSmartFolderId", null);
     });
     list.appendChild(allLi);
 
@@ -191,6 +205,7 @@ export class Sidebar extends Component {
       li.appendChild(deleteBtn);
 
       li.addEventListener("click", () => {
+        appState.set("selectedSmartFolderId", null);
         if (folder.id === appState.get("selectedFolderId")) {
           appState.set("selectedFileIds", []);
           appState.set("selectedFileId", null);
@@ -280,6 +295,9 @@ export class Sidebar extends Component {
 
     // Collections section
     this.renderCollections();
+
+    // Smart folders section
+    this.renderSmartFolders();
   }
 
   private toggleExpand(folderId: number): void {
@@ -375,6 +393,98 @@ export class Sidebar extends Component {
     } catch {
       // Silently continue without collections
     }
+  }
+
+  private async loadSmartFolders(): Promise<void> {
+    try {
+      const sf = await SmartFolderService.getAll();
+      appState.set("smartFolders", sf);
+    } catch {
+      // Silently continue
+    }
+  }
+
+  private renderSmartFolders(): void {
+    const section = document.createElement("div");
+    section.className = "sidebar-smart-folders";
+
+    const header = document.createElement("div");
+    header.className = "sidebar-header";
+    const title = document.createElement("span");
+    title.className = "sidebar-title";
+    title.textContent = "Intelligente Ordner";
+    header.appendChild(title);
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "sidebar-add-btn";
+    addBtn.textContent = "+";
+    addBtn.title = "Neuer intelligenter Ordner";
+    addBtn.setAttribute("aria-label", "Neuer intelligenter Ordner");
+    addBtn.addEventListener("click", () => SmartFolderDialog.open());
+    header.appendChild(addBtn);
+    section.appendChild(header);
+
+    const selectedSmartId = appState.get("selectedSmartFolderId");
+
+    if (this.smartFoldersList.length > 0) {
+      const list = document.createElement("ul");
+      list.className = "folder-list";
+
+      for (const sf of this.smartFoldersList) {
+        const li = document.createElement("li");
+        li.className = "folder-item smart-folder-item";
+        if (sf.id === selectedSmartId) {
+          li.classList.add("selected");
+        }
+
+        const iconSpan = document.createElement("span");
+        iconSpan.className = "smart-folder-icon";
+        iconSpan.textContent = sf.icon;
+        li.appendChild(iconSpan);
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "folder-name";
+        nameSpan.textContent = sf.name;
+        li.appendChild(nameSpan);
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "folder-delete-btn";
+        delBtn.textContent = "\u00D7";
+        delBtn.title = "Loeschen";
+        delBtn.setAttribute("aria-label", `${sf.name} loeschen`);
+        delBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await SmartFolderService.remove(sf.id);
+            const updated = await SmartFolderService.getAll();
+            appState.set("smartFolders", updated);
+            if (appState.get("selectedSmartFolderId") === sf.id) {
+              appState.set("selectedSmartFolderId", null);
+            }
+          } catch {
+            ToastContainer.show("error", "Konnte nicht geloescht werden");
+          }
+        });
+        li.appendChild(delBtn);
+
+        li.addEventListener("click", () => {
+          if (sf.id === appState.get("selectedSmartFolderId")) {
+            appState.set("selectedSmartFolderId", null);
+          } else {
+            // Mutual exclusion: clear folder selection when selecting smart folder
+            appState.set("selectedFileIds", []);
+            appState.set("selectedFileId", null);
+            appState.set("selectedFolderId", null);
+            appState.set("selectedSmartFolderId", sf.id);
+          }
+        });
+
+        list.appendChild(li);
+      }
+      section.appendChild(list);
+    }
+
+    this.el.appendChild(section);
   }
 
   private renderCollections(): void {

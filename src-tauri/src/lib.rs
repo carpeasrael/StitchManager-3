@@ -350,6 +350,12 @@ pub fn run() {
             commands::viewer::get_notes,
             commands::viewer::set_last_viewed_page,
             commands::viewer::get_last_viewed_page,
+            commands::smart_folders::get_smart_folders,
+            commands::smart_folders::create_smart_folder,
+            commands::smart_folders::update_smart_folder,
+            commands::smart_folders::delete_smart_folder,
+            commands::smart_folders::update_smart_folder_sort_orders,
+            commands::statistics::get_dashboard_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

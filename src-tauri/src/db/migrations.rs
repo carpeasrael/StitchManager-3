@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 25;
+const CURRENT_VERSION: i32 = 26;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -143,6 +143,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 25 {
         apply_v25(conn)?;
+    }
+
+    if current < 26 {
+        apply_v26(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1333,6 +1337,36 @@ fn apply_v25(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v26(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS smart_folders (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            icon        TEXT NOT NULL DEFAULT '🔍',
+            filter_json TEXT NOT NULL,
+            sort_order  INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO smart_folders (name, icon, filter_json, sort_order)
+        VALUES ('Nicht analysiert', '🔬', '{\"aiAnalyzed\": false}', 10);
+
+        INSERT INTO smart_folders (name, icon, filter_json, sort_order)
+        VALUES ('5 Sterne', '⭐', '{\"ratingMin\": 5}', 20);
+
+        INSERT INTO smart_folders (name, icon, filter_json, sort_order)
+        VALUES ('Favoriten', '❤️', '{\"isFavorite\": true}', 30);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (26, 'Add smart_folders table with presets');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1396,6 +1430,7 @@ mod tests {
             "quality_inspections",
             "schema_version",
             "settings",
+            "smart_folders",
             "step_definitions",
             "suppliers",
             "tags",
@@ -1417,7 +1452,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 25, "Schema version must be 25");
+        assert_eq!(version, 26, "Schema version must be 26");
     }
 
     #[test]
@@ -1446,16 +1481,16 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 25);
+        assert_eq!(version, 26);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 25",
+                "SELECT description FROM schema_version WHERE version = 26",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("folder_type"), "v25 description should mention folder_type");
+        assert!(desc.contains("smart_folders"), "v26 description should mention smart_folders");
     }
 
     #[test]

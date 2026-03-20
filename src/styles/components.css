@@ -1681,6 +1681,56 @@
   padding-top: var(--spacing-2);
 }
 
+.sidebar-smart-folders {
+  margin-top: var(--spacing-3);
+  border-top: 1px solid var(--color-border-light);
+  padding-top: var(--spacing-2);
+}
+
+.smart-folder-icon {
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  font-size: var(--font-size-body);
+}
+
+/* Smart Folder Dialog */
+.dialog-smart-folder {
+  width: 480px;
+  max-width: 90vw;
+}
+
+.dialog-smart-folder-body {
+  padding: var(--spacing-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+/* Dashboard list rows */
+.dashboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.dashboard-list-row {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-body);
+  border-radius: var(--radius-card);
+}
+
+.dashboard-list-row:hover {
+  background: var(--color-accent-10);
+}
+
+.dashboard-list-value {
+  color: var(--color-muted);
+  font-size: var(--font-size-caption);
+}
+
 .collection-item {
   font-style: italic;
 }

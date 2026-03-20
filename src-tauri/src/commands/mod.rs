@@ -19,6 +19,8 @@ pub mod procurement;
 pub mod reports;
 pub mod versions;
 pub mod viewer;
+pub mod smart_folders;
+pub mod statistics;
 
 use crate::error::AppError;
 use std::path::{Component, Path};
