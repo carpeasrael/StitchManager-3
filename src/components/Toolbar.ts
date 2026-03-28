@@ -2,10 +2,9 @@ import { Component } from "./Component";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
-import { open } from "@tauri-apps/plugin-dialog";
-import * as FolderService from "../services/FolderService";
+import { FolderDialog } from "./FolderDialog";
+import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import * as ScannerService from "../services/ScannerService";
-import * as FileService from "../services/FileService";
 
 interface MenuItem {
   className: string;
@@ -182,6 +181,12 @@ export class Toolbar extends Component {
             icon: "\uD83D\uDCCB",
             label: "Projekte",
             onClick: () => EventBus.emit("toolbar:show-projects"),
+          },
+          {
+            className: "menu-item-manufacturing",
+            icon: "\uD83D\uDD27",
+            label: "Fertigung",
+            onClick: () => EventBus.emit("toolbar:manufacturing"),
           },
           {
             className: "menu-item-print",
@@ -361,30 +366,8 @@ export class Toolbar extends Component {
     setHidden("menu-item-batch-ai", !hasMulti);
   }
 
-  private async addFolder(): Promise<void> {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "Ordner ausw\u00E4hlen",
-      });
-      if (!selected) return;
-
-      const path = typeof selected === "string" ? selected : String(selected);
-      if (!path) return;
-
-      const folderName =
-        path.split("/").filter(Boolean).pop() ||
-        path.split("\\").filter(Boolean).pop() ||
-        path;
-
-      await FolderService.create(folderName, path);
-      const folders = await FolderService.getAll();
-      appState.set("folders", folders);
-    } catch (e) {
-      console.warn("Failed to add folder:", e);
-      ToastContainer.show("error", "Ordner konnte nicht hinzugefuegt werden");
-    }
+  private addFolder(): void {
+    FolderDialog.open();
   }
 
   private async scanFolder(): Promise<void> {
@@ -396,23 +379,12 @@ export class Toolbar extends Component {
     if (!folder) return;
 
     try {
-      const result = await ScannerService.scanDirectory(folder.path);
-
-      if (result.foundFiles.length > 0) {
-        await ScannerService.importFiles(result.foundFiles, folderId);
+      const result = await ScannerService.scanOnly(folder.path);
+      if (result.files.length === 0) {
+        ToastContainer.show("info", "Keine unterstuetzten Dateien gefunden");
+        return;
       }
-
-      EventBus.emit("scan:complete", {
-        folderId,
-        foundFiles: result.foundFiles.length,
-      });
-
-      const files = await FileService.getFiles(folderId);
-      appState.set("files", files);
-
-      // Refresh folder counts after scan/import
-      const updatedFolders = await FolderService.getAll();
-      appState.set("folders", updatedFolders);
+      ImportPreviewDialog.open(result.files, folderId);
     } catch (e) {
       console.warn("Failed to scan folder:", e);
       ToastContainer.show("error", "Ordner konnte nicht gescannt werden");

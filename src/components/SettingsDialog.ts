@@ -43,8 +43,13 @@ export class SettingsDialog {
   }
 
   private async show(): Promise<void> {
-    const settings = await SettingsService.getAllSettings();
-    const customFields = await SettingsService.getCustomFields();
+    const [settings, customFields, apiKey] = await Promise.all([
+      SettingsService.getAllSettings(),
+      SettingsService.getCustomFields(),
+      SettingsService.getSecret("ai_api_key").catch(() => ""),
+    ]);
+    // Inject API key from secure storage into settings for form rendering
+    settings.ai_api_key = apiKey;
 
     this.originalTheme = appState.get("theme");
     this.originalFontSize = settings.font_size || "medium";
@@ -836,21 +841,19 @@ export class SettingsDialog {
       const key = input.dataset.key;
       if (!key) continue;
 
-      // Clear API key when provider is not OpenAI.
-      // ai_provider and ai_api_key are always co-located in kiForm.
+      // API key uses OS keychain via set_secret, not plain settings
       if (key === "ai_api_key") {
         const provider = form.querySelector<HTMLSelectElement>(
           '[data-key="ai_provider"]'
         );
-        if (provider && provider.value !== "openai") {
-          try {
-            await SettingsService.setSetting(key, "");
-          } catch (e) {
-            console.warn(`Failed to clear setting '${key}':`, e);
-            allOk = false;
-          }
-          continue;
+        const value = provider && provider.value !== "openai" ? "" : input.value;
+        try {
+          await SettingsService.setSecret(key, value);
+        } catch (e) {
+          console.warn(`Failed to save secret '${key}':`, e);
+          allOk = false;
         }
+        continue;
       }
 
       try {

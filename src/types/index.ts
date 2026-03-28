@@ -1,9 +1,12 @@
+export type FolderType = 'embroidery' | 'sewing_pattern' | 'mixed';
+
 export interface Folder {
   id: number;
   name: string;
   path: string;
   parentId: number | null;
   sortOrder: number;
+  folderType: FolderType;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +51,9 @@ export interface EmbroideryFile {
   aiConfirmed: boolean;
   createdAt: string;
   updatedAt: string;
+  instructionsHtml: string | null;
+  patternDate: string | null;
+  rating: number | null;
 }
 
 export interface FileFormat {
@@ -105,6 +111,10 @@ export interface FileUpdate {
   fileSource?: string;
   purchaseLink?: string;
   status?: string;
+  author?: string;
+  instructionsHtml?: string;
+  patternDate?: string;
+  rating?: number;
 }
 
 export interface StitchSegment {
@@ -159,8 +169,29 @@ export interface SearchParams {
   category?: string;
   author?: string;
   sizeRange?: string;
+  ratingMin?: number;
+  ratingMax?: number;
+  isFavorite?: boolean;
   sortField?: string;
   sortDirection?: string;
+}
+
+export interface SmartFolder {
+  id: number;
+  name: string;
+  icon: string;
+  filterJson: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface DashboardStats {
+  filesByType: Record<string, number>;
+  aiStatus: { none: number; analyzed: number; confirmed: number };
+  topFolders: { folderName: string; value: number }[];
+  missingMetadata: { noTags: number; noRating: number; noDescription: number };
+  storageByFolder: { folderName: string; value: number }[];
+  recentImports: number;
 }
 
 export interface SelectedFields {
@@ -186,6 +217,29 @@ export interface MassImportResult {
   skippedCount: number;
   errorCount: number;
   elapsedMs: number;
+}
+
+export interface ScannedFileInfo {
+  filepath: string;
+  filename: string;
+  fileSize: number | null;
+  extension: string | null;
+  fileType: string;
+  alreadyImported: boolean;
+}
+
+export interface ScanOnlyResult {
+  files: ScannedFileInfo[];
+  totalScanned: number;
+  errors: string[];
+}
+
+export interface BulkImportMetadata {
+  tags?: string[];
+  rating?: number;
+  theme?: string;
+  author?: string;
+  skillLevel?: string;
 }
 
 export interface MigrationResult {
@@ -287,6 +341,13 @@ export interface Project {
   patternFileId: number | null;
   status: string;
   notes: string | null;
+  orderNumber: string | null;
+  customer: string | null;
+  priority: string | null;
+  deadline: string | null;
+  responsiblePerson: string | null;
+  approvalStatus: string | null;
+  quantity: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -303,6 +364,299 @@ export interface Collection {
   name: string;
   description: string | null;
   createdAt: string;
+}
+
+export interface Supplier {
+  id: number;
+  name: string;
+  contact: string | null;
+  website: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Material {
+  id: number;
+  materialNumber: string | null;
+  name: string;
+  materialType: string | null;
+  unit: string | null;
+  supplierId: number | null;
+  netPrice: number | null;
+  wasteFactor: number | null;
+  minStock: number | null;
+  reorderTimeDays: number | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaterialInventory {
+  id: number;
+  materialId: number;
+  totalStock: number;
+  reservedStock: number;
+  location: string | null;
+  updatedAt: string;
+}
+
+export interface MaterialConsumption {
+  id: number;
+  projectId: number;
+  materialId: number;
+  quantity: number;
+  unit: string | null;
+  stepName: string | null;
+  recordedBy: string | null;
+  notes: string | null;
+  recordedAt: string;
+}
+
+export interface NachkalkulationLine {
+  materialId: number;
+  materialName: string;
+  unit: string | null;
+  plannedQuantity: number;
+  actualQuantity: number;
+  difference: number;
+  plannedCost: number;
+  actualCost: number;
+  costDifference: number;
+}
+
+export interface Product {
+  id: number;
+  productNumber: string | null;
+  name: string;
+  category: string | null;
+  description: string | null;
+  productType: string | null;
+  status: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductVariant {
+  id: number;
+  productId: number;
+  sku: string | null;
+  variantName: string | null;
+  size: string | null;
+  color: string | null;
+  additionalCost: number;
+  description: string | null;
+  notes: string | null;
+  status: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillOfMaterial {
+  id: number;
+  productId: number;
+  entryType: string;
+  materialId: number | null;
+  stepDefinitionId: number | null;
+  fileId: number | null;
+  quantity: number;
+  unit: string | null;
+  durationMinutes: number | null;
+  label: string | null;
+  notes: string | null;
+  sortOrder: number;
+}
+
+export interface TimeEntry {
+  id: number;
+  projectId: number;
+  stepName: string;
+  plannedMinutes: number | null;
+  actualMinutes: number | null;
+  worker: string | null;
+  machine: string | null;
+  costRateId: number | null;
+  recordedAt: string;
+}
+
+// Sprint D: Production Workflow
+
+export interface StepDefinition {
+  id: number;
+  name: string;
+  description: string | null;
+  defaultDurationMinutes: number | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface ProductStep {
+  id: number;
+  productId: number;
+  stepDefinitionId: number;
+  sortOrder: number;
+}
+
+export interface WorkflowStep {
+  id: number;
+  projectId: number;
+  stepDefinitionId: number;
+  status: string;
+  responsible: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  notes: string | null;
+  sortOrder: number;
+}
+
+// Sprint E: Procurement
+
+export interface PurchaseOrder {
+  id: number;
+  orderNumber: string | null;
+  supplierId: number;
+  projectId: number | null;
+  status: string;
+  orderDate: string | null;
+  expectedDelivery: string | null;
+  shippingCost: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaterialRequirement {
+  materialId: number;
+  materialName: string;
+  unit: string | null;
+  needed: number;
+  available: number;
+  shortage: number;
+  supplierId: number | null;
+  supplierName: string | null;
+}
+
+export interface OrderItem {
+  id: number;
+  orderId: number;
+  materialId: number;
+  quantityOrdered: number;
+  quantityDelivered: number;
+  unitPrice: number | null;
+  notes: string | null;
+}
+
+export interface Delivery {
+  id: number;
+  orderId: number;
+  deliveryDate: string;
+  deliveryNote: string | null;
+  notes: string | null;
+}
+
+// Sprint F: License Management
+
+export interface LicenseRecord {
+  id: number;
+  name: string;
+  licenseType: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  maxUses: number | null;
+  currentUses: number;
+  commercialAllowed: boolean;
+  costPerPiece: number;
+  costPerSeries: number;
+  costFlat: number;
+  source: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Phase 3: Quality & Reporting
+
+export interface QualityInspection {
+  id: number;
+  projectId: number;
+  workflowStepId: number | null;
+  inspector: string | null;
+  inspectionDate: string;
+  result: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface DefectRecord {
+  id: number;
+  inspectionId: number;
+  description: string;
+  severity: string | null;
+  status: string | null;
+  resolvedAt: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  entityType: string;
+  entityId: number;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changedBy: string | null;
+  changedAt: string;
+}
+
+export interface CostRate {
+  id: number;
+  rateType: string;
+  name: string;
+  rateValue: number;
+  unit: string | null;
+  setupCost: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CostBreakdown {
+  projectId: number;
+  projectName: string;
+  quantity: number;
+  materialCost: number;
+  licenseCost: number;
+  stitchCost: number;
+  laborCost: number;
+  machineCost: number;
+  procurementCost: number;
+  herstellkosten: number;
+  overheadPct: number;
+  overheadCost: number;
+  selbstkosten: number;
+  profitMarginPct: number;
+  profitAmount: number;
+  nettoVerkaufspreis: number;
+  selbstkostenPerPiece: number;
+  verkaufspreisPerPiece: number;
+}
+
+export interface ProjectReport {
+  projectId: number;
+  projectName: string;
+  totalPlannedMinutes: number;
+  totalActualMinutes: number;
+  materialCost: number;
+  laborCost: number;
+  totalCost: number;
+  inspectionCount: number;
+  passCount: number;
+  failCount: number;
+  openDefects: number;
+  workflowTotal: number;
+  workflowCompleted: number;
+  costBreakdown: CostBreakdown | null;
 }
 
 export interface PrinterInfo {
@@ -368,4 +722,7 @@ export interface State {
   theme: ThemeMode;
   toasts: Toast[];
   usbDevices: UsbDevice[];
+  expandedFolderIds: number[];
+  smartFolders: SmartFolder[];
+  selectedSmartFolderId: number | null;
 }

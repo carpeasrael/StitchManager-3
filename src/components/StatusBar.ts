@@ -71,7 +71,7 @@ export class StatusBar extends Component {
     const center = document.createElement("span");
     center.className = "status-center";
 
-    const files = appState.get("files");
+    const files = appState.getRef("files");
     if (files.length > 0) {
       const formatCounts = new Map<string, number>();
       for (const file of files) {

@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod audit;
 pub mod backup;
 pub mod batch;
 pub mod convert;
@@ -13,8 +14,13 @@ pub mod thread_colors;
 pub mod transfer;
 pub mod print;
 pub mod projects;
+pub mod manufacturing;
+pub mod procurement;
+pub mod reports;
 pub mod versions;
 pub mod viewer;
+pub mod smart_folders;
+pub mod statistics;
 
 use crate::error::AppError;
 use std::path::{Component, Path};

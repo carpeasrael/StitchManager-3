@@ -7,7 +7,8 @@ pub const FILE_SELECT: &str =
      category, author, keywords, comments, unique_id, is_favorite, \
      file_type, size_range, skill_level, language, format_type, file_source, purchase_link, status, \
      page_count, paper_size, \
-     ai_analyzed, ai_confirmed, created_at, updated_at FROM embroidery_files";
+     ai_analyzed, ai_confirmed, created_at, updated_at, \
+     instructions_html, pattern_date, rating FROM embroidery_files";
 
 /// Same column list with `e.` alias prefix, for use in JOINs or subquery-filtered queries.
 pub const FILE_SELECT_ALIASED: &str =
@@ -20,7 +21,8 @@ pub const FILE_SELECT_ALIASED: &str =
      e.file_source, e.purchase_link, e.status, \
      e.page_count, e.paper_size, \
      e.ai_analyzed, e.ai_confirmed, \
-     e.created_at, e.updated_at FROM embroidery_files e";
+     e.created_at, e.updated_at, \
+     e.instructions_html, e.pattern_date, e.rating FROM embroidery_files e";
 
 /// FILE_SELECT with a WHERE clause that filters by ID and excludes soft-deleted files.
 pub const FILE_SELECT_LIVE_BY_ID: &str =
@@ -30,7 +32,8 @@ pub const FILE_SELECT_LIVE_BY_ID: &str =
      category, author, keywords, comments, unique_id, is_favorite, \
      file_type, size_range, skill_level, language, format_type, file_source, purchase_link, status, \
      page_count, paper_size, \
-     ai_analyzed, ai_confirmed, created_at, updated_at FROM embroidery_files \
+     ai_analyzed, ai_confirmed, created_at, updated_at, \
+     instructions_html, pattern_date, rating FROM embroidery_files \
      WHERE id = ?1 AND deleted_at IS NULL";
 
 pub fn row_to_file(row: &rusqlite::Row) -> rusqlite::Result<EmbroideryFile> {
@@ -74,5 +77,8 @@ pub fn row_to_file(row: &rusqlite::Row) -> rusqlite::Result<EmbroideryFile> {
         ai_confirmed: row.get(36)?,
         created_at: row.get(37)?,
         updated_at: row.get(38)?,
+        instructions_html: row.get(39)?,
+        pattern_date: row.get(40)?,
+        rating: row.get(41)?,
     })
 }

@@ -27,7 +27,7 @@ pub async fn create_backup(
     std::fs::create_dir_all(&backup_dir)?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-    let zip_name = format!("stichman_backup_{timestamp}.zip");
+    let zip_name = format!("stitchmanager_backup_{timestamp}.zip");
     let zip_path = backup_dir.join(&zip_name);
 
     // Create a temporary copy of the DB to avoid locking issues
@@ -82,14 +82,13 @@ pub async fn create_backup(
         for (id, filepath) in &files {
             let path = Path::new(filepath);
             if path.exists() && path.is_file() {
-                if let Ok(data) = std::fs::read(path) {
-                    // Use ID prefix to avoid filename collisions across directories
-                    let basename = path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
-                    let entry_name = format!("files/{id}_{basename}");
-                    if zip.start_file(&entry_name, options).is_ok() {
-                        let _ = zip.write_all(&data);
+                let basename = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                let entry_name = format!("files/{id}_{basename}");
+                if zip.start_file(&entry_name, options).is_ok() {
+                    if let Ok(mut src) = std::fs::File::open(path) {
+                        let _ = std::io::copy(&mut src, &mut zip);
                         file_count += 1;
                     }
                 }
@@ -102,10 +101,10 @@ pub async fn create_backup(
             for entry in std::fs::read_dir(&thumb_dir)? {
                 if let Ok(entry) = entry {
                     if entry.path().is_file() {
-                        if let Ok(data) = std::fs::read(entry.path()) {
-                            let name = format!("thumbnails/{}", entry.file_name().to_string_lossy());
-                            if zip.start_file(&name, options).is_ok() {
-                                let _ = zip.write_all(&data);
+                        let name = format!("thumbnails/{}", entry.file_name().to_string_lossy());
+                        if zip.start_file(&name, options).is_ok() {
+                            if let Ok(mut src) = std::fs::File::open(entry.path()) {
+                                let _ = std::io::copy(&mut src, &mut zip);
                                 file_count += 1;
                             }
                         }
@@ -169,9 +168,8 @@ pub async fn restore_backup(
     {
         let mut db_entry = archive.by_name("stitch_manager.db")
             .map_err(|e| AppError::Internal(format!("DB-Extraktion fehlgeschlagen: {e}")))?;
-        let mut db_data = Vec::new();
-        db_entry.read_to_end(&mut db_data)?;
-        std::fs::write(&db_target, &db_data)?;
+        let mut db_file = std::fs::File::create(&db_target)?;
+        std::io::copy(&mut db_entry, &mut db_file)?;
     }
 
     // Extract thumbnails if present
@@ -193,9 +191,9 @@ pub async fn restore_backup(
             if name.starts_with("thumbnails/") && !name.ends_with('/') {
                 let filename = name.strip_prefix("thumbnails/").unwrap_or(&name);
                 let target = thumb_dir.join(filename);
-                let mut data = Vec::new();
-                let _ = entry.read_to_end(&mut data);
-                let _ = std::fs::write(&target, &data);
+                if let Ok(mut out) = std::fs::File::create(&target) {
+                    let _ = std::io::copy(&mut entry, &mut out);
+                }
             }
         }
     }
@@ -712,6 +710,17 @@ pub fn import_library(
 
     for record in records {
         let rel_path = record.get("relativePath").and_then(|v| v.as_str()).unwrap_or("");
+
+        // Validate relativePath: reject traversal, absolute paths (#123)
+        let rel = std::path::Path::new(rel_path);
+        if rel.is_absolute() || rel_path.is_empty() {
+            continue;
+        }
+        let has_traversal = rel.components().any(|c| matches!(c, std::path::Component::ParentDir));
+        if has_traversal {
+            continue;
+        }
+
         let abs_path = format!("{}/{}", root, rel_path);
         let filename = record.get("filename").and_then(|v| v.as_str()).unwrap_or("unknown");
         let unique_id = record.get("uniqueId").and_then(|v| v.as_str());

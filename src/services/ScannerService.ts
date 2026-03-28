@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { EmbroideryFile, MassImportResult, MigrationResult } from "../types/index";
+import type { EmbroideryFile, MassImportResult, MigrationResult, ScanOnlyResult, BulkImportMetadata } from "../types/index";
 
 export interface ScanResult {
   foundFiles: string[];
@@ -11,11 +11,20 @@ export async function scanDirectory(path: string): Promise<ScanResult> {
   return invoke<ScanResult>("scan_directory", { path });
 }
 
+export async function scanOnly(path: string): Promise<ScanOnlyResult> {
+  return invoke<ScanOnlyResult>("scan_only", { path });
+}
+
 export async function importFiles(
   filePaths: string[],
-  folderId: number
+  folderId: number,
+  bulkMetadata?: BulkImportMetadata
 ): Promise<EmbroideryFile[]> {
-  return invoke<EmbroideryFile[]>("import_files", { filePaths, folderId });
+  return invoke<EmbroideryFile[]>("import_files", {
+    filePaths,
+    folderId,
+    bulkMetadata: bulkMetadata ?? null,
+  });
 }
 
 export async function massImport(path: string): Promise<MassImportResult> {

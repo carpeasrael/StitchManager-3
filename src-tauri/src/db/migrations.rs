@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 13;
+const CURRENT_VERSION: i32 = 26;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -95,6 +95,58 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 13 {
         apply_v13(conn)?;
+    }
+
+    if current < 14 {
+        apply_v14(conn)?;
+    }
+
+    if current < 15 {
+        apply_v15(conn)?;
+    }
+
+    if current < 16 {
+        apply_v16(conn)?;
+    }
+
+    if current < 17 {
+        apply_v17(conn)?;
+    }
+
+    if current < 18 {
+        apply_v18(conn)?;
+    }
+
+    if current < 19 {
+        apply_v19(conn)?;
+    }
+
+    if current < 20 {
+        apply_v20(conn)?;
+    }
+
+    if current < 21 {
+        apply_v21(conn)?;
+    }
+
+    if current < 22 {
+        apply_v22(conn)?;
+    }
+
+    if current < 23 {
+        apply_v23(conn)?;
+    }
+
+    if current < 24 {
+        apply_v24(conn)?;
+    }
+
+    if current < 25 {
+        apply_v25(conn)?;
+    }
+
+    if current < 26 {
+        apply_v26(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -725,6 +777,596 @@ fn apply_v12(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+fn apply_v14(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Extend projects table with manufacturing fields
+        ALTER TABLE projects ADD COLUMN order_number TEXT;
+        ALTER TABLE projects ADD COLUMN customer TEXT;
+        ALTER TABLE projects ADD COLUMN priority TEXT DEFAULT 'normal';
+        ALTER TABLE projects ADD COLUMN deadline TEXT;
+        ALTER TABLE projects ADD COLUMN responsible_person TEXT;
+        ALTER TABLE projects ADD COLUMN approval_status TEXT DEFAULT 'draft';
+
+        CREATE INDEX IF NOT EXISTS idx_projects_priority ON projects(priority);
+        CREATE INDEX IF NOT EXISTS idx_projects_deadline ON projects(deadline);
+        CREATE INDEX IF NOT EXISTS idx_projects_approval_status ON projects(approval_status);
+
+        -- Suppliers
+        CREATE TABLE IF NOT EXISTS suppliers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            contact TEXT,
+            website TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_suppliers_deleted_at ON suppliers(deleted_at);
+
+        -- Materials
+        CREATE TABLE IF NOT EXISTS materials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_number TEXT UNIQUE,
+            name TEXT NOT NULL,
+            material_type TEXT,
+            unit TEXT DEFAULT 'Stk',
+            supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+            net_price REAL,
+            waste_factor REAL DEFAULT 0.0,
+            min_stock REAL DEFAULT 0,
+            reorder_time_days INTEGER,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_materials_supplier_id ON materials(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_materials_material_type ON materials(material_type);
+        CREATE INDEX IF NOT EXISTS idx_materials_deleted_at ON materials(deleted_at);
+
+        -- Material inventory
+        CREATE TABLE IF NOT EXISTS material_inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            total_stock REAL DEFAULT 0,
+            reserved_stock REAL DEFAULT 0,
+            location TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_material_inventory_material_id ON material_inventory(material_id);
+
+        -- Products
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_number TEXT UNIQUE,
+            name TEXT NOT NULL,
+            category TEXT,
+            description TEXT,
+            product_type TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type);
+        CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
+        CREATE INDEX IF NOT EXISTS idx_products_deleted_at ON products(deleted_at);
+
+        -- Bill of materials
+        CREATE TABLE IF NOT EXISTS bill_of_materials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            quantity REAL NOT NULL,
+            unit TEXT,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_bom_product_id ON bill_of_materials(product_id);
+        CREATE INDEX IF NOT EXISTS idx_bom_material_id ON bill_of_materials(material_id);
+
+        -- Time entries
+        CREATE TABLE IF NOT EXISTS time_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            step_name TEXT NOT NULL,
+            planned_minutes REAL,
+            actual_minutes REAL,
+            worker TEXT,
+            machine TEXT,
+            recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_time_entries_project_id ON time_entries(project_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (14, 'Add manufacturing tables: suppliers, materials, inventory, products, BOM, time_entries; extend projects');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v15(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Sprint D: Production Workflow
+        CREATE TABLE IF NOT EXISTS step_definitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            default_duration_minutes REAL,
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS product_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            step_definition_id INTEGER NOT NULL REFERENCES step_definitions(id) ON DELETE CASCADE,
+            sort_order INTEGER DEFAULT 0,
+            UNIQUE(product_id, step_definition_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_product_steps_product_id ON product_steps(product_id);
+
+        CREATE TABLE IF NOT EXISTS workflow_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            step_definition_id INTEGER NOT NULL REFERENCES step_definitions(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            responsible TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            notes TEXT,
+            sort_order INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_steps_project_id ON workflow_steps(project_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_steps_status ON workflow_steps(status);
+
+        -- Sprint E: Procurement
+        CREATE TABLE IF NOT EXISTS purchase_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_number TEXT UNIQUE,
+            supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+            status TEXT NOT NULL DEFAULT 'draft',
+            order_date TEXT,
+            expected_delivery TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier_id ON purchase_orders(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status);
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_deleted_at ON purchase_orders(deleted_at);
+
+        CREATE TABLE IF NOT EXISTS order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            material_id INTEGER NOT NULL REFERENCES materials(id),
+            quantity_ordered REAL NOT NULL,
+            quantity_delivered REAL DEFAULT 0,
+            unit_price REAL,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+        CREATE INDEX IF NOT EXISTS idx_order_items_material_id ON order_items(material_id);
+
+        CREATE TABLE IF NOT EXISTS deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            delivery_date TEXT NOT NULL DEFAULT (datetime('now')),
+            delivery_note TEXT,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_deliveries_order_id ON deliveries(order_id);
+
+        CREATE TABLE IF NOT EXISTS delivery_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            delivery_id INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+            order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+            quantity_received REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_delivery_items_delivery_id ON delivery_items(delivery_id);
+
+        -- Sprint F: License Management
+        CREATE TABLE IF NOT EXISTS license_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            license_type TEXT DEFAULT 'personal',
+            valid_from TEXT,
+            valid_until TEXT,
+            max_uses INTEGER,
+            current_uses INTEGER DEFAULT 0,
+            commercial_allowed INTEGER DEFAULT 0,
+            source TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_license_records_deleted_at ON license_records(deleted_at);
+
+        CREATE TABLE IF NOT EXISTS license_file_links (
+            license_id INTEGER NOT NULL REFERENCES license_records(id) ON DELETE CASCADE,
+            file_id INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            PRIMARY KEY (license_id, file_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_license_file_links_file_id ON license_file_links(file_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (15, 'Add workflow, procurement, and license management tables');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v16(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS quality_inspections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            workflow_step_id INTEGER REFERENCES workflow_steps(id) ON DELETE SET NULL,
+            inspector TEXT,
+            inspection_date TEXT NOT NULL DEFAULT (datetime('now')),
+            result TEXT NOT NULL DEFAULT 'pending',
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_quality_inspections_project_id ON quality_inspections(project_id);
+        CREATE INDEX IF NOT EXISTS idx_quality_inspections_result ON quality_inspections(result);
+
+        CREATE TABLE IF NOT EXISTS defect_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_id INTEGER NOT NULL REFERENCES quality_inspections(id) ON DELETE CASCADE,
+            description TEXT NOT NULL,
+            severity TEXT DEFAULT 'minor',
+            status TEXT DEFAULT 'open',
+            resolved_at TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_defect_records_inspection_id ON defect_records(inspection_id);
+        CREATE INDEX IF NOT EXISTS idx_defect_records_status ON defect_records(status);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (16, 'Add quality inspections and defect tracking tables');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v17(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Cost rates: configurable labor, machine, overhead, profit rates
+        CREATE TABLE IF NOT EXISTS cost_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rate_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            rate_value REAL NOT NULL,
+            unit TEXT,
+            setup_cost REAL DEFAULT 0,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_cost_rates_rate_type ON cost_rates(rate_type);
+        CREATE INDEX IF NOT EXISTS idx_cost_rates_deleted_at ON cost_rates(deleted_at);
+
+        -- Project cost items: persisted cost breakdown snapshots
+        CREATE TABLE IF NOT EXISTS project_cost_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            cost_type TEXT NOT NULL,
+            description TEXT,
+            amount REAL NOT NULL,
+            calculated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_cost_items_project_id ON project_cost_items(project_id);
+
+        -- Add cost fields to license_records
+        ALTER TABLE license_records ADD COLUMN cost_per_piece REAL DEFAULT 0;
+        ALTER TABLE license_records ADD COLUMN cost_per_series REAL DEFAULT 0;
+        ALTER TABLE license_records ADD COLUMN cost_flat REAL DEFAULT 0;
+
+        -- Link time entries to cost rates for per-resource costing
+        ALTER TABLE time_entries ADD COLUMN cost_rate_id INTEGER REFERENCES cost_rates(id) ON DELETE SET NULL;
+
+        -- Add shipping cost to purchase orders for procurement cost aggregation
+        ALTER TABLE purchase_orders ADD COLUMN shipping_cost REAL DEFAULT 0;
+
+        -- Add production quantity to projects for per-piece calculations
+        ALTER TABLE projects ADD COLUMN quantity INTEGER DEFAULT 1;
+
+        -- Link licenses to projects
+        CREATE TABLE IF NOT EXISTS project_license_links (
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            license_id INTEGER NOT NULL REFERENCES license_records(id) ON DELETE CASCADE,
+            PRIMARY KEY (project_id, license_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_license_links_license_id ON project_license_links(license_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (17, 'Add cost calculation: cost_rates, project_cost_items, license costs, project quantity');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v18(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Material consumptions: actual usage per project/material/step
+        CREATE TABLE IF NOT EXISTS material_consumptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            quantity REAL NOT NULL,
+            unit TEXT,
+            step_name TEXT,
+            recorded_by TEXT,
+            notes TEXT,
+            recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_material_consumptions_project_id ON material_consumptions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_material_consumptions_material_id ON material_consumptions(material_id);
+
+        -- Inventory transactions: audit log for all automated stock changes
+        CREATE TABLE IF NOT EXISTS inventory_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+            project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+            transaction_type TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_inventory_transactions_material_id ON inventory_transactions(material_id);
+        CREATE INDEX IF NOT EXISTS idx_inventory_transactions_project_id ON inventory_transactions(project_id);
+        CREATE INDEX IF NOT EXISTS idx_inventory_transactions_type ON inventory_transactions(transaction_type);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (18, 'Add material consumption tracking and inventory transaction audit log');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v19(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Add project linkage to purchase orders
+        ALTER TABLE purchase_orders ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_project_id ON purchase_orders(project_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (19, 'Add project_id to purchase_orders for project-order linkage');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v20(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS product_variants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            sku TEXT,
+            variant_name TEXT,
+            size TEXT,
+            color TEXT,
+            additional_cost REAL DEFAULT 0,
+            notes TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_product_variants_product_id ON product_variants(product_id);
+        CREATE INDEX IF NOT EXISTS idx_product_variants_deleted_at ON product_variants(deleted_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_product_variants_sku_active ON product_variants(sku) WHERE deleted_at IS NULL;
+
+        INSERT INTO schema_version (version, description)
+        VALUES (20, 'Add product_variants table for sizes, colors, and customization');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v21(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER NOT NULL,
+            field_name TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            changed_by TEXT,
+            changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_changed_at ON audit_log(changed_at);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (21, 'Add audit_log table for change history traceability');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v22(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS project_products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            quantity REAL NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, product_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_products_project ON project_products(project_id);
+        CREATE INDEX IF NOT EXISTS idx_project_products_product ON project_products(product_id);
+
+        CREATE TABLE IF NOT EXISTS project_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            file_id INTEGER NOT NULL REFERENCES embroidery_files(id) ON DELETE CASCADE,
+            role TEXT NOT NULL DEFAULT 'pattern',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, file_id, role)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_files_project ON project_files(project_id);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (22, 'Add project_products and project_files junction tables, add product_id to time_entries');
+
+        COMMIT;"
+    )?;
+
+    // ALTER TABLE must run outside the transaction that creates tables
+    let has_col: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('time_entries') WHERE name = 'product_id'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_col {
+        conn.execute_batch(
+            "ALTER TABLE time_entries ADD COLUMN product_id INTEGER REFERENCES products(id) ON DELETE SET NULL;
+             CREATE INDEX IF NOT EXISTS idx_time_entries_product_id ON time_entries(product_id);"
+        )?;
+    }
+
+    Ok(())
+}
+
+fn apply_v23(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        -- Add description to product_variants
+        ALTER TABLE product_variants ADD COLUMN description TEXT;
+
+        -- Rebuild bill_of_materials to support multiple entry types
+        CREATE TABLE IF NOT EXISTS bill_of_materials_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            entry_type TEXT NOT NULL DEFAULT 'material',
+            material_id INTEGER REFERENCES materials(id) ON DELETE CASCADE,
+            step_definition_id INTEGER REFERENCES step_definitions(id) ON DELETE SET NULL,
+            file_id INTEGER REFERENCES embroidery_files(id) ON DELETE SET NULL,
+            quantity REAL NOT NULL DEFAULT 0,
+            unit TEXT,
+            duration_minutes REAL,
+            label TEXT,
+            notes TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO bill_of_materials_new (id, product_id, entry_type, material_id, quantity, unit, notes, sort_order)
+            SELECT id, product_id, 'material', material_id, quantity, unit, notes, 0
+            FROM bill_of_materials;
+
+        DROP TABLE bill_of_materials;
+        ALTER TABLE bill_of_materials_new RENAME TO bill_of_materials;
+
+        CREATE INDEX IF NOT EXISTS idx_bom_product_id ON bill_of_materials(product_id);
+        CREATE INDEX IF NOT EXISTS idx_bom_material_id ON bill_of_materials(material_id);
+        CREATE INDEX IF NOT EXISTS idx_bom_entry_type ON bill_of_materials(entry_type);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (23, 'Extend BOM with entry types, add variant description');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v24(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE embroidery_files ADD COLUMN instructions_html TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN pattern_date TEXT;
+        ALTER TABLE embroidery_files ADD COLUMN rating INTEGER CHECK(rating IS NULL OR (rating >= 1 AND rating <= 5));
+
+        INSERT INTO schema_version (version, description)
+        VALUES (24, 'Add sewing pattern metadata: instructions, date, rating');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v25(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        ALTER TABLE folders ADD COLUMN folder_type TEXT NOT NULL DEFAULT 'mixed'
+            CHECK(folder_type IN ('embroidery', 'sewing_pattern', 'mixed'));
+
+        INSERT INTO schema_version (version, description)
+        VALUES (25, 'Add folder_type column to folders');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
+fn apply_v26(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        CREATE TABLE IF NOT EXISTS smart_folders (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            icon        TEXT NOT NULL DEFAULT '🔍',
+            filter_json TEXT NOT NULL,
+            sort_order  INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO smart_folders (name, icon, filter_json, sort_order)
+        VALUES ('Nicht analysiert', '🔬', '{\"aiAnalyzed\": false}', 10);
+
+        INSERT INTO smart_folders (name, icon, filter_json, sort_order)
+        VALUES ('5 Sterne', '⭐', '{\"ratingMin\": 5}', 20);
+
+        INSERT INTO smart_folders (name, icon, filter_json, sort_order)
+        VALUES ('Favoriten', '❤️', '{\"isFavorite\": true}', 30);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (26, 'Add smart_folders table with presets');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -743,10 +1385,16 @@ mod tests {
 
         let expected = vec![
             "ai_analysis_results",
+            "audit_log",
+            "bill_of_materials",
             "collection_items",
             "collections",
+            "cost_rates",
             "custom_field_definitions",
             "custom_field_values",
+            "defect_records",
+            "deliveries",
+            "delivery_items",
             "embroidery_files",
             "file_attachments",
             "file_formats",
@@ -761,12 +1409,33 @@ mod tests {
             "folders",
             "instruction_bookmarks",
             "instruction_notes",
+            "inventory_transactions",
+            "license_file_links",
+            "license_records",
             "machine_profiles",
+            "material_consumptions",
+            "material_inventory",
+            "materials",
+            "order_items",
+            "product_steps",
+            "product_variants",
+            "products",
+            "project_cost_items",
             "project_details",
+            "project_files",
+            "project_license_links",
+            "project_products",
             "projects",
+            "purchase_orders",
+            "quality_inspections",
             "schema_version",
             "settings",
+            "smart_folders",
+            "step_definitions",
+            "suppliers",
             "tags",
+            "time_entries",
+            "workflow_steps",
         ];
 
         assert_eq!(tables, expected, "All tables must exist (including FTS5)");
@@ -783,7 +1452,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 13, "Schema version must be 13");
+        assert_eq!(version, 26, "Schema version must be 26");
     }
 
     #[test]
@@ -806,22 +1475,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_thirteen() {
+    fn test_schema_version_is_twentythree() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 13);
+        assert_eq!(version, 26);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 13",
+                "SELECT description FROM schema_version WHERE version = 26",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(desc, "Add deleted_at column for soft delete / recycle bin");
+        assert!(desc.contains("smart_folders"), "v26 description should mention smart_folders");
     }
 
     #[test]

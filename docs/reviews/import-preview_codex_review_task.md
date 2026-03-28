@@ -1,0 +1,6 @@
+1. Watcher Toast enhancement is incomplete: `fs:new-files` now shows only static text (`"…Metadaten im Panel bearbeiten"`) and does not provide the required actionable "Ueberpruefen" link/interaction to open review context.
+2. ImportPreviewDialog import execution does not show BatchDialog/import progress as required; it calls `ScannerService.importFiles(...)` directly without opening import-mode progress UI.
+3. Large-list requirement is not implemented: ImportPreviewDialog always renders the full list and has no virtualized rendering path for >50 files.
+4. Drag-drop 4+ scan-then-preview flow is incomplete for multi-directory drops: it scans only the first file’s parent directory (`scanOnly(parentDir)`) and then filters, so dropped files from other directories are omitted from preview/import.
+5. Sewing-pattern bulk-field visibility does not match the approved approach: Designer/Schwierigkeitsgrad inputs are shown when any sewing-pattern file exists in the result set, not when at least one sewing-pattern file is checked.
+6. The two added backend tests do not test the new command paths directly (`scan_only` / `import_files`); they reimplement mirrored logic in-test, so command-level behavior required by the analysis is not actually verified.

@@ -75,7 +75,7 @@ fn try_decode_png(data: &[u8]) -> Option<::image::DynamicImage> {
 pub fn generate_report(
     files: &[ReportEntry],
 ) -> Result<Vec<u8>, AppError> {
-    let (doc, page1, layer1) = PdfDocument::new("StichMan Report", Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
+    let (doc, page1, layer1) = PdfDocument::new("Stitch Manager Report", Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
     let font = doc.add_builtin_font(BuiltinFont::Helvetica).map_err(|e| {
         AppError::Internal(format!("Font-Fehler: {e}"))
     })?;
@@ -87,7 +87,7 @@ pub fn generate_report(
     let mut y = PAGE_H - MARGIN;
 
     // Title
-    current_layer.use_text("StichMan \u{2014} Bericht", 16.0, Mm(MARGIN), Mm(y), &font_bold);
+    current_layer.use_text("Stitch Manager \u{2014} Bericht", 16.0, Mm(MARGIN), Mm(y), &font_bold);
     y -= LINE_H * 2.0;
 
     let file_count = files.len();
@@ -291,7 +291,7 @@ pub fn generate_report(
 
     // Footer on last page
     current_layer.use_text(
-        "Erstellt mit StichMan",
+        "Erstellt mit Stitch Manager",
         8.0, Mm(MARGIN), Mm(MARGIN),
         &font,
     );

@@ -12,6 +12,7 @@ import * as ProjectService from "../services/ProjectService";
 import type { Project } from "../types";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as ThreadColorService from "../services/ThreadColorService";
+import * as ViewerService from "../services/ViewerService";
 import type {
   EmbroideryFile,
   FileAttachment,
@@ -37,6 +38,10 @@ interface FormSnapshot {
   fileSource: string;
   purchaseLink: string;
   status: string;
+  author: string;
+  instructionsHtml: string;
+  patternDate: string;
+  rating: string;
 }
 
 export class MetadataPanel extends Component {
@@ -78,6 +83,19 @@ export class MetadataPanel extends Component {
   private async onSelectionChanged(force: boolean): Promise<void> {
     const fileId = appState.get("selectedFileId");
     if (!force && fileId !== null && fileId === this.currentFile?.id) return;
+
+    // Guard: warn if there are unsaved changes before switching
+    if (this.dirty && this.currentFile && fileId !== this.currentFile.id) {
+      const discard = confirm(
+        "Ungespeicherte Aenderungen vorhanden. Verwerfen?"
+      );
+      if (!discard) {
+        // Revert selection to current file
+        appState.set("selectedFileId", this.currentFile.id);
+        return;
+      }
+    }
+
     if (fileId === null) {
       this.currentFile = null;
       this.currentTags = [];
@@ -126,6 +144,10 @@ export class MetadataPanel extends Component {
       fileSource: file.fileSource || "",
       purchaseLink: file.purchaseLink || "",
       status: file.status || "none",
+      author: file.author || "",
+      instructionsHtml: file.instructionsHtml || "",
+      patternDate: file.patternDate || "",
+      rating: file.rating != null ? String(file.rating) : "0",
     };
   }
 
@@ -147,7 +169,11 @@ export class MetadataPanel extends Component {
       current.formatType !== this.snapshot.formatType ||
       current.fileSource !== this.snapshot.fileSource ||
       current.purchaseLink !== this.snapshot.purchaseLink ||
-      current.status !== this.snapshot.status;
+      current.status !== this.snapshot.status ||
+      current.author !== this.snapshot.author ||
+      current.instructionsHtml !== this.snapshot.instructionsHtml ||
+      current.patternDate !== this.snapshot.patternDate ||
+      current.rating !== this.snapshot.rating;
 
     // Check custom fields for changes
     if (!dirty) {
@@ -190,6 +216,16 @@ export class MetadataPanel extends Component {
       fileSource: getValue("fileSource"),
       purchaseLink: getValue("purchaseLink"),
       status: getValue("status"),
+      author: getValue("author"),
+      patternDate: getValue("patternDate"),
+      rating: (() => {
+        const ratingEl = this.el.querySelector<HTMLElement>(".star-rating");
+        return ratingEl?.dataset.rating || "";
+      })(),
+      instructionsHtml: (() => {
+        const editor = this.el.querySelector<HTMLElement>('[data-field="instructionsHtml"]');
+        return editor ? editor.innerHTML.trim() : "";
+      })(),
     };
   }
 
@@ -221,67 +257,69 @@ export class MetadataPanel extends Component {
     const wrapper = document.createElement("div");
     wrapper.className = "metadata-panel";
 
-    // Stitch preview section — interactive canvas with zoom/pan
-    const previewSection = document.createElement("div");
-    previewSection.className = "stitch-preview-section";
+    // Preview section — conditional on file type
+    if (file.fileType === "sewing_pattern") {
+      this.renderPatternPreview(wrapper, file);
+    } else {
+      // Stitch preview section — interactive canvas with zoom/pan
+      const previewSection = document.createElement("div");
+      previewSection.className = "stitch-preview-section";
 
-    const previewContainer = document.createElement("div");
-    previewContainer.className = "stitch-preview-container";
+      const previewContainer = document.createElement("div");
+      previewContainer.className = "stitch-preview-container";
 
-    const canvas = document.createElement("canvas");
-    canvas.className = "stitch-preview-canvas";
-    previewContainer.appendChild(canvas);
+      const canvas = document.createElement("canvas");
+      canvas.className = "stitch-preview-canvas";
+      previewContainer.appendChild(canvas);
 
-    // Zoom controls overlay
-    const controls = document.createElement("div");
-    controls.className = "stitch-preview-controls";
-    const zoomInBtn = document.createElement("button");
-    zoomInBtn.className = "stitch-preview-btn";
-    zoomInBtn.textContent = "+";
-    zoomInBtn.title = "Vergr\u00F6\u00DFern";
-    zoomInBtn.setAttribute("aria-label", "Vergr\u00F6\u00DFern");
-    const zoomOutBtn = document.createElement("button");
-    zoomOutBtn.className = "stitch-preview-btn";
-    zoomOutBtn.textContent = "\u2212";
-    zoomOutBtn.title = "Verkleinern";
-    zoomOutBtn.setAttribute("aria-label", "Verkleinern");
-    const zoomResetBtn = document.createElement("button");
-    zoomResetBtn.className = "stitch-preview-btn";
-    zoomResetBtn.textContent = "\u21BA";
-    zoomResetBtn.title = "Zur\u00FCcksetzen";
-    zoomResetBtn.setAttribute("aria-label", "Zur\u00FCcksetzen");
-    const zoomLabel = document.createElement("span");
-    zoomLabel.className = "stitch-preview-zoom-label";
-    zoomLabel.textContent = "100%";
-    controls.appendChild(zoomInBtn);
-    controls.appendChild(zoomOutBtn);
-    controls.appendChild(zoomResetBtn);
-    controls.appendChild(zoomLabel);
-    previewContainer.appendChild(controls);
+      const controls = document.createElement("div");
+      controls.className = "stitch-preview-controls";
+      const zoomInBtn = document.createElement("button");
+      zoomInBtn.className = "stitch-preview-btn";
+      zoomInBtn.textContent = "+";
+      zoomInBtn.title = "Vergr\u00F6\u00DFern";
+      zoomInBtn.setAttribute("aria-label", "Vergr\u00F6\u00DFern");
+      const zoomOutBtn = document.createElement("button");
+      zoomOutBtn.className = "stitch-preview-btn";
+      zoomOutBtn.textContent = "\u2212";
+      zoomOutBtn.title = "Verkleinern";
+      zoomOutBtn.setAttribute("aria-label", "Verkleinern");
+      const zoomResetBtn = document.createElement("button");
+      zoomResetBtn.className = "stitch-preview-btn";
+      zoomResetBtn.textContent = "\u21BA";
+      zoomResetBtn.title = "Zur\u00FCcksetzen";
+      zoomResetBtn.setAttribute("aria-label", "Zur\u00FCcksetzen");
+      const zoomLabel = document.createElement("span");
+      zoomLabel.className = "stitch-preview-zoom-label";
+      zoomLabel.textContent = "100%";
+      controls.appendChild(zoomInBtn);
+      controls.appendChild(zoomOutBtn);
+      controls.appendChild(zoomResetBtn);
+      controls.appendChild(zoomLabel);
+      previewContainer.appendChild(controls);
 
-    // Click on preview to open full-screen image dialog
-    const expandBtn = document.createElement("button");
-    expandBtn.className = "stitch-preview-btn stitch-preview-expand";
-    expandBtn.textContent = "\u2922";
-    expandBtn.title = "Vollbild";
-    expandBtn.setAttribute("aria-label", "Vollbild");
-    expandBtn.addEventListener("click", () => {
-      if (this.currentSegments.length > 0) {
-        ImagePreviewDialog.open(this.currentSegments);
+      const expandBtn = document.createElement("button");
+      expandBtn.className = "stitch-preview-btn stitch-preview-expand";
+      expandBtn.textContent = "\u2922";
+      expandBtn.title = "Vollbild";
+      expandBtn.setAttribute("aria-label", "Vollbild");
+      expandBtn.addEventListener("click", () => {
+        if (this.currentSegments.length > 0) {
+          ImagePreviewDialog.open(this.currentSegments);
+        }
+      });
+      controls.appendChild(expandBtn);
+
+      previewSection.appendChild(previewContainer);
+      wrapper.appendChild(previewSection);
+
+      this.currentSegments = [];
+      const previewFileId = file.id;
+      if (file.filepath) {
+        this.loadStitchPreview(canvas, file.filepath, previewFileId, zoomLabel, {
+          zoomInBtn, zoomOutBtn, zoomResetBtn,
+        }).catch(() => { /* keep empty canvas */ });
       }
-    });
-    controls.appendChild(expandBtn);
-
-    previewSection.appendChild(previewContainer);
-    wrapper.appendChild(previewSection);
-
-    // Load stitch segments and render on canvas
-    this.currentSegments = [];
-    const previewFileId = file.id;
-    if (file.filepath) {
-      this.loadStitchPreview(canvas, file.filepath, previewFileId, zoomLabel, {
-        zoomInBtn, zoomOutBtn, zoomResetBtn,
-      }).catch(() => { /* keep empty canvas */ });
     }
 
     // "View document" button for PDFs and viewable files
@@ -303,10 +341,14 @@ export class MetadataPanel extends Component {
       wrapper.appendChild(viewBar);
     }
 
-    // "New project from pattern" button (sewing patterns and PDFs only)
-    if (file.fileType === "sewing_pattern" || fileExt === "pdf") {
+    // Project actions: "Projekt starten" + "Zu Projekt hinzufuegen" (all file types)
+    {
       const projectBar = document.createElement("div");
       projectBar.className = "metadata-view-bar";
+      projectBar.style.flexWrap = "wrap";
+      projectBar.style.gap = "var(--spacing-1)";
+
+      // "Projekt starten" button
       const projectBtn = document.createElement("button");
       projectBtn.className = "metadata-project-btn";
       projectBtn.textContent = "+ Neues Projekt";
@@ -317,6 +359,52 @@ export class MetadataPanel extends Component {
         });
       });
       projectBar.appendChild(projectBtn);
+
+      // "Zu Projekt hinzufuegen" dropdown
+      const addSelect = document.createElement("select");
+      addSelect.className = "metadata-form-input";
+      addSelect.style.flex = "1";
+      addSelect.style.minWidth = "140px";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Zu Projekt hinzufuegen...";
+      addSelect.appendChild(placeholder);
+      addSelect.disabled = true;
+
+      // Load active projects asynchronously
+      ProjectService.getProjects().then((projects) => {
+        const active = projects.filter(
+          (p) => p.status !== "completed" && p.status !== "archived"
+        );
+        if (active.length === 0) {
+          placeholder.textContent = "Keine aktiven Projekte";
+          return;
+        }
+        addSelect.disabled = false;
+        for (const p of active) {
+          const opt = document.createElement("option");
+          opt.value = String(p.id);
+          opt.textContent = p.name;
+          addSelect.appendChild(opt);
+        }
+      }).catch(() => {
+        placeholder.textContent = "Projekte konnten nicht geladen werden";
+      });
+
+      addSelect.addEventListener("change", async () => {
+        const projectId = Number(addSelect.value);
+        if (!projectId || !this.currentFile) return;
+        const role = "pattern";
+        try {
+          await ProjectService.addFileToProject(projectId, this.currentFile.id, role);
+          ToastContainer.show("success", "Datei zum Projekt hinzugefuegt");
+        } catch {
+          ToastContainer.show("error", "Hinzufuegen fehlgeschlagen");
+        }
+        addSelect.value = "";
+      });
+
+      projectBar.appendChild(addSelect);
       wrapper.appendChild(projectBar);
     }
 
@@ -429,6 +517,8 @@ export class MetadataPanel extends Component {
       sewingSection.appendChild(sewingHeader);
       const sewingForm = document.createElement("div");
       sewingForm.className = "metadata-form";
+      this.addFormField(sewingForm, "Designer", "author", file.author || "", "text");
+      this.addFormField(sewingForm, "Datum", "patternDate", file.patternDate || "", "date");
       this.addFormField(sewingForm, "Größen", "sizeRange", file.sizeRange || "", "text");
       this.addSelectField(sewingForm, "Schwierigkeit", "skillLevel", file.skillLevel || "", [
         { value: "", label: "-- Auswählen --" },
@@ -438,10 +528,87 @@ export class MetadataPanel extends Component {
         { value: "advanced", label: "Fortgeschritten" },
         { value: "expert", label: "Experte" },
       ]);
+
+      // Star rating
+      const ratingRow = document.createElement("div");
+      ratingRow.className = "metadata-field";
+      const ratingLabel = document.createElement("label");
+      ratingLabel.className = "metadata-label";
+      ratingLabel.textContent = "Bewertung";
+      ratingRow.appendChild(ratingLabel);
+      const starContainer = document.createElement("div");
+      starContainer.className = "star-rating";
+      starContainer.setAttribute("role", "radiogroup");
+      starContainer.setAttribute("aria-label", "Bewertung");
+      starContainer.dataset.rating = file.rating != null ? String(file.rating) : "0";
+      for (let i = 1; i <= 5; i++) {
+        const star = document.createElement("span");
+        star.className = "star" + (file.rating != null && i <= file.rating ? " filled" : "");
+        star.textContent = "\u2605";
+        star.dataset.value = String(i);
+        star.addEventListener("mouseenter", () => {
+          starContainer.querySelectorAll(".star").forEach((s) => {
+            (s as HTMLElement).classList.toggle("hover-fill", Number((s as HTMLElement).dataset.value) <= i);
+          });
+        });
+        star.addEventListener("mouseleave", () => {
+          starContainer.querySelectorAll(".star").forEach((s) => (s as HTMLElement).classList.remove("hover-fill"));
+        });
+        star.addEventListener("click", () => {
+          const current = Number(starContainer.dataset.rating) || 0;
+          const newRating = current === i ? 0 : i;
+          starContainer.dataset.rating = String(newRating);
+          starContainer.querySelectorAll(".star").forEach((s) => {
+            (s as HTMLElement).classList.toggle("filled", Number((s as HTMLElement).dataset.value) <= newRating);
+          });
+          this.checkDirty();
+        });
+        starContainer.appendChild(star);
+      }
+      ratingRow.appendChild(starContainer);
+      sewingForm.appendChild(ratingRow);
+
       this.addFormField(sewingForm, "Sprache", "language", file.language || "", "text");
       this.addFormField(sewingForm, "Formattyp", "formatType", file.formatType || "", "text");
       this.addFormField(sewingForm, "Quelle", "fileSource", file.fileSource || "", "text");
       this.addLinkField(sewingForm, "Kauflink", "purchaseLink", file.purchaseLink || "");
+
+      // Rich text - Anleitung
+      const instrRow = document.createElement("div");
+      instrRow.className = "metadata-field";
+      const instrLabel = document.createElement("label");
+      instrLabel.className = "metadata-label";
+      instrLabel.textContent = "Anleitung";
+      instrRow.appendChild(instrLabel);
+      const instrToolbar = document.createElement("div");
+      instrToolbar.className = "rt-toolbar";
+      for (const tb of [
+        { cmd: "bold", label: "B", style: "font-weight:bold" },
+        { cmd: "italic", label: "I", style: "font-style:italic" },
+        { cmd: "insertUnorderedList", label: "\u2022", style: "" },
+      ]) {
+        const btn = document.createElement("button");
+        btn.className = "rt-btn";
+        btn.type = "button";
+        btn.innerHTML = `<span style="${tb.style}">${tb.label}</span>`;
+        btn.addEventListener("click", (e) => { e.preventDefault(); document.execCommand(tb.cmd, false); });
+        instrToolbar.appendChild(btn);
+      }
+      instrRow.appendChild(instrToolbar);
+      const instrEditor = document.createElement("div");
+      instrEditor.className = "rt-editor";
+      instrEditor.contentEditable = "true";
+      instrEditor.dataset.field = "instructionsHtml";
+      instrEditor.innerHTML = file.instructionsHtml || "";
+      instrEditor.addEventListener("input", () => this.checkDirty());
+      instrEditor.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const text = e.clipboardData?.getData("text/plain") || "";
+        document.execCommand("insertText", false, text);
+      });
+      instrRow.appendChild(instrEditor);
+      sewingForm.appendChild(instrRow);
+
       sewingSection.appendChild(sewingForm);
       wrapper.appendChild(sewingSection);
     }
@@ -775,7 +942,7 @@ export class MetadataPanel extends Component {
     label: string,
     field: string,
     value: string,
-    type: "text" | "textarea"
+    type: "text" | "textarea" | "date"
   ): void {
     const group = document.createElement("div");
     group.className = "metadata-form-group";
@@ -795,7 +962,7 @@ export class MetadataPanel extends Component {
       group.appendChild(textarea);
     } else {
       const input = document.createElement("input");
-      input.type = "text";
+      input.type = type;
       input.className = "metadata-form-input";
       input.dataset.field = field;
       input.value = value;
@@ -1041,6 +1208,23 @@ export class MetadataPanel extends Component {
           updates.status = values.status;
           hasUpdates = true;
         }
+        if (values.author !== this.snapshot.author) {
+          updates.author = values.author;
+          hasUpdates = true;
+        }
+        if (values.instructionsHtml !== this.snapshot.instructionsHtml) {
+          updates.instructionsHtml = values.instructionsHtml;
+          hasUpdates = true;
+        }
+        if (values.patternDate !== this.snapshot.patternDate) {
+          updates.patternDate = values.patternDate;
+          hasUpdates = true;
+        }
+        if (values.rating !== this.snapshot.rating) {
+          const r = Number(values.rating) || 0;
+          updates.rating = r;
+          hasUpdates = true;
+        }
       }
 
       const tagsChanged =
@@ -1159,6 +1343,104 @@ export class MetadataPanel extends Component {
     }
 
     container.appendChild(group);
+  }
+
+  private renderPatternPreview(wrapper: HTMLElement, file: EmbroideryFile): void {
+    const previewSection = document.createElement("div");
+    previewSection.className = "stitch-preview-section";
+
+    const previewContainer = document.createElement("div");
+    previewContainer.className = "stitch-preview-container pattern-preview-container";
+
+    const fileExt = file.filepath?.split(".").pop()?.toLowerCase() || "";
+    const gen = ++this.previewGeneration;
+    const fileId = file.id;
+
+    if (fileExt === "pdf") {
+      const pdfCanvas = document.createElement("canvas");
+      pdfCanvas.className = "pattern-preview-canvas";
+      previewContainer.appendChild(pdfCanvas);
+
+      const loadingHint = document.createElement("div");
+      loadingHint.className = "pattern-preview-loading";
+      loadingHint.textContent = "PDF wird geladen...";
+      previewContainer.appendChild(loadingHint);
+
+      (async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let doc: any = null;
+        try {
+          const pdfjs = await import("pdfjs-dist");
+          pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+            "pdfjs-dist/build/pdf.worker.min.mjs",
+            import.meta.url
+          ).href;
+          if (gen !== this.previewGeneration) return;
+
+          const bytes = await ViewerService.readFileBytes(file.filepath);
+          if (gen !== this.previewGeneration) return;
+
+          doc = await pdfjs.getDocument({ data: bytes }).promise;
+          if (gen !== this.previewGeneration) return;
+
+          const page = await doc.getPage(1);
+          if (gen !== this.previewGeneration) return;
+
+          const containerWidth = previewContainer.clientWidth || 380;
+          const viewport = page.getViewport({ scale: 1 });
+          const scale = containerWidth / viewport.width;
+          const scaledViewport = page.getViewport({ scale });
+
+          pdfCanvas.width = scaledViewport.width;
+          pdfCanvas.height = scaledViewport.height;
+          const ctx = pdfCanvas.getContext("2d");
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport: scaledViewport, canvas: pdfCanvas }).promise;
+          }
+          loadingHint.remove();
+
+          // Auto-save preview as thumbnail (only if not already cached)
+          if (gen === this.previewGeneration && !file.thumbnailPath) {
+            const thumbData = pdfCanvas.toDataURL("image/png").replace("data:image/png;base64,", "");
+            FileService.saveThumbnailData(fileId, thumbData).catch((e) => console.warn("Thumbnail save failed:", e));
+          }
+        } catch {
+          loadingHint.textContent = "PDF-Vorschau fehlgeschlagen";
+        } finally {
+          if (doc) doc.destroy();
+        }
+      })();
+    } else if (["png", "jpg", "jpeg", "bmp", "gif", "webp"].includes(fileExt)) {
+      const img = document.createElement("img");
+      img.className = "pattern-preview-img";
+      img.alt = file.name || file.filename;
+      previewContainer.appendChild(img);
+
+      (async () => {
+        try {
+          const b64 = await ViewerService.readFileBase64(file.filepath);
+          if (gen !== this.previewGeneration) return;
+          const mimeMap: Record<string, string> = { png: "image/png", bmp: "image/bmp", gif: "image/gif", webp: "image/webp" };
+          const mime = mimeMap[fileExt] || "image/jpeg";
+          img.src = `data:${mime};base64,${b64}`;
+
+          // Auto-save preview as thumbnail (only if not already cached)
+          if (gen === this.previewGeneration && !file.thumbnailPath) {
+            FileService.saveThumbnailData(fileId, b64).catch((e) => console.warn("Thumbnail save failed:", e));
+          }
+        } catch {
+          img.alt = "Vorschau fehlgeschlagen";
+        }
+      })();
+    } else {
+      const hint = document.createElement("div");
+      hint.className = "pattern-preview-loading";
+      hint.textContent = "Keine Vorschau verfuegbar";
+      previewContainer.appendChild(hint);
+    }
+
+    previewSection.appendChild(previewContainer);
+    wrapper.appendChild(previewSection);
   }
 
   private async loadStitchPreview(

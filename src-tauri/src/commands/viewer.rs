@@ -7,9 +7,54 @@ use crate::DbState;
 
 /// Read a file from disk and return its contents as base64-encoded data.
 /// Used by the frontend document/image viewer to load files.
+/// Restricted to paths known to the application (#121).
 #[tauri::command]
-pub fn read_file_bytes(file_path: String) -> Result<String, AppError> {
+pub fn read_file_bytes(
+    db: State<'_, DbState>,
+    file_path: String,
+) -> Result<String, AppError> {
     super::validate_no_traversal(&file_path)?;
+
+    // Validate the path is known to the application
+    let conn = lock_db(&db)?;
+    let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| std::path::PathBuf::from(&file_path));
+    let canonical_str = canonical.to_string_lossy().to_string();
+
+    // Check: is this path in embroidery_files, file_attachments, or under library_root?
+    let in_files: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM embroidery_files WHERE (filepath = ?1 OR filepath = ?2) AND deleted_at IS NULL",
+        [&file_path, &canonical_str],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    let in_attachments: bool = if !in_files {
+        conn.query_row(
+            "SELECT COUNT(*) > 0 FROM file_attachments WHERE file_path = ?1 OR file_path = ?2",
+            [&file_path, &canonical_str],
+            |row| row.get(0),
+        ).unwrap_or(false)
+    } else { false };
+
+    let in_library: bool = if !in_files && !in_attachments {
+        if let Ok(root) = conn.query_row::<String, _, _>(
+            "SELECT value FROM settings WHERE key = 'library_root'", [], |row| row.get(0),
+        ) {
+            let root_path = if root.starts_with("~/") {
+                dirs::home_dir().map(|h| h.join(&root[2..])).unwrap_or_else(|| std::path::PathBuf::from(&root))
+            } else {
+                std::path::PathBuf::from(&root)
+            };
+            let canonical_root = std::fs::canonicalize(&root_path).unwrap_or(root_path);
+            canonical.starts_with(&canonical_root)
+        } else { false }
+    } else { false };
+
+    if !in_files && !in_attachments && !in_library {
+        return Err(AppError::Validation(
+            "Zugriff verweigert: Dateipfad ist nicht in der Bibliothek".into(),
+        ));
+    }
+    drop(conn);
     let path = std::path::Path::new(&file_path);
     if !path.exists() {
         return Err(AppError::NotFound(format!(

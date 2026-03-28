@@ -15,6 +15,9 @@ const initialState: State = {
   theme: "hell",
   toasts: [],
   usbDevices: [],
+  expandedFolderIds: [],
+  smartFolders: [],
+  selectedSmartFolderId: null,
 };
 
 class AppStateClass {

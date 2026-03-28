@@ -1,5 +1,6 @@
 import { Component } from "./Component";
 import { appState } from "../state/AppState";
+import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import { getFormatLabel, formatSize } from "../utils/format";
 import * as FileService from "../services/FileService";
@@ -7,6 +8,7 @@ import * as FileService from "../services/FileService";
 const CARD_HEIGHT = 72;
 const BUFFER = 5;
 const THUMB_CACHE_MAX = 200;
+const PAGE_SIZE = 500;
 
 export class FileList extends Component {
   private generation = 0;
@@ -19,6 +21,9 @@ export class FileList extends Component {
   private scrollRafPending = false;
   private thumbCache = new Map<number, string>();
   private renderedCards = new Map<number, HTMLElement>();
+  private currentPage = 0;
+  private totalCount = 0;
+  private loadingMore = false;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -35,6 +40,9 @@ export class FileList extends Component {
       appState.on("formatFilter", () => this.loadFiles())
     );
     this.subscribe(
+      appState.on("selectedSmartFolderId", () => this.loadFiles())
+    );
+    this.subscribe(
       appState.on("files", () => this.render())
     );
     this.subscribe(
@@ -43,23 +51,93 @@ export class FileList extends Component {
     this.subscribe(
       appState.on("selectedFileIds", () => this.updateSelection())
     );
+    this.subscribe(
+      EventBus.on("filelist:scroll-to-index", (index: unknown) => {
+        this.scrollToIndex(index as number);
+      })
+    );
     this.loadFiles();
   }
 
   private async loadFiles(): Promise<void> {
     const gen = ++this.generation;
+    this.currentPage = 0;
+    this.totalCount = 0;
     const folderId = appState.get("selectedFolderId");
     const search = appState.get("searchQuery");
     const formatFilter = appState.get("formatFilter");
-    const searchParams = appState.get("searchParams");
+    let searchParams = appState.get("searchParams");
+
+    // Apply smart folder filter if selected
+    const smartFolderId = appState.get("selectedSmartFolderId");
+    if (smartFolderId !== null) {
+      const smartFolders = appState.get("smartFolders");
+      const sf = smartFolders.find((f) => f.id === smartFolderId);
+      if (sf) {
+        try {
+          const parsed = JSON.parse(sf.filterJson);
+          searchParams = { ...searchParams, ...parsed };
+        } catch {
+          // Invalid JSON, ignore
+        }
+      }
+    }
 
     try {
-      const result = await FileService.getFilesPaginated(folderId, search, formatFilter, searchParams, 0, 5000);
+      const result = await FileService.getFilesPaginated(
+        smartFolderId !== null ? null : folderId,
+        search, formatFilter, searchParams, 0, PAGE_SIZE
+      );
       if (gen !== this.generation) return;
+      this.totalCount = result.totalCount;
+      this.currentPage = 0;
       appState.set("files", result.files);
     } catch (e) {
       console.warn("Failed to load files:", e);
       ToastContainer.show("error", "Dateien konnten nicht geladen werden");
+    }
+  }
+
+  private async loadMoreFiles(): Promise<void> {
+    const files = appState.getRef("files");
+    if (this.loadingMore || files.length >= this.totalCount) return;
+    this.loadingMore = true;
+    const gen = this.generation;
+    const folderId = appState.get("selectedFolderId");
+    const search = appState.get("searchQuery");
+    const formatFilter = appState.get("formatFilter");
+    let searchParams = appState.get("searchParams");
+
+    // Apply smart folder filter for pagination consistency
+    const smartFolderId = appState.get("selectedSmartFolderId");
+    if (smartFolderId !== null) {
+      const smartFolders = appState.get("smartFolders");
+      const sf = smartFolders.find((f) => f.id === smartFolderId);
+      if (sf) {
+        try {
+          const parsed = JSON.parse(sf.filterJson);
+          searchParams = { ...searchParams, ...parsed };
+        } catch { /* ignore */ }
+      }
+    }
+
+    try {
+      const nextPage = this.currentPage + 1;
+      const result = await FileService.getFilesPaginated(
+        smartFolderId !== null ? null : folderId,
+        search, formatFilter, searchParams, nextPage, PAGE_SIZE
+      );
+      if (gen !== this.generation) return;
+      if (result.files.length > 0) {
+        this.currentPage = nextPage;
+        this.totalCount = result.totalCount;
+        const existing = appState.getRef("files");
+        appState.set("files", [...existing, ...result.files]);
+      }
+    } catch (e) {
+      console.warn("Failed to load more files:", e);
+    } finally {
+      this.loadingMore = false;
     }
   }
 
@@ -113,6 +191,12 @@ export class FileList extends Component {
 
       if (this.visibleStart !== oldStart || this.visibleEnd !== oldEnd) {
         this.renderVisible();
+      }
+
+      // Load more files when approaching the end of the loaded list
+      const files = appState.getRef("files");
+      if (files.length < this.totalCount && this.visibleEnd >= files.length - BUFFER * 2) {
+        this.loadMoreFiles();
       }
     });
   }
@@ -337,6 +421,20 @@ export class FileList extends Component {
       const isMultiSelected = selectedIds.includes(file.id);
       const isSingleSelected = file.id === selectedId && selectedIds.length === 0;
       card.classList.toggle("selected", isMultiSelected || isSingleSelected);
+    }
+  }
+
+  private scrollToIndex(index: number): void {
+    if (!this.scrollContainer) return;
+    const containerHeight = this.scrollContainer.clientHeight;
+    const itemTop = index * CARD_HEIGHT;
+    const itemBottom = itemTop + CARD_HEIGHT;
+    const scrollTop = this.scrollContainer.scrollTop;
+
+    if (itemTop < scrollTop) {
+      this.scrollContainer.scrollTop = itemTop;
+    } else if (itemBottom > scrollTop + containerHeight) {
+      this.scrollContainer.scrollTop = itemBottom - containerHeight;
     }
   }
 
