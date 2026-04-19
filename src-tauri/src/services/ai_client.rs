@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::error::Error as _;
 use std::time::Duration;
 
 use crate::error::AppError;
@@ -50,10 +51,45 @@ pub struct AiClient {
     http: reqwest::Client,
 }
 
+/// Walk a `reqwest::Error`'s source chain so the user sees the real cause
+/// (TimedOut / ConnectionReset / DNS / TLS / …) instead of the generic
+/// "error sending request" wrapper. The `is_*` predicates also let us
+/// produce a German hint for the most common failure modes.
+fn describe_reqwest_error(e: &reqwest::Error) -> String {
+    let mut parts: Vec<String> = vec![e.to_string()];
+    let mut src: Option<&dyn std::error::Error> = e.source();
+    while let Some(s) = src {
+        parts.push(s.to_string());
+        src = s.source();
+    }
+    let chain = parts.join(" → ");
+
+    let hint = if e.is_timeout() {
+        " (Zeitüberschreitung — bitte ai_timeout_ms in den Einstellungen erhöhen)"
+    } else if e.is_connect() {
+        " (Verbindung zur Ollama-Adresse fehlgeschlagen — IP, Port, Firewall prüfen)"
+    } else if e.is_request() {
+        " (Anfrage konnte nicht gesendet werden)"
+    } else {
+        ""
+    };
+    format!("{chain}{hint}")
+}
+
 impl AiClient {
     pub fn new(config: AiConfig) -> Result<Self, AppError> {
+        // Audit-follow-up: split the timeout into a short connect_timeout
+        // (so connection failures fail fast) and a longer overall
+        // `timeout` (so vision inference has time to run). Vision models
+        // routinely take 30–120 s on first call when Ollama is loading
+        // the model, so we ensure the overall budget is at least 120 s
+        // even if the user hasn't bumped `ai_timeout_ms`.
+        const MIN_TIMEOUT_MS: u64 = 120_000;
+        const CONNECT_TIMEOUT_MS: u64 = 10_000;
+        let total_timeout_ms = config.timeout_ms.max(MIN_TIMEOUT_MS);
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_millis(config.timeout_ms))
+            .timeout(Duration::from_millis(total_timeout_ms))
+            .connect_timeout(Duration::from_millis(CONNECT_TIMEOUT_MS))
             .build()
             .map_err(|e| AppError::Ai(format!("HTTP-Client Fehler: {e}")))?;
         Ok(Self { config, http })
@@ -86,13 +122,25 @@ impl AiClient {
             }
         });
 
+        // Audit-follow-up: log what we actually send so failures can be
+        // diagnosed without enabling Ollama-side tracing.
+        log::info!(
+            "Ollama analyze: POST {url} model={} image_b64_bytes={} prompt_chars={}",
+            self.config.model,
+            image_base64.len(),
+            prompt.chars().count()
+        );
+
         let resp = self
             .http
             .post(&url)
             .json(&body)
             .send()
             .await
-            .map_err(|e| AppError::Ai(format!("Ollama-Anfrage fehlgeschlagen: {e}")))?;
+            .map_err(|e| AppError::Ai(format!(
+                "Ollama-Anfrage an {url} fehlgeschlagen: {}",
+                describe_reqwest_error(&e)
+            )))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -105,7 +153,10 @@ impl AiClient {
         let json: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| AppError::Ai(format!("Ollama-Antwort ungueltig: {e}")))?;
+            .map_err(|e| AppError::Ai(format!(
+                "Ollama-Antwort ungueltig: {}",
+                describe_reqwest_error(&e)
+            )))?;
 
         json["response"]
             .as_str()
@@ -147,10 +198,20 @@ impl AiClient {
             req = req.bearer_auth(key);
         }
 
+        log::info!(
+            "OpenAI analyze: POST {url} model={} image_b64_bytes={} prompt_chars={}",
+            self.config.model,
+            image_base64.len(),
+            prompt.chars().count()
+        );
+
         let resp = req
             .send()
             .await
-            .map_err(|e| AppError::Ai(format!("OpenAI-Anfrage fehlgeschlagen: {e}")))?;
+            .map_err(|e| AppError::Ai(format!(
+                "OpenAI-Anfrage an {url} fehlgeschlagen: {}",
+                describe_reqwest_error(&e)
+            )))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -161,7 +222,10 @@ impl AiClient {
         let json: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| AppError::Ai(format!("OpenAI-Antwort ungueltig: {e}")))?;
+            .map_err(|e| AppError::Ai(format!(
+                "OpenAI-Antwort ungueltig: {}",
+                describe_reqwest_error(&e)
+            )))?;
 
         json["choices"][0]["message"]["content"]
             .as_str()
