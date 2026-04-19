@@ -5,6 +5,7 @@ import type {
 import * as ViewerService from "../services/ViewerService";
 import * as PrintService from "../services/PrintService";
 import { ToastContainer } from "./Toast";
+import { trapFocus } from "../utils/focus-trap";
 import type { PrinterInfo, PrintSettings } from "../types";
 
 // Reuse the same worker config as DocumentViewer
@@ -23,6 +24,7 @@ export class PrintPreviewDialog {
   private totalPages = 0;
   private selectedPages = new Set<number>();
   private overlay: HTMLElement | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
   private previewCanvas: HTMLCanvasElement | null = null;
   private previewContainer: HTMLElement | null = null;
   private printers: PrinterInfo[] = [];
@@ -134,6 +136,12 @@ export class PrintPreviewDialog {
     this.overlay = this.buildUI();
     document.body.appendChild(this.overlay);
 
+    // Audit Wave 3 usability: focus trap on full-screen modal.
+    const dialogEl = this.overlay.querySelector<HTMLElement>(".print-preview-dialog");
+    if (dialogEl) {
+      this.releaseFocusTrap = trapFocus(dialogEl);
+    }
+
     // Detect large-format pages now that overlay is in the DOM
     this.detectLargeFormat();
 
@@ -179,7 +187,7 @@ export class PrintPreviewDialog {
     warning.dataset.id = "pp-warning";
     warning.style.display = "none";
     warning.textContent =
-      "\u26A0 WARNUNG: Skalierung ist aktiv! Schnittmuster werden NICHT in Originalgroesse gedruckt.";
+      "\u26A0 WARNUNG: Skalierung ist aktiv! Schnittmuster werden NICHT in Originalgröße gedruckt.";
     dialog.appendChild(warning);
 
     // Main content
@@ -297,7 +305,7 @@ export class PrintPreviewDialog {
     });
 
     // Paper size
-    this.addSettingDropdown(container, "Papiergroesse", [
+    this.addSettingDropdown(container, "Papiergröße", [
       { value: "A4", label: "A4 (210\u00D7297 mm)" },
       { value: "Letter", label: "US Letter (216\u00D7279 mm)" },
       { value: "A3", label: "A3 (297\u00D7420 mm)" },
@@ -379,7 +387,7 @@ export class PrintPreviewDialog {
     tileOverlapGroup.style.display = "none";
     const overlapLabel = document.createElement("label");
     overlapLabel.className = "pp-setting-label";
-    overlapLabel.textContent = "Ueberlappung (mm)";
+    overlapLabel.textContent = "Überlappung (mm)";
     const overlapInput = document.createElement("input");
     overlapInput.type = "number";
     overlapInput.className = "pp-setting-input";
@@ -598,7 +606,7 @@ export class PrintPreviewDialog {
 
   private async executePrint(): Promise<void> {
     if (this.selectedPages.size === 0) {
-      ToastContainer.show("info", "Keine Seiten ausgewaehlt");
+      ToastContainer.show("info", "Keine Seiten ausgewählt");
       return;
     }
 
@@ -705,6 +713,10 @@ export class PrintPreviewDialog {
     if (this.pdfDoc) {
       this.pdfDoc.destroy();
       this.pdfDoc = null;
+    }
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
     }
     if (this.overlay) {
       this.overlay.remove();

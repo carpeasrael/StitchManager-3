@@ -48,8 +48,8 @@ export class FolderMoveDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.title = "Schliessen";
-    closeBtn.setAttribute("aria-label", "Dialog schliessen");
+    closeBtn.title = "Schließen";
+    closeBtn.setAttribute("aria-label", "Dialog schließen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -118,7 +118,7 @@ export class FolderMoveDialog {
     moveBtn.textContent = "Verschieben";
     moveBtn.addEventListener("click", async () => {
       if (selectedTarget === undefined) {
-        ToastContainer.show("error", "Bitte einen Zielordner auswaehlen");
+        ToastContainer.show("error", "Bitte einen Zielordner auswählen");
         return;
       }
       moveBtn.disabled = true;

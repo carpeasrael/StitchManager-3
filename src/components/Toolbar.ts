@@ -46,8 +46,8 @@ export class Toolbar extends Component {
 
     const btn = document.createElement("button");
     btn.className = "burger-btn";
-    btn.title = "Menue";
-    btn.setAttribute("aria-label", "Menue oeffnen");
+    btn.title = "Menü";
+    btn.setAttribute("aria-label", "Menü öffnen");
     btn.setAttribute("aria-haspopup", "true");
     btn.setAttribute("aria-expanded", "false");
     btn.textContent = "\u2630";
@@ -66,7 +66,7 @@ export class Toolbar extends Component {
           {
             className: "menu-item-add",
             icon: "\uD83D\uDCC1",
-            label: "Ordner hinzufuegen",
+            label: "Ordner hinzufügen",
             onClick: () => this.addFolder(),
           },
           {

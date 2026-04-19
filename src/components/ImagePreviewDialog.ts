@@ -46,7 +46,7 @@ export class ImagePreviewDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "image-preview-close";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => this.close());
     dialog.appendChild(closeBtn);
 

@@ -1,6 +1,7 @@
 import * as MfgService from "../services/ManufacturingService";
 import { ToastContainer } from "./Toast";
 import { trapFocus } from "../utils/focus-trap";
+import { ConfirmDialog } from "./ConfirmDialog";
 import * as ProjectService from "../services/ProjectService";
 import * as ReportService from "../services/ReportService";
 import { appState } from "../state/AppState";
@@ -139,7 +140,7 @@ export class ManufacturingDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dv-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => ManufacturingDialog.dismiss());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -263,7 +264,7 @@ export class ManufacturingDialog {
     if (this.selectedMaterial) {
       this.renderMaterialDetail(detailPane, this.selectedMaterial);
     } else {
-      detailPane.textContent = "Material auswaehlen";
+      detailPane.textContent = "Material auswählen";
     }
     container.appendChild(detailPane);
   }
@@ -318,7 +319,7 @@ export class ManufacturingDialog {
       "Typ",
       m.materialType || "",
       [
-        { value: "", label: "-- Waehlen --" },
+        { value: "", label: "-- Wählen --" },
         { value: "fabric", label: "Stoff" },
         { value: "thread", label: "Garn" },
         { value: "embroidery_thread", label: "Stickgarn" },
@@ -335,7 +336,7 @@ export class ManufacturingDialog {
       "Einheit",
       m.unit || "Stk",
       [
-        { value: "Stk", label: "Stueck (Stk)" },
+        { value: "Stk", label: "Stück (Stk)" },
         { value: "m", label: "Meter (m)" },
         { value: "m2", label: "Quadratmeter (m\u00B2)" },
         { value: "kg", label: "Kilogramm (kg)" },
@@ -376,17 +377,22 @@ export class ManufacturingDialog {
     actions.className = "mfg-actions";
     const delBtn = document.createElement("button");
     delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Material loeschen";
+    delBtn.textContent = "Material löschen";
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`Material "${m.name}" wirklich loeschen?`)) return;
+      const ok = await ConfirmDialog.open({
+        title: "Material löschen?",
+        message: `Material „${m.name}" wird gelöscht.`,
+        destructive: true,
+      });
+      if (!ok) return;
       try {
         await MfgService.deleteMaterial(m.id);
         this.selectedMaterial = null;
         await this.loadAll();
         this.renderActiveTab();
-        ToastContainer.show("success", "Material geloescht");
+        ToastContainer.show("success", "Material gelöscht");
       } catch (e) {
-        ToastContainer.show("error", "Loeschen fehlgeschlagen");
+        ToastContainer.show("error", "Löschen fehlgeschlagen");
       }
     });
     actions.appendChild(delBtn);
@@ -442,7 +448,7 @@ export class ManufacturingDialog {
     if (this.selectedSupplier) {
       this.renderSupplierDetail(detailPane, this.selectedSupplier);
     } else {
-      detailPane.textContent = "Lieferant auswaehlen";
+      detailPane.textContent = "Lieferant auswählen";
     }
     container.appendChild(detailPane);
   }
@@ -501,17 +507,22 @@ export class ManufacturingDialog {
     actions.className = "mfg-actions";
     const delBtn = document.createElement("button");
     delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Lieferant loeschen";
+    delBtn.textContent = "Lieferant löschen";
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`Lieferant "${s.name}" wirklich loeschen?`)) return;
+      const ok = await ConfirmDialog.open({
+        title: "Lieferant löschen?",
+        message: `Lieferant „${s.name}" wird gelöscht.`,
+        destructive: true,
+      });
+      if (!ok) return;
       try {
         await MfgService.deleteSupplier(s.id);
         this.selectedSupplier = null;
         await this.loadAll();
         this.renderActiveTab();
-        ToastContainer.show("success", "Lieferant geloescht");
+        ToastContainer.show("success", "Lieferant gelöscht");
       } catch (e) {
-        ToastContainer.show("error", "Loeschen fehlgeschlagen");
+        ToastContainer.show("error", "Löschen fehlgeschlagen");
       }
     });
     actions.appendChild(delBtn);
@@ -566,7 +577,7 @@ export class ManufacturingDialog {
     if (this.selectedProduct) {
       this.renderProductDetail(detailPane, this.selectedProduct);
     } else {
-      detailPane.textContent = "Produkt auswaehlen";
+      detailPane.textContent = "Produkt auswählen";
     }
     container.appendChild(detailPane);
   }
@@ -602,7 +613,7 @@ export class ManufacturingDialog {
           }
           this.renderActiveTab();
         } catch (e) {
-          ToastContainer.show("error", "Stueckliste konnte nicht geladen werden");
+          ToastContainer.show("error", "Stückliste konnte nicht geladen werden");
         }
       });
       container.appendChild(item);
@@ -628,8 +639,8 @@ export class ManufacturingDialog {
       "Produkttyp",
       p.productType || "",
       [
-        { value: "", label: "-- Waehlen --" },
-        { value: "naehprodukt", label: "Naehprodukt" },
+        { value: "", label: "-- Wählen --" },
+        { value: "nähprodukt", label: "Nähprodukt" },
         { value: "stickprodukt", label: "Stickprodukt" },
         { value: "kombiprodukt", label: "Kombiprodukt" },
       ],
@@ -655,7 +666,7 @@ export class ManufacturingDialog {
     bomSection.className = "mfg-bom-section";
     const bomTitle = document.createElement("h4");
     bomTitle.className = "mfg-section-title";
-    bomTitle.textContent = "Stueckliste (BOM)";
+    bomTitle.textContent = "Stückliste (BOM)";
     bomSection.appendChild(bomTitle);
 
     const entries = this.bomMap.get(p.id) || [];
@@ -737,7 +748,7 @@ export class ManufacturingDialog {
     } else {
       const empty = document.createElement("div");
       empty.className = "mfg-item-sub";
-      empty.textContent = "Keine Eintraege in der Stueckliste";
+      empty.textContent = "Keine Einträge in der Stückliste";
       bomSection.appendChild(empty);
     }
 
@@ -777,7 +788,7 @@ export class ManufacturingDialog {
         matSelect.dataset.field = "materialId";
         const defaultOpt = document.createElement("option");
         defaultOpt.value = "";
-        defaultOpt.textContent = "Material waehlen";
+        defaultOpt.textContent = "Material wählen";
         matSelect.appendChild(defaultOpt);
         for (const mat of this.materials) {
           const opt = document.createElement("option");
@@ -899,7 +910,7 @@ export class ManufacturingDialog {
             }
           });
           if (!fileId) {
-            ToastContainer.show("error", "Datei muss ausgewaehlt werden");
+            ToastContainer.show("error", "Datei muss ausgewählt werden");
             return;
           }
           await MfgService.addBomEntry(p.id, { entryType: et, fileId });
@@ -929,7 +940,7 @@ export class ManufacturingDialog {
         vtable.className = "mfg-bom-table";
         const vthead = document.createElement("thead");
         const vheadTr = document.createElement("tr");
-        for (const h of ["SKU", "Name", "Beschreibung", "Groesse", "Farbe", "Zusatzk.", ""]) {
+        for (const h of ["SKU", "Name", "Beschreibung", "Größe", "Farbe", "Zusatzk.", ""]) {
           const vth = document.createElement("th");
           vth.textContent = h;
           vheadTr.appendChild(vth);
@@ -948,12 +959,12 @@ export class ManufacturingDialog {
           const vrmBtn = document.createElement("button");
           vrmBtn.className = "mfg-bom-remove";
           vrmBtn.textContent = "\u2716";
-          vrmBtn.title = "Variante loeschen";
+          vrmBtn.title = "Variante löschen";
           vrmBtn.addEventListener("click", async () => {
             try {
               await MfgService.deleteVariant(v.id);
               this.renderActiveTab();
-            } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+            } catch { ToastContainer.show("error", "Löschen fehlgeschlagen"); }
           });
           vtdAction.appendChild(vrmBtn);
           vtr.appendChild(vtdAction);
@@ -986,7 +997,7 @@ export class ManufacturingDialog {
 
     const sizeIn = document.createElement("input");
     sizeIn.className = "mfg-input mfg-input-sm";
-    sizeIn.placeholder = "Groesse";
+    sizeIn.placeholder = "Größe";
     sizeIn.style.width = "70px";
     varAddRow.appendChild(sizeIn);
 
@@ -1009,7 +1020,7 @@ export class ManufacturingDialog {
     varAddBtn.textContent = "+";
     varAddBtn.addEventListener("click", async () => {
       if (!skuIn.value && !vnameIn.value && !sizeIn.value && !colorIn.value) {
-        ToastContainer.show("error", "Mindestens SKU, Name, Groesse oder Farbe angeben");
+        ToastContainer.show("error", "Mindestens SKU, Name, Größe oder Farbe angeben");
         return;
       }
       try {
@@ -1045,18 +1056,23 @@ export class ManufacturingDialog {
     actions.appendChild(bomExportBtn);
     const delBtn = document.createElement("button");
     delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Produkt loeschen";
+    delBtn.textContent = "Produkt löschen";
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`Produkt "${p.name}" wirklich loeschen?`)) return;
+      const ok = await ConfirmDialog.open({
+        title: "Produkt löschen?",
+        message: `Produkt „${p.name}" wird gelöscht.`,
+        destructive: true,
+      });
+      if (!ok) return;
       try {
         await MfgService.deleteProduct(p.id);
         this.selectedProduct = null;
         this.bomMap.delete(p.id);
         await this.loadAll();
         this.renderActiveTab();
-        ToastContainer.show("success", "Produkt geloescht");
+        ToastContainer.show("success", "Produkt gelöscht");
       } catch (e) {
-        ToastContainer.show("error", "Loeschen fehlgeschlagen");
+        ToastContainer.show("error", "Löschen fehlgeschlagen");
       }
     });
     actions.appendChild(delBtn);
@@ -1108,7 +1124,7 @@ export class ManufacturingDialog {
     if (this.selectedStepDef) {
       this.renderStepDefDetail(detailPane, this.selectedStepDef);
     } else {
-      detailPane.textContent = "Schrittvorlage auswaehlen";
+      detailPane.textContent = "Schrittvorlage auswählen";
     }
     container.appendChild(detailPane);
   }
@@ -1175,16 +1191,21 @@ export class ManufacturingDialog {
     actions.className = "mfg-actions";
     const delBtn = document.createElement("button");
     delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Vorlage loeschen";
+    delBtn.textContent = "Vorlage löschen";
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`Schrittvorlage "${sd.name}" wirklich loeschen?`)) return;
+      const ok = await ConfirmDialog.open({
+        title: "Schrittvorlage löschen?",
+        message: `Schrittvorlage „${sd.name}" wird gelöscht.`,
+        destructive: true,
+      });
+      if (!ok) return;
       try {
         await MfgService.deleteStepDef(sd.id);
         this.selectedStepDef = null;
         this.stepDefs = await MfgService.getStepDefs();
         this.renderActiveTab();
-        ToastContainer.show("success", "Vorlage geloescht");
-      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+        ToastContainer.show("success", "Vorlage gelöscht");
+      } catch { ToastContainer.show("error", "Löschen fehlgeschlagen"); }
     });
     actions.appendChild(delBtn);
     container.appendChild(actions);
@@ -1223,7 +1244,7 @@ export class ManufacturingDialog {
     if (this.selectedLicense) {
       this.renderLicenseDetail(detailPane, this.selectedLicense);
     } else {
-      detailPane.textContent = "Lizenz auswaehlen";
+      detailPane.textContent = "Lizenz auswählen";
     }
     container.appendChild(detailPane);
   }
@@ -1317,16 +1338,21 @@ export class ManufacturingDialog {
     actions.className = "mfg-actions";
     const delBtn = document.createElement("button");
     delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Lizenz loeschen";
+    delBtn.textContent = "Lizenz löschen";
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`Lizenz "${l.name}" wirklich loeschen?`)) return;
+      const ok = await ConfirmDialog.open({
+        title: "Lizenz löschen?",
+        message: `Lizenz „${l.name}" wird gelöscht.`,
+        destructive: true,
+      });
+      if (!ok) return;
       try {
         await MfgService.deleteLicense(l.id);
         this.selectedLicense = null;
         this.licenses = await MfgService.getLicenses();
         this.renderActiveTab();
-        ToastContainer.show("success", "Lizenz geloescht");
-      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+        ToastContainer.show("success", "Lizenz gelöscht");
+      } catch { ToastContainer.show("error", "Löschen fehlgeschlagen"); }
     });
     actions.appendChild(delBtn);
     container.appendChild(actions);
@@ -1347,10 +1373,10 @@ export class ManufacturingDialog {
   // ── Quality Tab ──────────────────────────────────────────────────
 
   private renderQualityDashboard(container: HTMLElement): void {
-    this.addBadge(container, `Pruefungen: ${this.inspections.length}`, "");
+    this.addBadge(container, `Prüfungen: ${this.inspections.length}`, "");
     const failed = this.inspections.filter((i) => i.result === "failed").length;
     if (failed > 0) this.addBadge(container, `Fehlgeschlagen: ${failed}`, "mfg-badge-warn");
-    this.addCreateBtn(container, "Pruefung", () => this.createInspection());
+    this.addCreateBtn(container, "Prüfung", () => this.createInspection());
   }
 
   private renderQualityTab(container: HTMLElement): void {
@@ -1363,7 +1389,7 @@ export class ManufacturingDialog {
     selectorRow.appendChild(selectorLabel);
     const projectSelect = document.createElement("select");
     projectSelect.className = "mfg-input";
-    const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt waehlen";
+    const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt wählen";
     projectSelect.appendChild(emptyOpt);
     for (const p of this.allProjects) {
       const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
@@ -1386,7 +1412,7 @@ export class ManufacturingDialog {
     if (!this.qaProjectId) {
       const hint = document.createElement("div");
       hint.className = "mfg-tt-hint";
-      hint.textContent = "Projekt auswaehlen";
+      hint.textContent = "Projekt auswählen";
       container.appendChild(hint);
       return;
     }
@@ -1401,14 +1427,14 @@ export class ManufacturingDialog {
     if (this.selectedInspection) {
       this.renderInspectionDetail(detailPane, this.selectedInspection);
     } else {
-      detailPane.textContent = "Pruefung auswaehlen";
+      detailPane.textContent = "Prüfung auswählen";
     }
     container.appendChild(detailPane);
   }
 
   private renderInspectionList(container: HTMLElement): void {
     container.innerHTML = "";
-    if (this.inspections.length === 0) { container.textContent = "Keine Pruefungen"; return; }
+    if (this.inspections.length === 0) { container.textContent = "Keine Prüfungen"; return; }
     const resultLabels: Record<string, string> = { pending: "Ausstehend", passed: "Bestanden", failed: "Fehlgeschlagen", rework: "Nacharbeit" };
     for (const insp of this.inspections) {
       const item = document.createElement("div");
@@ -1494,7 +1520,7 @@ export class ManufacturingDialog {
           await MfgService.deleteDefect(d.id);
           this.defects = await MfgService.getDefects(insp.id);
           this.renderActiveTab();
-        } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+        } catch { ToastContainer.show("error", "Löschen fehlgeschlagen"); }
       });
       row.appendChild(rmBtn);
       defSection.appendChild(row);
@@ -1532,30 +1558,35 @@ export class ManufacturingDialog {
     actions.className = "mfg-actions";
     const delBtn = document.createElement("button");
     delBtn.className = "dialog-btn dialog-btn-danger";
-    delBtn.textContent = "Pruefung loeschen";
+    delBtn.textContent = "Prüfung löschen";
     delBtn.addEventListener("click", async () => {
-      if (!confirm("Pruefung wirklich loeschen?")) return;
+      const ok = await ConfirmDialog.open({
+        title: "Prüfung löschen?",
+        message: "Diese Prüfung wird gelöscht.",
+        destructive: true,
+      });
+      if (!ok) return;
       try {
         await MfgService.deleteInspection(insp.id);
         this.selectedInspection = null;
         this.defects = [];
         if (this.qaProjectId) this.inspections = await MfgService.getInspections(this.qaProjectId);
         this.renderActiveTab();
-        ToastContainer.show("success", "Pruefung geloescht");
-      } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+        ToastContainer.show("success", "Prüfung gelöscht");
+      } catch { ToastContainer.show("error", "Löschen fehlgeschlagen"); }
     });
     actions.appendChild(delBtn);
     container.appendChild(actions);
   }
 
   private async createInspection(): Promise<void> {
-    if (!this.qaProjectId) { ToastContainer.show("error", "Bitte zuerst ein Projekt waehlen"); return; }
+    if (!this.qaProjectId) { ToastContainer.show("error", "Bitte zuerst ein Projekt wählen"); return; }
     try {
       const insp = await MfgService.createInspection(this.qaProjectId);
       this.inspections = await MfgService.getInspections(this.qaProjectId);
       this.selectedInspection = this.inspections.find((x) => x.id === insp.id) || null;
       this.renderActiveTab();
-      ToastContainer.show("success", "Pruefung erstellt");
+      ToastContainer.show("success", "Prüfung erstellt");
     } catch { ToastContainer.show("error", "Erstellen fehlgeschlagen"); }
   }
 
@@ -1655,7 +1686,7 @@ export class ManufacturingDialog {
               this.renderCostRatesDashboard(
                 this.overlay?.querySelector<HTMLElement>('[data-id="mfg-dashboard"]')!
               );
-            } catch { ToastContainer.show("error", "Loeschen fehlgeschlagen"); }
+            } catch { ToastContainer.show("error", "Löschen fehlgeschlagen"); }
           });
           row.appendChild(delBtn);
           section.appendChild(row);
@@ -1764,7 +1795,7 @@ export class ManufacturingDialog {
     prodSelect.className = "mfg-input";
     const emptyProdOpt = document.createElement("option");
     emptyProdOpt.value = "";
-    emptyProdOpt.textContent = "Produkt waehlen";
+    emptyProdOpt.textContent = "Produkt wählen";
     prodSelect.appendChild(emptyProdOpt);
     for (const p of this.products) {
       const opt = document.createElement("option");
@@ -1787,7 +1818,7 @@ export class ManufacturingDialog {
     qtyRow.className = "mfg-field";
     const qtyLabel = document.createElement("label");
     qtyLabel.className = "mfg-label";
-    qtyLabel.textContent = "Menge (Stueck):";
+    qtyLabel.textContent = "Menge (Stück):";
     const qtyInput = document.createElement("input");
     qtyInput.className = "mfg-input";
     qtyInput.type = "number";
@@ -1891,7 +1922,7 @@ export class ManufacturingDialog {
       selectorRow.appendChild(selectorLabel);
       const projectSelect = document.createElement("select");
       projectSelect.className = "mfg-input";
-      const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt waehlen";
+      const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Projekt wählen";
       projectSelect.appendChild(emptyOpt);
       for (const p of this.allProjects) {
         const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
@@ -1921,7 +1952,7 @@ export class ManufacturingDialog {
       selectorRow.appendChild(prodLabel);
       const prodSelect = document.createElement("select");
       prodSelect.className = "mfg-input";
-      const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Produkt waehlen";
+      const emptyOpt = document.createElement("option"); emptyOpt.value = ""; emptyOpt.textContent = "Produkt wählen";
       prodSelect.appendChild(emptyOpt);
       for (const p of this.products) {
         const opt = document.createElement("option"); opt.value = String(p.id); opt.textContent = p.name;
@@ -1975,8 +2006,8 @@ export class ManufacturingDialog {
       const hint = document.createElement("div");
       hint.className = "mfg-tt-hint";
       hint.textContent = this.reportMode === "project"
-        ? (this.reportProjectId ? "Bericht wird geladen..." : "Projekt auswaehlen")
-        : (this.reportProductId ? "Berechnung wird geladen..." : "Produkt auswaehlen");
+        ? (this.reportProjectId ? "Bericht wird geladen..." : "Projekt auswählen")
+        : (this.reportProductId ? "Berechnung wird geladen..." : "Produkt auswählen");
       detailPane.appendChild(hint);
       container.appendChild(detailPane);
       return;
@@ -2031,7 +2062,7 @@ export class ManufacturingDialog {
         { label: "Netto-Verkaufspreis", value: `${nettoVP.toFixed(2)} EUR`, cls: "mfg-kalk-total", separator: true },
       ];
       if (cb.quantity > 1) {
-        lines.push({ label: `Verkaufspreis/Stueck (${cb.quantity} St.)`, value: `${(nettoVP / cb.quantity).toFixed(2)} EUR` });
+        lines.push({ label: `Verkaufspreis/Stück (${cb.quantity} St.)`, value: `${(nettoVP / cb.quantity).toFixed(2)} EUR` });
       }
       for (const line of lines) {
         if (line.separator) {
@@ -2171,8 +2202,8 @@ export class ManufacturingDialog {
     ];
 
     if (cb.quantity > 1) {
-      lines.push({ label: `Selbstkosten/Stueck (${cb.quantity} St.)`, value: `${cb.selbstkostenPerPiece.toFixed(2)} EUR` });
-      lines.push({ label: `Verkaufspreis/Stueck`, value: `${cb.verkaufspreisPerPiece.toFixed(2)} EUR` });
+      lines.push({ label: `Selbstkosten/Stück (${cb.quantity} St.)`, value: `${cb.selbstkostenPerPiece.toFixed(2)} EUR` });
+      lines.push({ label: `Verkaufspreis/Stück`, value: `${cb.verkaufspreisPerPiece.toFixed(2)} EUR` });
     }
 
     for (const line of lines) {
@@ -2215,7 +2246,7 @@ export class ManufacturingDialog {
     const toggle = document.createElement("button");
     toggle.className = "dialog-btn";
     toggle.style.fontSize = "var(--font-size-caption)";
-    toggle.textContent = "Aenderungshistorie";
+    toggle.textContent = "Änderungshistorie";
     toggle.addEventListener("click", async () => {
       toggle.style.display = "none";
       try {
@@ -2223,7 +2254,7 @@ export class ManufacturingDialog {
         if (entries.length === 0) {
           const hint = document.createElement("div");
           hint.className = "mfg-item-sub";
-          hint.textContent = "Keine Aenderungen protokolliert";
+          hint.textContent = "Keine Änderungen protokolliert";
           section.appendChild(hint);
           return;
         }
@@ -2394,7 +2425,7 @@ export class ManufacturingDialog {
 
   private productTypeLabel(type: string): string {
     const map: Record<string, string> = {
-      naehprodukt: "Naehprodukt",
+      nähprodukt: "Nähprodukt",
       stickprodukt: "Stickprodukt",
       kombiprodukt: "Kombiprodukt",
     };

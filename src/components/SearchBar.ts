@@ -274,7 +274,7 @@ export class SearchBar extends Component {
     grid.appendChild(this.buildTextFilter("Quelle", "fileSource", "z.B. Makerist\u2026", sp));
     grid.appendChild(this.buildTextFilter("Kategorie", "category", "z.B. Kleid, Rock\u2026", sp));
     grid.appendChild(this.buildTextFilter("Designer", "author", "z.B. Burda\u2026", sp));
-    grid.appendChild(this.buildTextFilter("Groesse", "sizeRange", "z.B. 36-42, M\u2026", sp));
+    grid.appendChild(this.buildTextFilter("Größe", "sizeRange", "z.B. 36-42, M\u2026", sp));
 
     this.panelEl.appendChild(grid);
 

@@ -2,6 +2,7 @@ import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
 import { trapFocus } from "../utils/focus-trap";
+import { ConfirmDialog } from "./ConfirmDialog";
 import * as SettingsService from "../services/SettingsService";
 import * as AiService from "../services/AiService";
 import { invoke } from "@tauri-apps/api/core";
@@ -82,7 +83,7 @@ export class SettingsDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -312,7 +313,7 @@ export class SettingsDialog {
     form.appendChild(themeGroup);
 
     // Font size
-    const fontGroup = this.createFormGroup("Schriftgroesse");
+    const fontGroup = this.createFormGroup("Schriftgröße");
     const fontSelect = document.createElement("select");
     fontSelect.className = "settings-input";
     fontSelect.dataset.key = "font_size";
@@ -367,11 +368,11 @@ export class SettingsDialog {
 
     const bgSelectBtn = document.createElement("button");
     bgSelectBtn.className = "dialog-btn dialog-btn-secondary";
-    bgSelectBtn.textContent = "Bild waehlen";
+    bgSelectBtn.textContent = "Bild wählen";
     bgSelectBtn.addEventListener("click", async () => {
       const selected = await open({
         multiple: false,
-        title: "Hintergrundbild waehlen",
+        title: "Hintergrundbild wählen",
         filters: [
           {
             name: "Bilder",
@@ -521,7 +522,7 @@ export class SettingsDialog {
     form.appendChild(urlGroup);
 
     // API Key (only visible for OpenAI)
-    const apiKeyGroup = this.createFormGroup("API-Schluessel");
+    const apiKeyGroup = this.createFormGroup("API-Schlüssel");
     apiKeyGroup.className = "settings-form-group settings-api-key-group";
     const apiKeyInput = document.createElement("input");
     apiKeyInput.type = "password";
@@ -797,20 +798,25 @@ export class SettingsDialog {
 
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "dialog-btn dialog-btn-danger";
-      deleteBtn.textContent = "Loeschen";
+      deleteBtn.textContent = "Löschen";
       deleteBtn.style.padding = "2px 8px";
       deleteBtn.style.fontSize = "var(--font-size-caption)";
       deleteBtn.addEventListener("click", async () => {
-        if (!confirm(`Feld "${field.name}" wirklich loeschen?`)) return;
+        const ok = await ConfirmDialog.open({
+          title: "Feld löschen?",
+          message: `Benutzerdefiniertes Feld „${field.name}" wird gelöscht.`,
+          destructive: true,
+        });
+        if (!ok) return;
         try {
           await SettingsService.deleteCustomField(field.id);
           const idx = fields.indexOf(field);
           if (idx >= 0) fields.splice(idx, 1);
           this.renderCustomFieldsList(container, fields);
-          ToastContainer.show("success", `Feld "${field.name}" geloescht`);
+          ToastContainer.show("success", `Feld "${field.name}" gelöscht`);
         } catch (e) {
           console.warn("Failed to delete custom field:", e);
-          ToastContainer.show("error", "Feld konnte nicht geloescht werden");
+          ToastContainer.show("error", "Feld konnte nicht gelöscht werden");
         }
       });
       row.appendChild(deleteBtn);

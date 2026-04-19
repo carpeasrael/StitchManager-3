@@ -121,7 +121,7 @@ export class BatchDialog {
 
     this.cancelBtn = document.createElement("button");
     this.cancelBtn.className = "dialog-btn dialog-btn-secondary";
-    this.cancelBtn.textContent = "Schliessen";
+    this.cancelBtn.textContent = "Schließen";
     this.cancelBtn.addEventListener("click", () => {
       this.close();
     });
@@ -240,7 +240,7 @@ export class BatchDialog {
 
   private onComplete(): void {
     if (this.cancelBtn) {
-      this.cancelBtn.textContent = "Schliessen";
+      this.cancelBtn.textContent = "Schließen";
       this.cancelBtn.disabled = false;
     }
 

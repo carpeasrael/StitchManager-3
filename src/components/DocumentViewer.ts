@@ -5,6 +5,7 @@ import type {
   RenderTask,
 } from "pdfjs-dist/types/src/display/api";
 import * as ViewerService from "../services/ViewerService";
+import { trapFocus } from "../utils/focus-trap";
 import type { InstructionBookmark, InstructionNote } from "../types";
 
 // Configure pdf.js worker
@@ -25,6 +26,7 @@ export class DocumentViewer {
   private zoom = 1.0;
   private zoomMode: "fit-width" | "fit-page" | "custom" = "fit-width";
   private overlay: HTMLElement | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
   private canvasContainer: HTMLElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private renderTask: RenderTask | null = null;
@@ -79,6 +81,13 @@ export class DocumentViewer {
 
     this.overlay = this.buildUI();
     document.body.appendChild(this.overlay);
+
+    // Audit Wave 3 usability: trap focus inside the dialog and restore the
+    // previous activeElement on close.
+    const dialog = this.overlay.querySelector<HTMLElement>(".document-viewer");
+    if (dialog) {
+      this.releaseFocusTrap = trapFocus(dialog);
+    }
 
     // Register keyboard shortcuts
     this.keyHandler = (e: KeyboardEvent) => this.onKeyDown(e);
@@ -177,8 +186,14 @@ export class DocumentViewer {
     const overlay = document.createElement("div");
     overlay.className = "document-viewer-overlay";
 
+    // Audit Wave 3 usability: full-screen modal needs proper dialog ARIA
+    // and focus trap so keyboard users can't tab into the obscured app.
     const viewer = document.createElement("div");
     viewer.className = "document-viewer";
+    viewer.setAttribute("role", "dialog");
+    viewer.setAttribute("aria-modal", "true");
+    viewer.setAttribute("aria-label", `Dokument: ${this.fileName}`);
+    viewer.tabIndex = -1;
 
     // Header
     const header = document.createElement("div");
@@ -197,7 +212,7 @@ export class DocumentViewer {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dv-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => DocumentViewer.dismiss());
     header.appendChild(closeBtn);
 
@@ -264,7 +279,7 @@ export class DocumentViewer {
     zoomGroup.appendChild(zoomLabel);
 
     zoomGroup.appendChild(
-      this.createToolbarBtn("+", "Vergroessern", () => this.zoomIn())
+      this.createToolbarBtn("+", "Vergrößern", () => this.zoomIn())
     );
     zoomGroup.appendChild(
       this.createToolbarBtn(
@@ -768,7 +783,7 @@ export class DocumentViewer {
 
       const delBtn = document.createElement("button");
       delBtn.className = "dv-btn dv-note-delete";
-      delBtn.textContent = "Loeschen";
+      delBtn.textContent = "Löschen";
       delBtn.addEventListener("click", async () => {
         await ViewerService.deleteNote(note.id);
         this.renderSidebar();
@@ -781,7 +796,7 @@ export class DocumentViewer {
 
     const addBtn = document.createElement("button");
     addBtn.className = "dv-btn dv-note-add";
-    addBtn.textContent = "+ Notiz hinzufuegen";
+    addBtn.textContent = "+ Notiz hinzufügen";
     addBtn.addEventListener("click", async () => {
       await ViewerService.addNote(
         this.fileId,
@@ -892,6 +907,10 @@ export class DocumentViewer {
     if (this.pdfDoc) {
       this.pdfDoc.destroy();
       this.pdfDoc = null;
+    }
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
     }
     if (this.overlay) {
       this.overlay.remove();

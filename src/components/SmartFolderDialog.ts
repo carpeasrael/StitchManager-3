@@ -40,7 +40,7 @@ export class SmartFolderDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Dialog schliessen");
+    closeBtn.setAttribute("aria-label", "Dialog schließen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -126,7 +126,7 @@ export class SmartFolderDialog {
     const aiSelect = document.createElement("select");
     aiSelect.className = "settings-input";
     aiSelect.id = "sf-ai";
-    for (const [val, label] of [["", "-- Alle --"], ["false", "Nicht analysiert"], ["true", "Analysiert"], ["confirmed", "Bestaetigt"]]) {
+    for (const [val, label] of [["", "-- Alle --"], ["false", "Nicht analysiert"], ["true", "Analysiert"], ["confirmed", "Bestätigt"]]) {
       const opt = document.createElement("option");
       opt.value = val;
       opt.textContent = label;

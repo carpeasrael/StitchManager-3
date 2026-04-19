@@ -101,7 +101,7 @@ export class EditDialog {
     // Close button
     const closeBtn = document.createElement("button");
     closeBtn.className = "edit-close-btn";
-    closeBtn.textContent = "Schliessen";
+    closeBtn.textContent = "Schließen";
     closeBtn.addEventListener("click", () => this.close());
     dialog.appendChild(closeBtn);
 

@@ -1,4 +1,5 @@
 import * as ViewerService from "../services/ViewerService";
+import { trapFocus } from "../utils/focus-trap";
 
 interface ImageSource {
   filePath: string;
@@ -14,6 +15,7 @@ export class ImageViewerDialog {
   private panX = 0;
   private panY = 0;
   private overlay: HTMLElement | null = null;
+  private releaseFocusTrap: (() => void) | null = null;
   private imgEl: HTMLImageElement | null = null;
   private isPanning = false;
   private lastX = 0;
@@ -49,6 +51,12 @@ export class ImageViewerDialog {
     this.overlay = this.buildUI();
     document.body.appendChild(this.overlay);
 
+    // Audit Wave 3 usability: focus trap for full-screen modal.
+    const dialogEl = this.overlay.querySelector<HTMLElement>(".image-viewer-dialog");
+    if (dialogEl) {
+      this.releaseFocusTrap = trapFocus(dialogEl);
+    }
+
     this.keyHandler = (e: KeyboardEvent) => this.onKeyDown(e);
     document.addEventListener("keydown", this.keyHandler);
 
@@ -59,8 +67,13 @@ export class ImageViewerDialog {
     const overlay = document.createElement("div");
     overlay.className = "image-viewer-overlay";
 
+    // Audit Wave 3 usability: dialog ARIA on full-screen modal.
     const dialog = document.createElement("div");
     dialog.className = "image-viewer-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", "Bildvorschau");
+    dialog.tabIndex = -1;
 
     // Header
     const header = document.createElement("div");
@@ -81,7 +94,7 @@ export class ImageViewerDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "image-viewer-close";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => ImageViewerDialog.dismiss());
     header.appendChild(closeBtn);
 
@@ -290,6 +303,10 @@ export class ImageViewerDialog {
     if (this.keyHandler) {
       document.removeEventListener("keydown", this.keyHandler);
       this.keyHandler = null;
+    }
+    if (this.releaseFocusTrap) {
+      this.releaseFocusTrap();
+      this.releaseFocusTrap = null;
     }
     if (this.overlay) {
       this.overlay.remove();

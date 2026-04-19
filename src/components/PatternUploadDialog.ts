@@ -78,7 +78,7 @@ export class PatternUploadDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dv-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => PatternUploadDialog.dismiss());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -104,7 +104,7 @@ export class PatternUploadDialog {
     const fileDisplay = document.createElement("span");
     fileDisplay.style.flex = "1";
     fileDisplay.style.opacity = "0.6";
-    fileDisplay.textContent = "Keine Datei gewaehlt";
+    fileDisplay.textContent = "Keine Datei gewählt";
     const browseBtn = document.createElement("button");
     browseBtn.className = "dialog-btn dialog-btn-primary";
     browseBtn.textContent = "Durchsuchen...";

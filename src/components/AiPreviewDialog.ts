@@ -57,7 +57,7 @@ export class AiPreviewDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);

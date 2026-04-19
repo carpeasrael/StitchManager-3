@@ -25,6 +25,8 @@ import * as ProjectService from "./services/ProjectService";
 import { ProjectListDialog } from "./components/ProjectListDialog";
 import { ManufacturingDialog } from "./components/ManufacturingDialog";
 import { ImportPreviewDialog } from "./components/ImportPreviewDialog";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { InputDialog } from "./components/InputDialog";
 import * as BackupService from "./services/BackupService";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
@@ -257,7 +259,7 @@ function showInfoDialog(): void {
       <div class="info-row"><span class="info-label">Technologie</span><span>Tauri v2 + Rust + TypeScript</span></div>
     </div>
     <div class="info-links"></div>
-    <button class="info-close-btn">Schliessen</button>
+    <button class="info-close-btn">Schließen</button>
   `;
 
   const linksEl = dialog.querySelector(".info-links")!;
@@ -295,9 +297,23 @@ async function deleteSelectedFiles(): Promise<void> {
   if (fileIds.length === 1) {
     const file = files.find((f) => f.id === fileIds[0]);
     const label = file ? (file.name || file.filename) : `ID ${fileIds[0]}`;
-    if (!confirm(`Datei "${label}" wirklich loeschen?`)) return;
+    const ok = await ConfirmDialog.open({
+      title: "Datei in Papierkorb verschieben?",
+      message: `Datei „${label}" wird in den Papierkorb verschoben.`,
+      hint: "Du kannst die Datei aus dem Papierkorb wiederherstellen.",
+      destructive: true,
+      confirmLabel: "In Papierkorb",
+    });
+    if (!ok) return;
   } else {
-    if (!confirm(`${fileIds.length} Dateien wirklich loeschen?`)) return;
+    const ok = await ConfirmDialog.open({
+      title: "Dateien in Papierkorb verschieben?",
+      message: `${fileIds.length} Dateien werden in den Papierkorb verschoben.`,
+      hint: "Du kannst die Dateien aus dem Papierkorb wiederherstellen.",
+      destructive: true,
+      confirmLabel: "In Papierkorb",
+    });
+    if (!ok) return;
   }
 
   // Soft-delete (move to trash) instead of hard delete
@@ -320,7 +336,7 @@ async function deleteSelectedFiles(): Promise<void> {
   } else if (deleted > 0) {
     ToastContainer.show("info", `${deleted} von ${fileIds.length} Dateien in Papierkorb verschoben`);
   } else {
-    ToastContainer.show("error", "Dateien konnten nicht geloescht werden");
+    ToastContainer.show("error", "Dateien konnten nicht gelöscht werden");
   }
 }
 
@@ -394,9 +410,11 @@ function initEventHandlers(): () => void {
           return;
         }
         // Show info and offer restore only. Purge is a separate toolbar action.
-        const restoreAll = confirm(
-          `${items.length} Dateien im Papierkorb.\n\nAlle wiederherstellen?`
-        );
+        const restoreAll = await ConfirmDialog.open({
+          title: "Papierkorb wiederherstellen",
+          message: `${items.length} Dateien befinden sich im Papierkorb. Alle wiederherstellen?`,
+          confirmLabel: "Alle wiederherstellen",
+        });
         if (restoreAll) {
           for (const [id] of items) await BackupService.restoreFile(id);
           ToastContainer.show("success", `${items.length} Dateien wiederhergestellt`);
@@ -415,7 +433,14 @@ function initEventHandlers(): () => void {
           ToastContainer.show("info", "Papierkorb ist leer");
           return;
         }
-        if (confirm(`${items.length} Dateien endgueltig loeschen?\n\nDiese Aktion kann nicht rueckgaengig gemacht werden.`)) {
+        const ok = await ConfirmDialog.open({
+          title: "Papierkorb endgültig leeren?",
+          message: `${items.length} Dateien werden endgültig gelöscht.`,
+          hint: "Diese Aktion kann nicht rückgängig gemacht werden.",
+          destructive: true,
+          confirmLabel: "Endgültig löschen",
+        });
+        if (ok) {
           for (const [id] of items) await BackupService.purgeFile(id);
           ToastContainer.show("success", "Papierkorb geleert");
           EventBus.emit("file:refresh");
@@ -431,7 +456,7 @@ function initEventHandlers(): () => void {
       const singleId = appState.get("selectedFileId");
       const ids = fileIds.length > 0 ? fileIds : singleId ? [singleId] : [];
       if (ids.length === 0) {
-        ToastContainer.show("info", "Keine Dateien ausgewaehlt");
+        ToastContainer.show("info", "Keine Dateien ausgewählt");
         return;
       }
       try {
@@ -603,11 +628,17 @@ function initEventHandlers(): () => void {
       // Check for subfolders
       const hasSubfolders = folders.some((f) => f.parentId === folderId);
 
-      let msg = `Ordner "${folder.name}"`;
+      let msg = `Ordner „${folder.name}"`;
       if (hasSubfolders) msg += " und Unterordner";
       if (fileCount > 0) msg += ` mit ${fileCount} Datei(en)`;
-      msg += " wirklich l\u00F6schen?";
-      if (!confirm(msg)) return;
+      msg += " wird gelöscht.";
+      const ok = await ConfirmDialog.open({
+        title: "Ordner löschen?",
+        message: msg,
+        hint: "Diese Aktion kann nicht rückgängig gemacht werden.",
+        destructive: true,
+      });
+      if (!ok) return;
 
       try {
         await FolderService.remove(folderId);
@@ -628,7 +659,7 @@ function initEventHandlers(): () => void {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: "Ordner fuer Import waehlen",
+        title: "Ordner für Import wählen",
       });
       if (!selected) return;
 
@@ -741,18 +772,25 @@ function initEventHandlers(): () => void {
         return;
       }
 
-      const format = prompt(`Zielformat waehlen (${formats.join(", ")}):`);
+      const format = await InputDialog.open({
+        title: "Format konvertieren",
+        label: `Zielformat (${formats.join(", ")})`,
+        placeholder: formats[0],
+        validate: (v) => {
+          if (!v) return "Bitte ein Format eingeben";
+          if (!formats.includes(v.toUpperCase())) {
+            return `Unbekanntes Format: ${v}`;
+          }
+          return null;
+        },
+      });
       if (!format) return;
-      const upper = format.trim().toUpperCase();
-      if (!formats.includes(upper)) {
-        ToastContainer.show("error", `Unbekanntes Format: ${format}`);
-        return;
-      }
+      const upper = format.toUpperCase();
 
       const selected = await open({
         directory: true,
         multiple: false,
-        title: "Zielordner fuer Konvertierung waehlen",
+        title: "Zielordner für Konvertierung wählen",
       });
       if (!selected) return;
       const outputDir = typeof selected === "string" ? selected : String(selected);
@@ -797,17 +835,27 @@ function initEventHandlers(): () => void {
       }
 
       if (machines.length === 0) {
-        ToastContainer.show("info", "Keine Maschinen konfiguriert. Bitte in den Einstellungen hinzufuegen.");
+        ToastContainer.show("info", "Keine Maschinen konfiguriert. Bitte in den Einstellungen hinzufügen.");
         return;
       }
 
-      const machineNames = machines.map((m, i) => `${i + 1}. ${m.name}`).join("\n");
-      const choice = prompt(`Maschine waehlen:\n${machineNames}\n\nNummer eingeben:`);
+      const machineLabels = machines.map((m) => m.name);
+      const choice = await InputDialog.open({
+        title: "An Maschine senden",
+        label: `Maschine (${machineLabels.join(", ")})`,
+        placeholder: machineLabels[0],
+        validate: (v) => {
+          if (!v) return "Bitte einen Maschinennamen eingeben";
+          if (!machineLabels.includes(v)) {
+            return `Unbekannte Maschine: ${v}`;
+          }
+          return null;
+        },
+      });
       if (!choice) return;
-
-      const idx = parseInt(choice, 10) - 1;
-      if (isNaN(idx) || idx < 0 || idx >= machines.length) {
-        ToastContainer.show("error", "Ungueltige Auswahl");
+      const idx = machineLabels.indexOf(choice);
+      if (idx < 0) {
+        ToastContainer.show("error", "Ungültige Auswahl");
         return;
       }
 
@@ -815,11 +863,11 @@ function initEventHandlers(): () => void {
         const result = await FileService.transferFiles(machines[idx].id, fileIds);
         ToastContainer.show(
           result.failed > 0 ? "error" : "success",
-          `${result.success} von ${result.total} Dateien uebertragen`
+          `${result.success} von ${result.total} Dateien übertragen`
         );
       } catch (e) {
         console.warn("Transfer failed:", e);
-        ToastContainer.show("error", "Uebertragung fehlgeschlagen");
+        ToastContainer.show("error", "Übertragung fehlgeschlagen");
       }
     }),
 
@@ -862,7 +910,7 @@ function initEventHandlers(): () => void {
       if (fileIds.length === 0) {
         const singleId = appState.get("selectedFileId");
         if (singleId === null) {
-          ToastContainer.show("info", "Keine Dateien ausgewaehlt");
+          ToastContainer.show("info", "Keine Dateien ausgewählt");
           return;
         }
         fileIds = [singleId];
@@ -1126,7 +1174,7 @@ function setupDragDrop(): () => void {
 
     const folderId = appState.get("selectedFolderId");
     if (!folderId) {
-      ToastContainer.show("error", "Bitte zuerst einen Ordner auswaehlen");
+      ToastContainer.show("error", "Bitte zuerst einen Ordner auswählen");
       return;
     }
 

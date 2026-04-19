@@ -45,8 +45,8 @@ export class FolderDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.title = "Schliessen";
-    closeBtn.setAttribute("aria-label", "Dialog schliessen");
+    closeBtn.title = "Schließen";
+    closeBtn.setAttribute("aria-label", "Dialog schließen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
 
@@ -86,7 +86,7 @@ export class FolderDialog {
     pathInput.id = "folder-dialog-path";
     pathInput.type = "text";
     pathInput.readOnly = true;
-    pathInput.placeholder = "Verzeichnis auswaehlen...";
+    pathInput.placeholder = "Verzeichnis auswählen...";
     const browseBtn = document.createElement("button");
     browseBtn.className = "btn btn-secondary";
     browseBtn.type = "button";
@@ -96,7 +96,7 @@ export class FolderDialog {
         const selected = await open({
           directory: true,
           multiple: false,
-          title: "Ordner auswaehlen",
+          title: "Ordner auswählen",
         });
         if (!selected) return;
         const p = typeof selected === "string" ? selected : String(selected);
@@ -127,7 +127,7 @@ export class FolderDialog {
     parentGroup.className = "settings-form-group";
     const parentLabel = document.createElement("label");
     parentLabel.className = "settings-label";
-    parentLabel.textContent = "Uebergeordneter Ordner";
+    parentLabel.textContent = "Übergeordneter Ordner";
     parentLabel.htmlFor = "folder-dialog-parent";
     const parentSelect = document.createElement("select");
     parentSelect.className = "settings-input";
@@ -211,7 +211,7 @@ export class FolderDialog {
         return;
       }
       if (!path) {
-        ToastContainer.show("error", "Bitte ein Verzeichnis auswaehlen");
+        ToastContainer.show("error", "Bitte ein Verzeichnis auswählen");
         browseBtn.focus();
         return;
       }

@@ -9,6 +9,7 @@ import { buildFolderTree, flattenVisibleTree } from "../utils/tree";
 import * as FolderService from "../services/FolderService";
 import * as ProjectService from "../services/ProjectService";
 import * as SmartFolderService from "../services/SmartFolderService";
+import { InputDialog } from "./InputDialog";
 import type { Collection, SmartFolder } from "../types";
 
 export class Sidebar extends Component {
@@ -481,8 +482,8 @@ export class Sidebar extends Component {
         const delBtn = document.createElement("button");
         delBtn.className = "folder-delete-btn";
         delBtn.textContent = "\u00D7";
-        delBtn.title = "Loeschen";
-        delBtn.setAttribute("aria-label", `${sf.name} loeschen`);
+        delBtn.title = "Löschen";
+        delBtn.setAttribute("aria-label", `${sf.name} löschen`);
         delBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           try {
@@ -493,7 +494,7 @@ export class Sidebar extends Component {
               appState.set("selectedSmartFolderId", null);
             }
           } catch {
-            ToastContainer.show("error", "Konnte nicht geloescht werden");
+            ToastContainer.show("error", "Konnte nicht gelöscht werden");
           }
         });
         li.appendChild(delBtn);
@@ -537,10 +538,15 @@ export class Sidebar extends Component {
     addBtn.title = "Neue Sammlung";
     addBtn.setAttribute("aria-label", "Neue Sammlung");
     addBtn.addEventListener("click", async () => {
-      const name = prompt("Sammlungsname:");
-      if (!name?.trim()) return;
+      const name = await InputDialog.open({
+        title: "Neue Sammlung",
+        label: "Name der Sammlung",
+        placeholder: "z.B. Frühling 2026",
+        validate: (v) => (v ? null : "Bitte einen Namen eingeben"),
+      });
+      if (!name) return;
       try {
-        await ProjectService.createCollection(name.trim());
+        await ProjectService.createCollection(name);
         await this.loadCollections();
       } catch {
         ToastContainer.show("error", "Sammlung konnte nicht erstellt werden");
@@ -575,15 +581,15 @@ export class Sidebar extends Component {
         const delBtn = document.createElement("button");
         delBtn.className = "folder-delete-btn";
         delBtn.textContent = "\u00D7";
-        delBtn.title = "Sammlung loeschen";
-        delBtn.setAttribute("aria-label", `Sammlung ${col.name} loeschen`);
+        delBtn.title = "Sammlung löschen";
+        delBtn.setAttribute("aria-label", `Sammlung ${col.name} löschen`);
         delBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           try {
             await ProjectService.deleteCollection(col.id);
             await this.loadCollections();
           } catch {
-            ToastContainer.show("error", "Sammlung konnte nicht geloescht werden");
+            ToastContainer.show("error", "Sammlung konnte nicht gelöscht werden");
           }
         });
         li.appendChild(delBtn);

@@ -5,6 +5,7 @@ import * as ReportService from "../services/ReportService";
 import * as SettingsService from "../services/SettingsService";
 import { ToastContainer } from "./Toast";
 import { trapFocus } from "../utils/focus-trap";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type {
   Project,
   ProjectDetail,
@@ -140,7 +141,7 @@ export class ProjectListDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dv-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.setAttribute("aria-label", "Schliessen");
+    closeBtn.setAttribute("aria-label", "Schließen");
     closeBtn.addEventListener("click", () => ProjectListDialog.dismiss());
     header.appendChild(closeBtn);
 
@@ -165,7 +166,7 @@ export class ProjectListDialog {
     const detailPane = document.createElement("div");
     detailPane.className = "pl-detail-pane";
     detailPane.dataset.id = "pl-detail";
-    detailPane.textContent = "Projekt auswaehlen";
+    detailPane.textContent = "Projekt auswählen";
     content.appendChild(detailPane);
 
     dialog.appendChild(content);
@@ -350,7 +351,7 @@ export class ProjectListDialog {
     cancelBtn.style.marginLeft = "8px";
     cancelBtn.textContent = "Abbrechen";
     cancelBtn.addEventListener("click", () => {
-      pane.textContent = "Projekt auswaehlen";
+      pane.textContent = "Projekt auswählen";
     });
     pane.appendChild(cancelBtn);
   }
@@ -473,7 +474,7 @@ export class ProjectListDialog {
         try {
           if (cb.checked) {
             await ProjectService.linkProductToProject(projectId, product.id);
-            ToastContainer.show("success", `${product.name} verknuepft`);
+            ToastContainer.show("success", `${product.name} verknüpft`);
           } else {
             await ProjectService.unlinkProductFromProject(
               projectId,
@@ -491,7 +492,7 @@ export class ProjectListDialog {
           }
         } catch {
           cb.checked = !cb.checked;
-          ToastContainer.show("error", "Verknuepfung fehlgeschlagen");
+          ToastContainer.show("error", "Verknüpfung fehlgeschlagen");
         }
       });
 
@@ -553,10 +554,10 @@ export class ProjectListDialog {
       container
     );
 
-    // Sub-section: Naehanleitungen
+    // Sub-section: Nähanleitungen
     await this.renderFileRoleSubsection(
       section,
-      "Naehanleitungen",
+      "Nähanleitungen",
       "instruction",
       instructionFiles,
       linkedFiles,
@@ -628,7 +629,7 @@ export class ProjectListDialog {
       const fileSelect = document.createElement("select");
       fileSelect.className = "pp-setting-select";
       fileSelect.style.flex = "1";
-      fileSelect.innerHTML = '<option value="">-- Datei auswaehlen --</option>';
+      fileSelect.innerHTML = '<option value="">-- Datei auswählen --</option>';
       for (const f of availableFiles) {
         if (!linkedFileIds.has(f.id)) {
           const opt = document.createElement("option");
@@ -640,7 +641,7 @@ export class ProjectListDialog {
 
       const addBtn = document.createElement("button");
       addBtn.className = "dv-btn";
-      addBtn.textContent = "Hinzufuegen";
+      addBtn.textContent = "Hinzufügen";
       addBtn.style.fontSize = "0.85em";
       addBtn.addEventListener("click", async () => {
         const fileId = parseInt(fileSelect.value, 10);
@@ -651,7 +652,7 @@ export class ProjectListDialog {
             fileId,
             role
           );
-          ToastContainer.show("success", `${pf.filename} hinzugefuegt`);
+          ToastContainer.show("success", `${pf.filename} hinzugefügt`);
           // Refresh entire file section
           const sec = section.closest<HTMLElement>(
             '[data-id="pl-files-section"]'
@@ -664,7 +665,7 @@ export class ProjectListDialog {
             }
           }
         } catch {
-          ToastContainer.show("error", "Hinzufuegen fehlgeschlagen");
+          ToastContainer.show("error", "Hinzufügen fehlgeschlagen");
         }
       });
 
@@ -713,7 +714,7 @@ export class ProjectListDialog {
       hint.style.opacity = "0.6";
       hint.style.fontSize = "0.85em";
       hint.textContent =
-        "Kein Materialbedarf. Verknuepfen Sie zuerst Produkte mit Stuecklisten.";
+        "Kein Materialbedarf. Verknüpfen Sie zuerst Produkte mit Stücklisten.";
       section.appendChild(hint);
       container.appendChild(section);
       return;
@@ -728,7 +729,7 @@ export class ProjectListDialog {
       "Material",
       "Einheit",
       "Bedarf",
-      "Verfuegbar",
+      "Verfügbar",
       "Fehlmenge",
     ]) {
       const th = document.createElement("th");
@@ -810,7 +811,7 @@ export class ProjectListDialog {
               const order = await ProcurementService.createOrder({
                 supplierId,
                 projectId,
-                notes: `Auto-Bestellung fuer Projekt (Fehlmengen)`,
+                notes: `Auto-Bestellung für Projekt (Fehlmengen)`,
               });
               // Add items to order
               for (const item of group.items) {
@@ -824,7 +825,7 @@ export class ProjectListDialog {
             } catch {
               ToastContainer.show(
                 "error",
-                `Bestellung fuer ${group.supplierName} fehlgeschlagen`
+                `Bestellung für ${group.supplierName} fehlgeschlagen`
               );
             }
           }
@@ -942,9 +943,9 @@ export class ProjectListDialog {
     pane.appendChild(detailsHeader);
 
     const knownFields = [
-      { key: "chosen_size", label: "Gewaehlte Groesse" },
+      { key: "chosen_size", label: "Gewählte Größe" },
       { key: "fabric_used", label: "Stoff" },
-      { key: "planned_modifications", label: "Geplante Aenderungen" },
+      { key: "planned_modifications", label: "Geplante Änderungen" },
       { key: "cut_version", label: "Schnittversion" },
     ];
 
@@ -990,7 +991,7 @@ export class ProjectListDialog {
       tcTable.className = "pl-tc-table";
       const thead = document.createElement("thead");
       const headRow = document.createElement("tr");
-      for (const h of ["Schritt", "Geplant", "Tatsaechlich", "Differenz"]) {
+      for (const h of ["Schritt", "Geplant", "Tatsächlich", "Differenz"]) {
         const th = document.createElement("th");
         th.textContent = h;
         headRow.appendChild(th);
@@ -1093,9 +1094,14 @@ export class ProjectListDialog {
 
     const delBtn = document.createElement("button");
     delBtn.className = "dv-btn dv-note-delete";
-    delBtn.textContent = "Loeschen";
+    delBtn.textContent = "Löschen";
     delBtn.addEventListener("click", async () => {
-      if (!confirm(`Projekt "${p.name}" wirklich loeschen?`)) return;
+      const ok = await ConfirmDialog.open({
+        title: "Projekt löschen?",
+        message: `Projekt „${p.name}" wird gelöscht.`,
+        destructive: true,
+      });
+      if (!ok) return;
       try {
         await ProjectService.deleteProject(p.id);
         this.selectedProject = null;
@@ -1103,9 +1109,9 @@ export class ProjectListDialog {
         this.renderList();
         const detailP =
           this.overlay?.querySelector<HTMLElement>('[data-id="pl-detail"]');
-        if (detailP) detailP.textContent = "Projekt auswaehlen";
+        if (detailP) detailP.textContent = "Projekt auswählen";
       } catch {
-        ToastContainer.show("error", "Loeschen fehlgeschlagen");
+        ToastContainer.show("error", "Löschen fehlgeschlagen");
       }
     });
     actions.appendChild(delBtn);
@@ -1118,7 +1124,7 @@ export class ProjectListDialog {
     const auditBtn = document.createElement("button");
     auditBtn.className = "dv-btn";
     auditBtn.style.fontSize = "0.85em";
-    auditBtn.textContent = "Aenderungshistorie";
+    auditBtn.textContent = "Änderungshistorie";
     auditBtn.addEventListener("click", async () => {
       auditBtn.style.display = "none";
       try {
@@ -1127,7 +1133,7 @@ export class ProjectListDialog {
           const hint = document.createElement("div");
           hint.style.fontSize = "0.85em";
           hint.style.opacity = "0.6";
-          hint.textContent = "Keine Aenderungen protokolliert";
+          hint.textContent = "Keine Änderungen protokolliert";
           auditSection.appendChild(hint);
           return;
         }

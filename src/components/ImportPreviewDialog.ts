@@ -67,8 +67,8 @@ export class ImportPreviewDialog {
     const closeBtn = document.createElement("button");
     closeBtn.className = "dialog-close-btn";
     closeBtn.textContent = "\u00D7";
-    closeBtn.title = "Schliessen";
-    closeBtn.setAttribute("aria-label", "Dialog schliessen");
+    closeBtn.title = "Schließen";
+    closeBtn.setAttribute("aria-label", "Dialog schließen");
     closeBtn.addEventListener("click", () => this.close());
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -87,7 +87,7 @@ export class ImportPreviewDialog {
     selectRow.className = "import-preview-select-row";
     const selectAllBtn = document.createElement("button");
     selectAllBtn.className = "btn btn-small";
-    selectAllBtn.textContent = "Alle auswaehlen";
+    selectAllBtn.textContent = "Alle auswählen";
     selectAllBtn.addEventListener("click", () => {
       for (const f of files) {
         if (!f.alreadyImported) this.checked.add(f.filepath);
@@ -98,7 +98,7 @@ export class ImportPreviewDialog {
     });
     const selectNoneBtn = document.createElement("button");
     selectNoneBtn.className = "btn btn-small";
-    selectNoneBtn.textContent = "Keine auswaehlen";
+    selectNoneBtn.textContent = "Keine auswählen";
     selectNoneBtn.addEventListener("click", () => {
       this.checked.clear();
       renderList();
@@ -141,7 +141,7 @@ export class ImportPreviewDialog {
       headerRow.appendChild(span);
     };
     makeHeader("Dateiname", "filename", "name");
-    makeHeader("Groesse", "fileSize", "size");
+    makeHeader("Größe", "fileSize", "size");
     makeHeader("Typ", "fileType", "type");
 
     body.appendChild(headerRow);
@@ -423,7 +423,7 @@ export class ImportPreviewDialog {
       if (folderSelect.value === "__new__") {
         // Create new folder from source path
         if (!sourcePath) {
-          ToastContainer.show("error", "Kein Quellpfad fuer neuen Ordner verfuegbar");
+          ToastContainer.show("error", "Kein Quellpfad für neuen Ordner verfügbar");
           return;
         }
         try {
@@ -442,7 +442,7 @@ export class ImportPreviewDialog {
       } else {
         selectedFolderId = Number(folderSelect.value);
         if (!selectedFolderId) {
-          ToastContainer.show("error", "Bitte einen Zielordner auswaehlen");
+          ToastContainer.show("error", "Bitte einen Zielordner auswählen");
           return;
         }
       }
@@ -451,7 +451,7 @@ export class ImportPreviewDialog {
         .filter((f) => this.checked.has(f.filepath) && !f.alreadyImported)
         .map((f) => f.filepath);
       if (checkedPaths.length === 0) {
-        ToastContainer.show("info", "Keine Dateien zum Importieren ausgewaehlt");
+        ToastContainer.show("info", "Keine Dateien zum Importieren ausgewählt");
         return;
       }
 

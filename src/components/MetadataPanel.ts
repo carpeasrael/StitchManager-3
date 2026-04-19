@@ -8,6 +8,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { ToastContainer } from "./Toast";
 import { TagInput } from "./TagInput";
 import { ImagePreviewDialog } from "./ImagePreviewDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 import * as ProjectService from "../services/ProjectService";
 import type { Project } from "../types";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -84,11 +85,16 @@ export class MetadataPanel extends Component {
     const fileId = appState.get("selectedFileId");
     if (!force && fileId !== null && fileId === this.currentFile?.id) return;
 
-    // Guard: warn if there are unsaved changes before switching
+    // Guard: warn if there are unsaved changes before switching.
+    // Audit Wave 3 usability: replaced native confirm() with Aurora dialog.
     if (this.dirty && this.currentFile && fileId !== this.currentFile.id) {
-      const discard = confirm(
-        "Ungespeicherte Aenderungen vorhanden. Verwerfen?"
-      );
+      const discard = await ConfirmDialog.open({
+        title: "Ungespeicherte Änderungen verwerfen?",
+        message: "Es gibt nicht gespeicherte Änderungen. Beim Wechseln gehen sie verloren.",
+        confirmLabel: "Verwerfen",
+        cancelLabel: "Bleiben",
+        destructive: true,
+      });
       if (!discard) {
         // Revert selection to current file
         appState.set("selectedFileId", this.currentFile.id);
@@ -341,7 +347,7 @@ export class MetadataPanel extends Component {
       wrapper.appendChild(viewBar);
     }
 
-    // Project actions: "Projekt starten" + "Zu Projekt hinzufuegen" (all file types)
+    // Project actions: "Projekt starten" + "Zu Projekt hinzufügen" (all file types)
     {
       const projectBar = document.createElement("div");
       projectBar.className = "metadata-view-bar";
@@ -360,14 +366,14 @@ export class MetadataPanel extends Component {
       });
       projectBar.appendChild(projectBtn);
 
-      // "Zu Projekt hinzufuegen" dropdown
+      // "Zu Projekt hinzufügen" dropdown
       const addSelect = document.createElement("select");
       addSelect.className = "metadata-form-input";
       addSelect.style.flex = "1";
       addSelect.style.minWidth = "140px";
       const placeholder = document.createElement("option");
       placeholder.value = "";
-      placeholder.textContent = "Zu Projekt hinzufuegen...";
+      placeholder.textContent = "Zu Projekt hinzufügen...";
       addSelect.appendChild(placeholder);
       addSelect.disabled = true;
 
@@ -397,9 +403,9 @@ export class MetadataPanel extends Component {
         const role = "pattern";
         try {
           await ProjectService.addFileToProject(projectId, this.currentFile.id, role);
-          ToastContainer.show("success", "Datei zum Projekt hinzugefuegt");
+          ToastContainer.show("success", "Datei zum Projekt hinzugefügt");
         } catch {
-          ToastContainer.show("error", "Hinzufuegen fehlgeschlagen");
+          ToastContainer.show("error", "Hinzufügen fehlgeschlagen");
         }
         addSelect.value = "";
       });
@@ -1125,15 +1131,20 @@ export class MetadataPanel extends Component {
         const delBtn = document.createElement("button");
         delBtn.className = "metadata-attachment-delete";
         delBtn.textContent = "\u00D7";
-        delBtn.title = "Projekt loeschen";
+        delBtn.title = "Projekt löschen";
         delBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
-          if (!confirm(`Projekt "${project.name}" wirklich loeschen?`)) return;
+          const ok = await ConfirmDialog.open({
+            title: "Projekt löschen?",
+            message: `Projekt „${project.name}" wird gelöscht.`,
+            destructive: true,
+          });
+          if (!ok) return;
           try {
             await ProjectService.deleteProject(project.id);
             this.renderProjectsSection(wrapper, fileId);
           } catch {
-            ToastContainer.show("error", "Loeschen fehlgeschlagen");
+            ToastContainer.show("error", "Löschen fehlgeschlagen");
           }
         });
         item.appendChild(delBtn);
@@ -1440,7 +1451,7 @@ export class MetadataPanel extends Component {
     } else {
       const hint = document.createElement("div");
       hint.className = "pattern-preview-loading";
-      hint.textContent = "Keine Vorschau verfuegbar";
+      hint.textContent = "Keine Vorschau verfügbar";
       previewContainer.appendChild(hint);
     }
 

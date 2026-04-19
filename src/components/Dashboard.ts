@@ -118,7 +118,7 @@ export class Dashboard extends Component {
     aiGrid.className = "dashboard-stats-grid";
     aiGrid.appendChild(this.createStatCard("Nicht analysiert", String(dashStats.aiStatus.none)));
     aiGrid.appendChild(this.createStatCard("Analysiert", String(dashStats.aiStatus.analyzed)));
-    aiGrid.appendChild(this.createStatCard("Bestaetigt", String(dashStats.aiStatus.confirmed)));
+    aiGrid.appendChild(this.createStatCard("Bestätigt", String(dashStats.aiStatus.confirmed)));
     aiSection.appendChild(aiGrid);
     this.el.appendChild(aiSection);
 
@@ -240,7 +240,7 @@ export class Dashboard extends Component {
     if (stats.totalFiles === 0) {
       const empty = document.createElement("div");
       empty.className = "dashboard-empty";
-      empty.textContent = "Keine Dateien vorhanden. Ordner hinzufuegen um zu starten.";
+      empty.textContent = "Keine Dateien vorhanden. Ordner hinzufügen um zu starten.";
       this.el.appendChild(empty);
     }
   }
