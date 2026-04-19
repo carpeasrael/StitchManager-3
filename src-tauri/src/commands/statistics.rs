@@ -56,21 +56,18 @@ pub fn get_dashboard_stats(db: State<'_, DbState>) -> Result<DashboardStats, App
         }
     }
 
-    // AI status
-    let ai_none: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL AND ai_analyzed = 0",
+    // Audit Wave 2 perf: collapse 3 separate full-table scans into one
+    // conditional-aggregate query.
+    let (ai_none, ai_analyzed, ai_confirmed): (i64, i64, i64) = conn.query_row(
+        "SELECT \
+         SUM(CASE WHEN ai_analyzed = 0 THEN 1 ELSE 0 END), \
+         SUM(CASE WHEN ai_analyzed = 1 AND ai_confirmed = 0 THEN 1 ELSE 0 END), \
+         SUM(CASE WHEN ai_analyzed = 1 AND ai_confirmed = 1 THEN 1 ELSE 0 END) \
+         FROM embroidery_files WHERE deleted_at IS NULL",
         [],
-        |row| row.get(0),
-    )?;
-    let ai_analyzed: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL AND ai_analyzed = 1 AND ai_confirmed = 0",
-        [],
-        |row| row.get(0),
-    )?;
-    let ai_confirmed: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL AND ai_analyzed = 1 AND ai_confirmed = 1",
-        [],
-        |row| row.get(0),
+        |row| Ok((row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                  row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                  row.get::<_, Option<i64>>(2)?.unwrap_or(0))),
     )?;
 
     // Top 10 folders by file count
@@ -92,22 +89,17 @@ pub fn get_dashboard_stats(db: State<'_, DbState>) -> Result<DashboardStats, App
         rows
     };
 
-    // Missing metadata
-    let no_tags: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files e \
-         WHERE e.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM file_tags WHERE file_id = e.id)",
+    // Audit Wave 2 perf: combine three missing-metadata counts into one query.
+    let (no_tags, no_rating, no_description): (i64, i64, i64) = conn.query_row(
+        "SELECT \
+         SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM file_tags WHERE file_id = e.id) THEN 1 ELSE 0 END), \
+         SUM(CASE WHEN rating IS NULL THEN 1 ELSE 0 END), \
+         SUM(CASE WHEN description IS NULL OR description = '' THEN 1 ELSE 0 END) \
+         FROM embroidery_files e WHERE deleted_at IS NULL",
         [],
-        |row| row.get(0),
-    )?;
-    let no_rating: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL AND rating IS NULL",
-        [],
-        |row| row.get(0),
-    )?;
-    let no_description: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM embroidery_files WHERE deleted_at IS NULL AND (description IS NULL OR description = '')",
-        [],
-        |row| row.get(0),
+        |row| Ok((row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                  row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                  row.get::<_, Option<i64>>(2)?.unwrap_or(0))),
     )?;
 
     // Storage by folder

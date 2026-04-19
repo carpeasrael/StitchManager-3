@@ -1,4 +1,4 @@
-use std::io::{Read as _, Write as _};
+use std::io::Write as _;
 use std::path::Path;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -570,79 +570,93 @@ pub fn import_metadata_json(
         .ok_or_else(|| AppError::Validation("JSON muss ein 'records' Array enthalten".into()))?;
 
     let conn = lock_db(&db)?;
+    // Audit Wave 2 perf: wrap the per-record UPDATE loop in one transaction
+    // so a 1000-record import is one fsync instead of 1000.
+    let tx = conn.unchecked_transaction()?;
     let mut imported: u32 = 0;
+    {
+        let mut select = tx.prepare_cached(
+            "SELECT id FROM embroidery_files WHERE unique_id = ?1 AND deleted_at IS NULL",
+        )?;
+        let mut update = tx.prepare_cached(
+            "UPDATE embroidery_files SET \
+             name = COALESCE(?2, name), theme = COALESCE(?3, theme), \
+             description = COALESCE(?4, description), status = ?5, \
+             category = COALESCE(?6, category), author = COALESCE(?7, author), \
+             keywords = COALESCE(?8, keywords), updated_at = datetime('now') \
+             WHERE id = ?1",
+        )?;
+        for record in records {
+            let unique_id = record.get("uniqueId").and_then(|v| v.as_str());
+            let name = record.get("name").and_then(|v| v.as_str());
+            let theme = record.get("theme").and_then(|v| v.as_str());
+            let description = record.get("description").and_then(|v| v.as_str());
+            let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("none");
+            let category = record.get("category").and_then(|v| v.as_str());
+            let author = record.get("author").and_then(|v| v.as_str());
+            let keywords = record.get("keywords").and_then(|v| v.as_str());
 
-    for record in records {
-        let unique_id = record.get("uniqueId").and_then(|v| v.as_str());
-        let name = record.get("name").and_then(|v| v.as_str());
-        let theme = record.get("theme").and_then(|v| v.as_str());
-        let description = record.get("description").and_then(|v| v.as_str());
-        let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("none");
-        let category = record.get("category").and_then(|v| v.as_str());
-        let author = record.get("author").and_then(|v| v.as_str());
-        let keywords = record.get("keywords").and_then(|v| v.as_str());
-
-        if let Some(uid) = unique_id {
-            // Try to merge by unique_id
-            let existing: Option<i64> = conn.query_row(
-                "SELECT id FROM embroidery_files WHERE unique_id = ?1 AND deleted_at IS NULL",
-                [uid],
-                |row| row.get(0),
-            ).ok();
-
-            if let Some(id) = existing {
-                conn.execute(
-                    "UPDATE embroidery_files SET \
-                     name = COALESCE(?2, name), theme = COALESCE(?3, theme), \
-                     description = COALESCE(?4, description), status = ?5, \
-                     category = COALESCE(?6, category), author = COALESCE(?7, author), \
-                     keywords = COALESCE(?8, keywords), updated_at = datetime('now') \
-                     WHERE id = ?1",
-                    rusqlite::params![id, name, theme, description, status, category, author, keywords],
-                )?;
-                imported += 1;
+            if let Some(uid) = unique_id {
+                let existing: Option<i64> = select.query_row([uid], |row| row.get(0)).ok();
+                if let Some(id) = existing {
+                    update.execute(rusqlite::params![
+                        id, name, theme, description, status, category, author, keywords
+                    ])?;
+                    imported += 1;
+                }
             }
         }
     }
+    tx.commit()?;
 
     Ok(imported)
 }
 
 /// Bulk archive multiple files.
+///
+/// Audit Wave 2 perf: per-row UPDATEs wrapped in one transaction.
 #[tauri::command]
 pub fn archive_files_batch(
     db: State<'_, DbState>,
     file_ids: Vec<i64>,
 ) -> Result<u32, AppError> {
     let conn = lock_db(&db)?;
+    let tx = conn.unchecked_transaction()?;
     let mut count: u32 = 0;
-    for id in &file_ids {
-        let changes = conn.execute(
+    {
+        let mut stmt = tx.prepare_cached(
             "UPDATE embroidery_files SET status = 'archived', updated_at = datetime('now') \
              WHERE id = ?1 AND deleted_at IS NULL AND status != 'archived'",
-            [id],
         )?;
-        count += changes as u32;
+        for id in &file_ids {
+            count += stmt.execute([id])? as u32;
+        }
     }
+    tx.commit()?;
     Ok(count)
 }
 
 /// Bulk unarchive multiple files.
+///
+/// Audit Wave 2 perf: per-row UPDATEs wrapped in one transaction.
 #[tauri::command]
 pub fn unarchive_files_batch(
     db: State<'_, DbState>,
     file_ids: Vec<i64>,
 ) -> Result<u32, AppError> {
     let conn = lock_db(&db)?;
+    let tx = conn.unchecked_transaction()?;
     let mut count: u32 = 0;
-    for id in &file_ids {
-        let changes = conn.execute(
+    {
+        let mut stmt = tx.prepare_cached(
             "UPDATE embroidery_files SET status = 'none', updated_at = datetime('now') \
              WHERE id = ?1 AND deleted_at IS NULL AND status = 'archived'",
-            [id],
         )?;
-        count += changes as u32;
+        for id in &file_ids {
+            count += stmt.execute([id])? as u32;
+        }
     }
+    tx.commit()?;
     Ok(count)
 }
 

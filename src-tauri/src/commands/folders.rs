@@ -196,14 +196,17 @@ pub fn delete_folder(db: State<'_, DbState>, folder_id: i64) -> Result<(), AppEr
         )));
     }
 
-    // Clean up thumbnail files on disk (best-effort)
-    for path in &thumbnail_paths {
+    // Audit Wave 2 perf: parallelise the per-thumbnail unlink — sequential
+    // unlink on a 10K-file folder takes seconds. rayon's par_iter saturates
+    // the disk I/O queue without changing semantics (best-effort cleanup).
+    use rayon::prelude::*;
+    thumbnail_paths.par_iter().for_each(|path| {
         if let Err(e) = std::fs::remove_file(path) {
             if e.kind() != std::io::ErrorKind::NotFound {
                 log::warn!("Failed to remove thumbnail {path}: {e}");
             }
         }
-    }
+    });
 
     Ok(())
 }

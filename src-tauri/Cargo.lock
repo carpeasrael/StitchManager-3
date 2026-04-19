@@ -146,6 +146,7 @@ dependencies = [
  "notify",
  "printpdf",
  "qrcode",
+ "rayon",
  "reqwest 0.12.28",
  "roxmltree",
  "rusqlite",

@@ -19,14 +19,21 @@ export class Sidebar extends Component {
   private reordering = false;
   private contextMenu: HTMLElement | null = null;
   private contextMenuCloseHandler: ((e: Event) => void) | null = null;
+  /** Audit Wave 2 perf #4: index of rendered folder/smart-folder rows so
+   *  selection changes can toggle a CSS class instead of rebuilding the
+   *  entire sidebar DOM (with all drag/contextmenu/keydown listeners). */
+  private folderRowEls = new Map<number, HTMLElement>();
+  private smartRowEls = new Map<number, HTMLElement>();
+  private allFoldersRowEl: HTMLElement | null = null;
 
   constructor(container: HTMLElement) {
     super(container);
     this.subscribe(
       appState.on("folders", () => this.loadCounts())
     );
+    // Selection changes are class-toggle only — no DOM rebuild.
     this.subscribe(
-      appState.on("selectedFolderId", () => this.render())
+      appState.on("selectedFolderId", () => this.updateSelectionClasses())
     );
     this.subscribe(
       appState.on("expandedFolderIds", () => this.render())
@@ -38,11 +45,28 @@ export class Sidebar extends Component {
       })
     );
     this.subscribe(
-      appState.on("selectedSmartFolderId", () => this.render())
+      appState.on("selectedSmartFolderId", () => this.updateSelectionClasses())
     );
     this.loadFolders();
     this.loadCollections();
     this.loadSmartFolders();
+  }
+
+  /** Audit Wave 2 perf #4: toggle `.selected` on the previously-rendered
+   *  rows instead of calling `render()`. ~1500 event-listener teardown
+   *  + recreate cycles avoided per click in a 200-folder sidebar. */
+  private updateSelectionClasses(): void {
+    const selectedId = appState.get("selectedFolderId");
+    const selectedSmartId = appState.get("selectedSmartFolderId");
+    if (this.allFoldersRowEl) {
+      this.allFoldersRowEl.classList.toggle("selected", selectedId === null && selectedSmartId === null);
+    }
+    for (const [id, el] of this.folderRowEls) {
+      el.classList.toggle("selected", id === selectedId);
+    }
+    for (const [id, el] of this.smartRowEls) {
+      el.classList.toggle("selected", id === selectedSmartId);
+    }
   }
 
   private async loadFolders(): Promise<void> {
@@ -73,6 +97,11 @@ export class Sidebar extends Component {
     const folders = appState.get("folders");
     const selectedId = appState.get("selectedFolderId");
     const expandedIds = new Set(appState.get("expandedFolderIds"));
+
+    // Reset row indices each structural render.
+    this.folderRowEls.clear();
+    this.smartRowEls.clear();
+    this.allFoldersRowEl = null;
 
     this.el.innerHTML = "";
 
@@ -123,6 +152,7 @@ export class Sidebar extends Component {
       appState.set("selectedFolderId", null);
       appState.set("selectedSmartFolderId", null);
     });
+    this.allFoldersRowEl = allLi;
     list.appendChild(allLi);
 
     if (folders.length === 0) {
@@ -288,6 +318,7 @@ export class Sidebar extends Component {
         }
       });
 
+      this.folderRowEls.set(folder.id, li);
       list.appendChild(li);
     }
 
@@ -479,6 +510,7 @@ export class Sidebar extends Component {
           }
         });
 
+        this.smartRowEls.set(sf.id, li);
         list.appendChild(li);
       }
       section.appendChild(list);

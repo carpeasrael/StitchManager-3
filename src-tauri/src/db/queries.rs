@@ -10,6 +10,25 @@ pub const FILE_SELECT: &str =
      ai_analyzed, ai_confirmed, created_at, updated_at, \
      instructions_html, pattern_date, rating FROM embroidery_files";
 
+/// Audit Wave 2 perf: slim SELECT for `get_files_paginated` that masks the
+/// heaviest text columns (instructions_html ≤ 100 KB, plus
+/// description/comments/keywords/purchase_link). The list view never displays
+/// these fields — they are pulled separately by `get_file(id)` when the user
+/// opens the metadata panel. Returns the same column ordering as `FILE_SELECT`
+/// so `row_to_file` can be reused without a parallel mapper.
+pub const FILE_SELECT_LIST_ALIASED: &str =
+    "SELECT e.id, e.folder_id, e.filename, e.filepath, e.name, e.theme, '' AS description, \
+     e.license, e.width_mm, e.height_mm, e.stitch_count, e.color_count, \
+     e.file_size_bytes, e.thumbnail_path, \
+     e.design_name, e.jump_count, e.trim_count, e.hoop_width_mm, e.hoop_height_mm, \
+     e.category, e.author, '' AS keywords, '' AS comments, e.unique_id, e.is_favorite, \
+     e.file_type, e.size_range, e.skill_level, e.language, e.format_type, \
+     e.file_source, '' AS purchase_link, e.status, \
+     e.page_count, e.paper_size, \
+     e.ai_analyzed, e.ai_confirmed, \
+     e.created_at, e.updated_at, \
+     '' AS instructions_html, e.pattern_date, e.rating FROM embroidery_files e";
+
 /// Same column list with `e.` alias prefix, for use in JOINs or subquery-filtered queries.
 pub const FILE_SELECT_ALIASED: &str =
     "SELECT e.id, e.folder_id, e.filename, e.filepath, e.name, e.theme, e.description, \

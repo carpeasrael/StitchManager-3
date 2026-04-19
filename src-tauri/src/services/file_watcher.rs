@@ -37,6 +37,10 @@ pub fn start_watcher(
         return Err(format!("Watch path is not a directory: {}", watch_path));
     }
 
+    // Audit Wave 2 perf: notify's Watcher requires `mpsc::Sender` (unbounded),
+    // so the upper bound is enforced downstream via the HashSet flush cap
+    // below — once the accumulator reaches 500 entries it's flushed even if
+    // the debounce window hasn't elapsed.
     let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
 
     let mut watcher = RecommendedWatcher::new(tx, Config::default())
@@ -70,6 +74,23 @@ pub fn start_watcher(
                             }
                             _ => {}
                         }
+                    }
+                    // Audit Wave 2 perf: cap accumulator size so a sustained
+                    // burst flushes proactively even before the timeout.
+                    if new_files.len() >= 500 || removed_files.len() >= 500 {
+                        if !new_files.is_empty() {
+                            let _ = handle.emit(
+                                "fs:new-files",
+                                FsEventPayload { paths: new_files.drain().collect() },
+                            );
+                        }
+                        if !removed_files.is_empty() {
+                            let _ = handle.emit(
+                                "fs:files-removed",
+                                FsEventPayload { paths: removed_files.drain().collect() },
+                            );
+                        }
+                        last_flush = Instant::now();
                     }
                 }
                 Ok(Err(e)) => {

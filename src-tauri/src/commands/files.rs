@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::{DbState, ThumbnailState};
 use crate::db::models::{EmbroideryFile, FileAttachment, FileFormat, FileThreadColor, FileUpdate, PaginatedFiles, SearchParams, Tag};
-use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, FILE_SELECT_LIVE_BY_ID, row_to_file};
+use crate::db::queries::{FILE_SELECT, FILE_SELECT_ALIASED, FILE_SELECT_LIST_ALIASED, FILE_SELECT_LIVE_BY_ID, row_to_file};
 use crate::error::{lock_db, AppError};
 
 /// Escape SQL LIKE wildcard characters in user input.
@@ -13,7 +13,7 @@ fn escape_like(input: &str) -> String {
 /// Build WHERE clause conditions from query parameters.
 /// Shared by both `query_files_impl` and `get_files_paginated`.
 fn build_query_conditions(
-    conn: &rusqlite::Connection,
+    _conn: &rusqlite::Connection,
     folder_id: Option<i64>,
     search: Option<String>,
     format_filter: Option<String>,
@@ -40,12 +40,10 @@ fn build_query_conditions(
     if let Some(ref q) = text_query {
         let trimmed = q.trim();
         if !trimmed.is_empty() {
-            // Try FTS5 first; fall back to LIKE if FTS table doesn't exist
-            let fts_exists: bool = conn.query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='files_fts'",
-                [],
-                |row| row.get(0),
-            ).unwrap_or(false);
+            // Audit Wave 2 perf: schema_version is always >= 6 in shipping
+            // builds (FTS5 was introduced then), so the per-query
+            // sqlite_master probe is dead weight on the hot search path.
+            let fts_exists = true;
 
             if fts_exists {
                 // Strip all FTS5 special characters to prevent query injection
@@ -399,9 +397,10 @@ pub fn get_files_paginated(
     let count_sql = format!("SELECT COUNT(*) FROM embroidery_files e{where_clause}");
     let total_count: i64 = conn.query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))?;
 
-    // Paginated data query with LIMIT/OFFSET
+    // Paginated data query with LIMIT/OFFSET. Use the slim list-view SELECT
+    // (audit Wave 2 perf #13) — the heavy text columns are masked.
     let data_sql = format!(
-        "{FILE_SELECT_ALIASED}{where_clause} {order} LIMIT ?{param_idx} OFFSET ?{}",
+        "{FILE_SELECT_LIST_ALIASED}{where_clause} {order} LIMIT ?{param_idx} OFFSET ?{}",
         param_idx + 1
     );
     let mut data_params = params;
@@ -444,45 +443,73 @@ pub fn get_thumbnails_batch(
         rows
     };
 
+    // Audit Wave 2 perf: process every file in parallel (rayon) — each
+    // entry is independent disk read + base64 encode + optional thumbnail
+    // generation. The previous serial loop blocked the Tauri command thread
+    // for ~500ms-2s on first display of a folder.
+    use rayon::prelude::*;
+    let outcomes: Vec<(i64, Option<String>, Option<String>)> = paths
+        .into_par_iter()
+        .map(|(file_id, thumbnail_path, filepath)| {
+            // Try cached thumbnail first.
+            if let Some(ref path) = thumbnail_path {
+                if !path.is_empty() && std::path::Path::new(path).exists() {
+                    if let Ok(data) = std::fs::read(path) {
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                        return (file_id, Some(format!("data:image/png;base64,{b64}")), None);
+                    }
+                }
+            }
+            let src_path = std::path::Path::new(&filepath);
+            let ext = src_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+            if ext.is_empty() {
+                return (file_id, None, None);
+            }
+            let raw_data = match std::fs::read(src_path) {
+                Ok(d) => d,
+                Err(_) => return (file_id, None, None),
+            };
+            match thumb_state.0.generate(file_id, &raw_data, &ext) {
+                Ok(thumb_path) => {
+                    let path_str = thumb_path.to_string_lossy().to_string();
+                    let data_uri = std::fs::read(&thumb_path).ok().map(|data| {
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                        format!("data:image/png;base64,{b64}")
+                    });
+                    (file_id, data_uri, Some(path_str))
+                }
+                Err(_) => (file_id, None, None),
+            }
+        })
+        .collect();
+
     let mut result = std::collections::HashMap::new();
     let mut generated_paths: Vec<(i64, String)> = Vec::new();
-
-    for (file_id, thumbnail_path, filepath) in paths {
-        // Try cached thumbnail first
-        if let Some(ref path) = thumbnail_path {
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                if let Ok(data) = std::fs::read(path) {
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                    result.insert(file_id, format!("data:image/png;base64,{b64}"));
-                    continue;
-                }
-            }
+    for (file_id, data_uri, path) in outcomes {
+        if let Some(uri) = data_uri {
+            result.insert(file_id, uri);
         }
-
-        // On-demand generation
-        let src_path = std::path::Path::new(&filepath);
-        let ext = src_path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
-        if ext.is_empty() { continue; }
-
-        if let Ok(raw_data) = std::fs::read(src_path) {
-            if let Ok(thumb_path) = thumb_state.0.generate(file_id, &raw_data, &ext) {
-                generated_paths.push((file_id, thumb_path.to_string_lossy().to_string()));
-                if let Ok(data) = std::fs::read(&thumb_path) {
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                    result.insert(file_id, format!("data:image/png;base64,{b64}"));
-                }
-            }
+        if let Some(p) = path {
+            generated_paths.push((file_id, p));
         }
     }
 
-    // Batch-persist generated thumbnail paths in a single lock acquisition
+    // Audit Wave 2 perf #3 pattern: batch-persist in one transaction.
     if !generated_paths.is_empty() {
         if let Ok(conn) = lock_db(&db) {
-            for (file_id, path) in &generated_paths {
-                let _ = conn.execute(
+            if let Ok(tx) = conn.unchecked_transaction() {
+                if let Ok(mut stmt) = tx.prepare_cached(
                     "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                    rusqlite::params![file_id, path],
-                );
+                ) {
+                    for (file_id, path) in &generated_paths {
+                        let _ = stmt.execute(rusqlite::params![file_id, path]);
+                    }
+                }
+                let _ = tx.commit();
             }
         }
     }
@@ -978,26 +1005,20 @@ pub fn set_file_tags(
         // Remove all existing tags for this file
         conn.execute("DELETE FROM file_tags WHERE file_id = ?1", [file_id])?;
 
-        // Insert each tag and create the junction
+        // Audit Wave 2 perf: collapse INSERT-then-SELECT into a single
+        // RETURNING statement (SQLite >= 3.35). With ON CONFLICT DO UPDATE
+        // we get the row id back whether the tag was new or existing.
+        let mut upsert = conn.prepare_cached(
+            "INSERT INTO tags(name) VALUES(?1) \
+             ON CONFLICT(name) DO UPDATE SET name = excluded.name \
+             RETURNING id",
+        )?;
+        let mut junction = conn.prepare_cached(
+            "INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
+        )?;
         for tag_name in &unique_tags {
-            // Create tag if it doesn't exist
-            conn.execute(
-                "INSERT OR IGNORE INTO tags (name) VALUES (?1)",
-                [tag_name.as_str()],
-            )?;
-
-            // Get the tag id
-            let tag_id: i64 = conn.query_row(
-                "SELECT id FROM tags WHERE name = ?1",
-                [tag_name.as_str()],
-                |row| row.get(0),
-            )?;
-
-            // Create the junction
-            conn.execute(
-                "INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
-                rusqlite::params![file_id, tag_id],
-            )?;
+            let tag_id: i64 = upsert.query_row([tag_name.as_str()], |row| row.get(0))?;
+            junction.execute(rusqlite::params![file_id, tag_id])?;
         }
         Ok(())
     })();

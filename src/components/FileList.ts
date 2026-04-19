@@ -24,6 +24,13 @@ export class FileList extends Component {
   private currentPage = 0;
   private totalCount = 0;
   private loadingMore = false;
+  /** Length of `files` at the time of the last render — lets us tell an
+   *  append apart from a replace and avoid wiping the thumb cache for
+   *  paginated load-more events (audit Wave 2 perf #1). */
+  private lastRenderedCount = 0;
+  /** Set true around `appState.set("files", …)` from `loadMoreFiles` so the
+   *  state listener can tell pagination-appends apart from filter changes. */
+  private expectingAppend = false;
 
   constructor(container: HTMLElement) {
     super(container);
@@ -43,7 +50,7 @@ export class FileList extends Component {
       appState.on("selectedSmartFolderId", () => this.loadFiles())
     );
     this.subscribe(
-      appState.on("files", () => this.render())
+      appState.on("files", (next) => this.onFilesChanged(next))
     );
     this.subscribe(
       appState.on("selectedFileId", () => this.updateSelection())
@@ -132,6 +139,10 @@ export class FileList extends Component {
         this.currentPage = nextPage;
         this.totalCount = result.totalCount;
         const existing = appState.getRef("files");
+        // Audit Wave 2 perf #1: signal to onFilesChanged that this is an
+        // append so it can incrementally extend the spacer/visible range
+        // instead of wiping thumb cache + rebuilding all rendered cards.
+        this.expectingAppend = true;
         appState.set("files", [...existing, ...result.files]);
       }
     } catch (e) {
@@ -141,11 +152,32 @@ export class FileList extends Component {
     }
   }
 
+  /**
+   * Audit Wave 2 perf #1: route all `files`-state changes through here so
+   * that paginated `loadMoreFiles` (which only appends to the tail) does
+   * NOT invalidate the thumbnail cache and does NOT rebuild every visible
+   * card. We rely on the `expectingAppend` flag set by `loadMoreFiles`
+   * just before its `appState.set` call.
+   */
+  private onFilesChanged(next: readonly { id: number }[]): void {
+    if (this.expectingAppend && this.listEl && next.length > this.lastRenderedCount) {
+      this.expectingAppend = false;
+      this.lastRenderedCount = next.length;
+      this.listEl.style.height = `${next.length * CARD_HEIGHT}px`;
+      this.calculateVisibleRange();
+      this.renderVisible();
+      return;
+    }
+    this.expectingAppend = false;
+    this.render();
+  }
+
   render(): void {
     const files = appState.getRef("files");
     this.lastClickedIndex = null;
     this.thumbCache.clear();
     this.renderedCards.clear();
+    this.lastRenderedCount = files.length;
 
     this.el.innerHTML = "";
 

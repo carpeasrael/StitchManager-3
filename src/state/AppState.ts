@@ -24,14 +24,32 @@ class AppStateClass {
   private state: State = { ...initialState };
   private listeners = new Map<keyof State, Set<Listener<keyof State>>>();
 
-  /** Returns a direct reference to the state value (no copy).
-   *  The `Readonly` type is compile-time only — do NOT mutate the
-   *  returned value at runtime. Use `set()` or `update()` to change state. */
-  getRef<K extends keyof State>(key: K): Readonly<State[K]> {
+  /**
+   * Returns a direct reference to the state value (no copy).
+   *
+   * Audit Wave 2: previously this method deep-copied arrays + spread every
+   * object on every read, which dominated GC pressure across the UI (237 call
+   * sites, fired by every keystroke and click). The codebase already follows
+   * immutable update semantics — every mutation goes through `set()` or
+   * `update()` with a freshly-constructed value — so the defensive copy was
+   * dead weight.
+   *
+   * IMPORTANT: do NOT mutate the returned value at runtime. Use `set()` or
+   * `update()` to change state. If you genuinely need a detached copy (e.g.
+   * to pass to code that may mutate), call `clone(key)` instead.
+   */
+  get<K extends keyof State>(key: K): State[K] {
     return this.state[key];
   }
 
-  get<K extends keyof State>(key: K): State[K] {
+  /** Backwards-compat alias for `get()`. Both return live references now. */
+  getRef<K extends keyof State>(key: K): State[K] {
+    return this.state[key];
+  }
+
+  /** Explicit shallow copy for callers that genuinely need to detach
+   *  the returned value from the live state (rare). */
+  clone<K extends keyof State>(key: K): State[K] {
     const value = this.state[key];
     if (Array.isArray(value)) {
       return value.map((item) =>
@@ -56,7 +74,7 @@ class AppStateClass {
    *  current value and must return the new value. Listeners fire once
    *  with the result. */
   update<K extends keyof State>(key: K, updater: (current: State[K]) => State[K]): void {
-    this.set(key, updater(this.get(key)));
+    this.set(key, updater(this.state[key]));
   }
 
   on<K extends keyof State>(

@@ -2,7 +2,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use crate::error::AppError;
 
-const CURRENT_VERSION: i32 = 26;
+const CURRENT_VERSION: i32 = 27;
 
 pub fn init_database(db_path: &Path) -> Result<Connection, AppError> {
     let conn = Connection::open(db_path)?;
@@ -147,6 +147,10 @@ fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     if current < 26 {
         apply_v26(conn)?;
+    }
+
+    if current < 27 {
+        apply_v27(conn)?;
     }
 
     // Keep query planner statistics up to date
@@ -1337,6 +1341,66 @@ fn apply_v25(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Audit Wave 2 perf:
+/// - Recreate `files_fts_update` with `OF column_list` so it only fires when
+///   an FTS-indexed column actually changes (was firing on every
+///   `updated_at` touch — see `toggle_favorite`, `archive_files_batch`,
+///   `ai_analyze_file`, `set_file_tags`).
+/// - Add the missing `idx_embroidery_files_created_at` index for
+///   dashboard "recent imports" queries.
+/// - Replace `idx_file_thread_colors_file_id` with the composite
+///   `(file_id, sort_order)` so the metadata-panel color list doesn't
+///   need a sort step after lookup.
+fn apply_v27(conn: &Connection) -> Result<(), AppError> {
+    conn.execute_batch(
+        "BEGIN TRANSACTION;
+
+        DROP TRIGGER IF EXISTS files_fts_update;
+
+        CREATE TRIGGER files_fts_update AFTER UPDATE OF
+            name, filename, theme, description, design_name,
+            category, author, keywords, comments, license, unique_id,
+            language, file_source, size_range
+            ON embroidery_files
+        BEGIN
+            INSERT INTO files_fts(files_fts, rowid, name, filename, theme, description,
+                design_name, category, author, keywords, comments, license, unique_id,
+                language, file_source, size_range)
+            VALUES ('delete', old.id, COALESCE(old.name,''), old.filename,
+                COALESCE(old.theme,''), COALESCE(old.description,''),
+                COALESCE(old.design_name,''), COALESCE(old.category,''),
+                COALESCE(old.author,''), COALESCE(old.keywords,''),
+                COALESCE(old.comments,''), COALESCE(old.license,''),
+                COALESCE(old.unique_id,''),
+                COALESCE(old.language,''), COALESCE(old.file_source,''),
+                COALESCE(old.size_range,''));
+            INSERT INTO files_fts(rowid, name, filename, theme, description, design_name,
+                category, author, keywords, comments, license, unique_id,
+                language, file_source, size_range)
+            VALUES (new.id, COALESCE(new.name,''), new.filename, COALESCE(new.theme,''),
+                COALESCE(new.description,''), COALESCE(new.design_name,''),
+                COALESCE(new.category,''), COALESCE(new.author,''),
+                COALESCE(new.keywords,''), COALESCE(new.comments,''),
+                COALESCE(new.license,''), COALESCE(new.unique_id,''),
+                COALESCE(new.language,''), COALESCE(new.file_source,''),
+                COALESCE(new.size_range,''));
+        END;
+
+        CREATE INDEX IF NOT EXISTS idx_embroidery_files_created_at
+            ON embroidery_files(created_at);
+
+        DROP INDEX IF EXISTS idx_file_thread_colors_file_id;
+        CREATE INDEX IF NOT EXISTS idx_file_thread_colors_file_id_sort
+            ON file_thread_colors(file_id, sort_order);
+
+        INSERT INTO schema_version (version, description)
+        VALUES (27, 'FTS5 trigger column-scoped, add created_at index, composite thread-colors index');
+
+        COMMIT;"
+    )?;
+    Ok(())
+}
+
 fn apply_v26(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(
         "BEGIN TRANSACTION;
@@ -1452,7 +1516,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 26, "Schema version must be 26");
+        assert_eq!(version, 27, "Schema version must be 27");
     }
 
     #[test]
@@ -1475,22 +1539,22 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_twentythree() {
+    fn test_schema_version_is_current() {
         let conn = init_database_in_memory().unwrap();
 
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 26);
+        assert_eq!(version, 27);
 
         let desc: String = conn
             .query_row(
-                "SELECT description FROM schema_version WHERE version = 26",
+                "SELECT description FROM schema_version WHERE version = 27",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(desc.contains("smart_folders"), "v26 description should mention smart_folders");
+        assert!(desc.contains("FTS5"), "v27 description should mention FTS5");
     }
 
     #[test]

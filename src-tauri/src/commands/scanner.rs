@@ -1,4 +1,5 @@
 use std::time::Instant;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
@@ -15,6 +16,32 @@ const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg", "bmp"];
 
 /// Maximum file size accepted for import/parse (100 MB).
 const MAX_IMPORT_SIZE: u64 = 100 * 1024 * 1024;
+
+/// Audit Wave 2 perf #3: batch all thumbnail-path UPDATEs for a single
+/// import run into one transaction. The previous pattern acquired the DB
+/// mutex and committed a WAL fsync per file (~3ms each on macOS APFS),
+/// dominating the wall time of a 10K-file import. This helper hands the
+/// completed (id, thumbnail_path) tuples to a single transaction.
+fn apply_thumbnail_paths(
+    db: &State<'_, DbState>,
+    pairs: &[(i64, String)],
+) -> Result<(), AppError> {
+    if pairs.is_empty() {
+        return Ok(());
+    }
+    let conn = lock_db(db)?;
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
+        )?;
+        for (id, path) in pairs {
+            stmt.execute(rusqlite::params![id, path])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
 
 /// Pre-parsed file data collected outside the DB lock.
 /// Shared across import_files, mass_import, watcher_auto_import, and migrate_from_2stitch.
@@ -238,7 +265,7 @@ pub fn import_files(
     // Collect filesystem metadata and parse files before acquiring the DB lock
     // to avoid holding the mutex during potentially slow I/O.
     let file_info: Vec<PreParsedFile> = file_paths
-        .iter()
+        .par_iter()
         .map(|filepath| pre_parse_file(filepath))
         .collect();
 
@@ -372,37 +399,29 @@ pub fn import_files(
     // Drop DB lock before thumbnail generation to avoid blocking other commands
     drop(conn);
 
-    // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
+    // Audit Wave 2 perf #3: generate every thumbnail without the DB lock,
+    // collect (id, path) pairs, then commit them all in one transaction.
     let mut thumb_failures: u32 = 0;
+    let mut thumb_pairs: Vec<(i64, String)> = Vec::with_capacity(imported_ids.len());
     for (id, filepath, ext, _) in &imported_ids {
         match std::fs::read(std::path::Path::new(filepath)) {
-            Ok(data) => {
-                match thumb_state.0.generate(*id, &data, ext) {
-                    Ok(thumb_path) => {
-                        match lock_db(&db) {
-                            Ok(c) => {
-                                let _ = c.execute(
-                                    "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                                    rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                                );
-                            }
-                            Err(e) => {
-                                thumb_failures += 1;
-                                log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        thumb_failures += 1;
-                        log::warn!("Failed to generate thumbnail for {filepath}: {e}");
-                    }
+            Ok(data) => match thumb_state.0.generate(*id, &data, ext) {
+                Ok(thumb_path) => {
+                    thumb_pairs.push((*id, thumb_path.to_string_lossy().to_string()));
                 }
-            }
+                Err(e) => {
+                    thumb_failures += 1;
+                    log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                }
+            },
             Err(e) => {
                 thumb_failures += 1;
                 log::warn!("Failed to read file for thumbnail generation {filepath}: {e}");
             }
         }
+    }
+    if let Err(e) = apply_thumbnail_paths(&db, &thumb_pairs) {
+        log::warn!("Failed to apply thumbnail paths in batch: {e}");
     }
     if thumb_failures > 0 {
         let thumb_ok = (imported_ids.len() as u32).saturating_sub(thumb_failures);
@@ -694,7 +713,7 @@ pub fn mass_import(
 
     // Pre-parse all files outside DB lock
     let file_infos: Vec<PreParsedFile> = embroidery_paths
-        .iter()
+        .par_iter()
         .map(|filepath| pre_parse_file(filepath))
         .collect();
 
@@ -787,31 +806,28 @@ pub fn mass_import(
     // Drop DB lock before thumbnail generation to avoid blocking other commands
     drop(conn);
 
-    // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
+    // Audit Wave 2 perf #3: batch the per-file thumbnail UPDATE into one tx.
     let mut thumb_failures: u32 = 0;
+    let mut thumb_pairs: Vec<(i64, String)> = Vec::with_capacity(thumb_pending.len());
     for (id, filepath, ext) in &thumb_pending {
         match std::fs::read(std::path::Path::new(filepath)) {
-            Ok(data) => {
-                match thumb_state.0.generate(*id, &data, ext) {
-                    Ok(thumb_path) => {
-                        if let Ok(c) = lock_db(&db) {
-                            let _ = c.execute(
-                                "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                                rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        thumb_failures += 1;
-                        log::warn!("Failed to generate thumbnail for {filepath}: {e}");
-                    }
+            Ok(data) => match thumb_state.0.generate(*id, &data, ext) {
+                Ok(thumb_path) => {
+                    thumb_pairs.push((*id, thumb_path.to_string_lossy().to_string()));
                 }
-            }
+                Err(e) => {
+                    thumb_failures += 1;
+                    log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                }
+            },
             Err(e) => {
                 thumb_failures += 1;
                 log::warn!("Failed to read file for thumbnail generation {filepath}: {e}");
             }
         }
+    }
+    if let Err(e) = apply_thumbnail_paths(&db, &thumb_pairs) {
+        log::warn!("Failed to apply thumbnail paths in batch: {e}");
     }
     if thumb_failures > 0 {
         let thumb_ok = (thumb_pending.len() as u32).saturating_sub(thumb_failures);
@@ -916,7 +932,7 @@ pub fn watcher_auto_import(
 ) -> Result<u32, AppError> {
     // Collect file metadata and parse files without holding the DB lock
     let file_infos: Vec<PreParsedFile> = file_paths
-        .iter()
+        .par_iter()
         .map(|filepath| pre_parse_file(filepath))
         .collect();
 
@@ -987,37 +1003,28 @@ pub fn watcher_auto_import(
         }
     } // DB lock dropped here before thumbnail generation
 
-    // Generate thumbnails without holding the DB lock; re-acquire briefly for each update
+    // Audit Wave 2 perf #3: batch the per-file thumbnail UPDATE into one tx.
     let mut thumb_failures: u32 = 0;
+    let mut thumb_pairs: Vec<(i64, String)> = Vec::with_capacity(thumb_pending.len());
     for (id, filepath, ext) in &thumb_pending {
         match std::fs::read(std::path::Path::new(filepath)) {
-            Ok(data) => {
-                match thumb_state.0.generate(*id, &data, ext) {
-                    Ok(thumb_path) => {
-                        match lock_db(&db) {
-                            Ok(c) => {
-                                let _ = c.execute(
-                                    "UPDATE embroidery_files SET thumbnail_path = ?2 WHERE id = ?1",
-                                    rusqlite::params![id, thumb_path.to_string_lossy().as_ref()],
-                                );
-                            }
-                            Err(e) => {
-                                thumb_failures += 1;
-                                log::warn!("Failed to acquire DB lock for thumbnail update {filepath}: {e}");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        thumb_failures += 1;
-                        log::warn!("Failed to generate thumbnail for {filepath}: {e}");
-                    }
+            Ok(data) => match thumb_state.0.generate(*id, &data, ext) {
+                Ok(thumb_path) => {
+                    thumb_pairs.push((*id, thumb_path.to_string_lossy().to_string()));
                 }
-            }
+                Err(e) => {
+                    thumb_failures += 1;
+                    log::warn!("Failed to generate thumbnail for {filepath}: {e}");
+                }
+            },
             Err(e) => {
                 thumb_failures += 1;
                 log::warn!("Failed to read file for thumbnail generation {filepath}: {e}");
             }
         }
+    }
+    if let Err(e) = apply_thumbnail_paths(&db, &thumb_pairs) {
+        log::warn!("Failed to apply thumbnail paths in batch: {e}");
     }
     if thumb_failures > 0 {
         let thumb_ok = (thumb_pending.len() as u32).saturating_sub(thumb_failures);

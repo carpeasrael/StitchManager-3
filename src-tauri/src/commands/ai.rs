@@ -495,24 +495,23 @@ pub fn ai_accept_result(
                     // Clear existing tags
                     conn.execute("DELETE FROM file_tags WHERE file_id = ?1", [result.file_id])?;
 
+                    // Audit Wave 2 perf: ON CONFLICT … RETURNING collapses
+                    // INSERT-then-SELECT into one round trip per tag.
+                    let mut upsert = conn.prepare_cached(
+                        "INSERT INTO tags(name) VALUES(?1) \
+                         ON CONFLICT(name) DO UPDATE SET name = excluded.name \
+                         RETURNING id",
+                    )?;
+                    let mut junction = conn.prepare_cached(
+                        "INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
+                    )?;
                     for tag_name in &tags {
                         let trimmed = tag_name.trim();
                         if trimmed.is_empty() {
                             continue;
                         }
-                        conn.execute(
-                            "INSERT OR IGNORE INTO tags (name) VALUES (?1)",
-                            [trimmed],
-                        )?;
-                        let tag_id: i64 = conn.query_row(
-                            "SELECT id FROM tags WHERE name = ?1",
-                            [trimmed],
-                            |row| row.get(0),
-                        )?;
-                        conn.execute(
-                            "INSERT INTO file_tags (file_id, tag_id) VALUES (?1, ?2)",
-                            rusqlite::params![result.file_id, tag_id],
-                        )?;
+                        let tag_id: i64 = upsert.query_row([trimmed], |row| row.get(0))?;
+                        junction.execute(rusqlite::params![result.file_id, tag_id])?;
                     }
                 }
             }
