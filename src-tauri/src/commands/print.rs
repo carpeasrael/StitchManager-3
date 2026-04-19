@@ -258,16 +258,15 @@ fn print_file_lpr(path: &str, settings: &PrintSettings) -> Result<(), AppError> 
 }
 
 #[cfg(target_os = "windows")]
-fn print_file_windows(path: &str, settings: &PrintSettings) -> Result<(), AppError> {
-    // On Windows, use Start-Process -Verb Print which opens the OS print dialog.
-    // printer_name is already validated to be alphanumeric+hyphens+underscores.
-    // Start-Process with -Verb Print correctly handles binary PDF data.
+fn print_file_windows(path: &str, _settings: &PrintSettings) -> Result<(), AppError> {
+    // Audit Wave 1: pass the path through PowerShell's environment variable
+    // mechanism instead of interpolating it into a `-Command` string. This
+    // eliminates a whole class of single-quote / CRLF / Unicode escape bugs.
+    let script = "Start-Process -FilePath $env:STITCH_PRINT_PATH -Verb Print -Wait";
+
     let output = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!("Start-Process -FilePath '{}' -Verb Print -Wait", path.replace('\'', "''")),
-        ])
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("STITCH_PRINT_PATH", path)
         .output()
         .map_err(|e| AppError::Internal(format!("Druckbefehl fehlgeschlagen: {e}")))?;
 

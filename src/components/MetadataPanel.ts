@@ -599,7 +599,7 @@ export class MetadataPanel extends Component {
       instrEditor.className = "rt-editor";
       instrEditor.contentEditable = "true";
       instrEditor.dataset.field = "instructionsHtml";
-      instrEditor.innerHTML = file.instructionsHtml || "";
+      instrEditor.innerHTML = sanitizeRichText(file.instructionsHtml || "");
       instrEditor.addEventListener("input", () => this.checkDirty());
       instrEditor.addEventListener("paste", (e) => {
         e.preventDefault();
@@ -1289,6 +1289,11 @@ export class MetadataPanel extends Component {
       }
     } catch (e) {
       console.warn("Failed to save file:", e);
+      // Surface the backend Validation message instead of a silent "Fehler!"
+      // (audit Wave 1 usability fix). Tauri serialises AppError as
+      // { code, message } — pull the message either way.
+      const msg = extractBackendMessage(e, "Speichern fehlgeschlagen");
+      ToastContainer.show("error", msg);
       if (saveBtn) {
         saveBtn.textContent = "Fehler!";
         setTimeout(() => {
@@ -1762,9 +1767,17 @@ export class MetadataPanel extends Component {
     if (!attachmentType) return;
 
     try {
+      // Audit Wave 1 usability fix: pre-filter the dialog to the same
+      // extension allow-list the backend enforces, so the user cannot pick
+      // a file we have to reject. Matches `ATTACHMENT_EXTENSIONS` in
+      // `src-tauri/src/commands/mod.rs`.
       const selected = await open({
         multiple: false,
         title: "Anhang ausw\u00E4hlen",
+        filters: [{
+          name: "Anh\u00E4nge (PDF, PNG, JPG, TXT, MD)",
+          extensions: ["pdf", "png", "jpg", "jpeg", "txt", "md"],
+        }],
       });
       if (!selected) return;
 
@@ -1778,7 +1791,8 @@ export class MetadataPanel extends Component {
       EventBus.emit("file:refresh");
     } catch (e) {
       console.warn("Failed to attach file:", e);
-      ToastContainer.show("error", "Anhang konnte nicht hinzugef\u00FCgt werden");
+      const msg = extractBackendMessage(e, "Anhang konnte nicht hinzugef\u00FCgt werden");
+      ToastContainer.show("error", msg);
     }
   }
 
@@ -1873,4 +1887,56 @@ export class MetadataPanel extends Component {
     grid.appendChild(row);
   }
 
+}
+
+/**
+ * Pull a human-readable German message out of a Tauri backend error.
+ * Tauri serialises `AppError` as `{ code, message }`; pure JS errors expose
+ * `e.message`. Falls back to `fallback` if neither field is present.
+ */
+function extractBackendMessage(e: unknown, fallback: string): string {
+  if (e && typeof e === "object" && "message" in e) {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === "string" && m.trim().length > 0) return m;
+  }
+  if (e instanceof Error && e.message) return e.message;
+  return fallback;
+}
+
+/**
+ * Defense-in-depth sanitiser for rich-text content rendered via `innerHTML`.
+ * The Rust backend already runs `ammonia` on every write to `instructions_html`,
+ * but we still re-sanitise on render so that legacy/imported data and any
+ * future code path that bypasses the backend is safe.
+ *
+ * Strategy: parse with DOMParser (offscreen, no script execution), then walk
+ * the tree keeping only an explicit allow-list of tags and dropping every
+ * attribute. Returns the cleaned innerHTML string.
+ */
+function sanitizeRichText(html: string): string {
+  if (!html) return "";
+  const ALLOWED = new Set([
+    "B", "I", "U", "STRONG", "EM",
+    "UL", "OL", "LI", "P", "BR", "DIV", "SPAN",
+  ]);
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
+  const toUnwrap: Element[] = [];
+  let node = walker.nextNode() as Element | null;
+  while (node) {
+    if (!ALLOWED.has(node.tagName)) {
+      toUnwrap.push(node);
+    } else {
+      // Strip every attribute — including class/style/href/on*.
+      for (const attr of Array.from(node.attributes)) {
+        node.removeAttribute(attr.name);
+      }
+    }
+    node = walker.nextNode() as Element | null;
+  }
+  for (const el of toUnwrap) {
+    while (el.firstChild) el.parentNode?.insertBefore(el.firstChild, el);
+    el.remove();
+  }
+  return doc.body.innerHTML;
 }

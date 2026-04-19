@@ -9,7 +9,7 @@ mod services;
 
 /// Wrapper for the rusqlite connection stored in Tauri managed state.
 /// Used by Rust-side commands for write operations, complex queries, and batch ops.
-/// The frontend uses `tauri-plugin-sql` for lightweight read queries independently.
+/// All DB access goes through narrow Tauri commands — no plugin-sql exposure.
 pub struct DbState(pub(crate) Mutex<rusqlite::Connection>);
 
 /// Wrapper for the ThumbnailGenerator stored in Tauri managed state.
@@ -19,11 +19,6 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(
-            tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:stitch_manager.db", vec![])
-                .build(),
-        )
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data_dir)?;

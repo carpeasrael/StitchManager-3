@@ -66,12 +66,25 @@ fn convert_file_inner(
     output_dir: &str,
 ) -> Result<String, AppError> {
     // Reject path traversal attempts
-    super::validate_no_traversal(&output_dir)?;
-    // Auto-version and fetch filepath in a single lock acquisition
+    super::validate_no_traversal(output_dir)?;
+    // Auto-version, fetch filepath, and validate output directory containment
+    // in a single lock acquisition (audit Wave 1).
     let filepath: String = {
         let conn = lock_db(db)?;
         let desc = format!("Konvertierung nach {target_format}");
         let _ = super::versions::create_version_snapshot(&conn, file_id, "convert", Some(&desc));
+
+        // Output must live under the configured library_root. Future enhancement:
+        // also accept USB mount points returned by `get_usb_devices`.
+        match super::library_root(&conn) {
+            Some(root) => super::ensure_under(std::path::Path::new(output_dir), &root)?,
+            None => {
+                return Err(AppError::Validation(
+                    "library_root ist nicht konfiguriert — Konvertierung abgebrochen".into(),
+                ));
+            }
+        }
+
         conn.query_row(
             "SELECT filepath FROM embroidery_files WHERE id = ?1 AND deleted_at IS NULL",
             [file_id],

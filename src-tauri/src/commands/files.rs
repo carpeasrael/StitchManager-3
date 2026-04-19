@@ -679,6 +679,25 @@ pub fn get_file_tags(
     Ok(tags)
 }
 
+/// Audit Wave 1: per-field length caps applied in `update_file`.
+const MAX_TEXT_FIELD: usize = 1024;
+const MAX_LINK_FIELD: usize = 2048;
+
+/// Strict YYYY-MM-DD parser used by `update_file` to reject free-form dates.
+fn is_valid_iso_date(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() != 10 {
+        return false;
+    }
+    if bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    bytes
+        .iter()
+        .enumerate()
+        .all(|(i, &b)| if matches!(i, 4 | 7) { b == b'-' } else { b.is_ascii_digit() })
+}
+
 #[tauri::command]
 pub fn update_file(
     db: State<'_, DbState>,
@@ -749,21 +768,41 @@ pub fn update_file(
         idx += 1;
     }
     if let Some(ref language) = updates.language {
+        if language.len() > MAX_TEXT_FIELD {
+            return Err(AppError::Validation("Sprache zu lang".into()));
+        }
         set_clauses.push(format!("language = ?{idx}"));
         params.push(Box::new(language.clone()));
         idx += 1;
     }
     if let Some(ref format_type) = updates.format_type {
+        if format_type.len() > MAX_TEXT_FIELD {
+            return Err(AppError::Validation("Formattyp zu lang".into()));
+        }
         set_clauses.push(format!("format_type = ?{idx}"));
         params.push(Box::new(format_type.clone()));
         idx += 1;
     }
     if let Some(ref file_source) = updates.file_source {
+        if file_source.len() > MAX_TEXT_FIELD {
+            return Err(AppError::Validation("Quelle zu lang".into()));
+        }
         set_clauses.push(format!("file_source = ?{idx}"));
         params.push(Box::new(file_source.clone()));
         idx += 1;
     }
     if let Some(ref purchase_link) = updates.purchase_link {
+        if !purchase_link.is_empty() {
+            if purchase_link.len() > MAX_LINK_FIELD {
+                return Err(AppError::Validation("Kaufquelle-URL zu lang".into()));
+            }
+            let scheme_ok = purchase_link.starts_with("http://") || purchase_link.starts_with("https://");
+            if !scheme_ok {
+                return Err(AppError::Validation(
+                    "Kaufquelle muss mit http:// oder https:// beginnen".into(),
+                ));
+            }
+        }
         set_clauses.push(format!("purchase_link = ?{idx}"));
         params.push(Box::new(purchase_link.clone()));
         idx += 1;
@@ -791,6 +830,11 @@ pub fn update_file(
         idx += 1;
     }
     if let Some(ref pattern_date) = updates.pattern_date {
+        if !pattern_date.is_empty() && !is_valid_iso_date(pattern_date) {
+            return Err(AppError::Validation(
+                "Musterdatum muss im Format YYYY-MM-DD vorliegen".into(),
+            ));
+        }
         set_clauses.push(format!("pattern_date = ?{idx}"));
         params.push(Box::new(pattern_date.clone()));
         idx += 1;
@@ -1165,49 +1209,28 @@ pub struct PatternMetadata {
 
 const PATTERN_EXTENSIONS: &[&str] = &["pdf", "png", "jpg", "jpeg", "bmp"];
 
-/// Allowlist-based HTML sanitization for rich text instructions (#124).
-/// Only permits safe formatting tags; strips all attributes except harmless ones.
+/// HTML sanitization for rich text instructions (#124, audit Wave 1).
+/// Backed by the `ammonia` crate to avoid hand-rolled parsing footguns.
+/// Strips every tag/attribute outside the allow-list, normalises entity
+/// encoding, and rejects URL schemes other than http/https on any surviving
+/// hrefs. The result is safe to assign to `innerHTML`.
 fn sanitize_html(html: &str) -> String {
-    const ALLOWED_TAGS: &[&str] = &[
-        "b", "i", "u", "strong", "em", "ul", "ol", "li", "p", "br", "div", "span",
-    ];
-
-    let mut result = String::with_capacity(html.len());
-    let mut chars = html.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '<' {
-            // Collect the full tag content until '>'
-            let mut tag_content = String::new();
-            for tc in chars.by_ref() {
-                if tc == '>' { break; }
-                tag_content.push(tc);
-            }
-
-            let trimmed = tag_content.trim().to_lowercase();
-            let is_closing = trimmed.starts_with('/');
-            let tag_body = if is_closing { &trimmed[1..] } else { &trimmed };
-
-            // Extract just the tag name (before any space or /)
-            let tag_name = tag_body.split(|c: char| c.is_whitespace() || c == '/').next().unwrap_or("");
-
-            if ALLOWED_TAGS.contains(&tag_name) {
-                // Emit the tag WITHOUT any attributes (strips all on* handlers, href, src, etc.)
-                if is_closing {
-                    result.push_str(&format!("</{tag_name}>"));
-                } else if trimmed.ends_with('/') {
-                    result.push_str(&format!("<{tag_name} />"));
-                } else {
-                    result.push_str(&format!("<{tag_name}>"));
-                }
-            }
-            // Non-allowed tags (script, style, img, a, iframe, etc.) are silently dropped
-        } else {
-            result.push(ch);
-        }
+    use std::collections::{HashMap, HashSet};
+    let mut tags: HashSet<&str> = HashSet::new();
+    for t in ["b", "i", "u", "strong", "em", "ul", "ol", "li", "p", "br", "div", "span"] {
+        tags.insert(t);
     }
+    let attrs: HashMap<&str, HashSet<&str>> = HashMap::new();
+    let mut url_schemes: HashSet<&str> = HashSet::new();
+    url_schemes.insert("http");
+    url_schemes.insert("https");
 
-    result
+    ammonia::Builder::default()
+        .tags(tags)
+        .tag_attributes(attrs)
+        .url_schemes(url_schemes)
+        .clean(html)
+        .to_string()
 }
 
 #[tauri::command]
@@ -1388,30 +1411,29 @@ pub fn attach_file(
         .unwrap_or("attachment")
         .to_string();
 
-    let mime_type = match src.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref() {
-        Some("pdf") => Some("application/pdf".to_string()),
-        Some("png") => Some("image/png".to_string()),
-        Some("jpg" | "jpeg") => Some("image/jpeg".to_string()),
-        Some("txt") => Some("text/plain".to_string()),
+    // Audit Wave 1: enforce an extension allow-list so attach + open cannot
+    // be used to stage executables (.exe, .sh, .scpt, .command, .app …).
+    let ext_lower = super::lower_ext(src);
+    if !super::ATTACHMENT_EXTENSIONS.contains(&ext_lower.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Anhang-Format nicht erlaubt: .{ext_lower}. Erlaubt: PDF, PNG, JPG, TXT, MD"
+        )));
+    }
+
+    let mime_type = match ext_lower.as_str() {
+        "pdf" => Some("application/pdf".to_string()),
+        "png" => Some("image/png".to_string()),
+        "jpg" | "jpeg" => Some("image/jpeg".to_string()),
+        "txt" => Some("text/plain".to_string()),
+        "md" => Some("text/markdown".to_string()),
         _ => None,
     };
 
-    // Determine attachment storage directory
+    // Determine attachment storage directory under the configured library root.
     let conn = lock_db(&db)?;
 
-    let library_root: String = conn
-        .query_row("SELECT value FROM settings WHERE key = 'library_root'", [], |row| row.get(0))
-        .map_err(|_| AppError::Validation("library_root ist nicht konfiguriert".into()))?;
-
-    let base_dir = if library_root.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            home.join(&library_root[2..])
-        } else {
-            std::path::PathBuf::from(&library_root)
-        }
-    } else {
-        std::path::PathBuf::from(&library_root)
-    };
+    let base_dir = super::library_root(&conn)
+        .ok_or_else(|| AppError::Validation("library_root ist nicht konfiguriert".into()))?;
 
     let attach_dir = base_dir.join(".stichman").join("attachments").join(file_id.to_string());
     std::fs::create_dir_all(&attach_dir)?;
@@ -1511,6 +1533,10 @@ pub fn get_attachments(
 }
 
 /// Delete an attachment (DB record + file on disk).
+///
+/// Audit Wave 1: enforce that the on-disk path lives under the configured
+/// attachment directory before unlinking — guards against malicious DB rows
+/// (e.g. from a hostile restored backup) pointing at arbitrary files.
 #[tauri::command]
 pub fn delete_attachment(
     db: State<'_, DbState>,
@@ -1518,11 +1544,11 @@ pub fn delete_attachment(
 ) -> Result<(), AppError> {
     let conn = lock_db(&db)?;
 
-    let file_path: String = conn
+    let (file_id, file_path): (i64, String) = conn
         .query_row(
-            "SELECT file_path FROM file_attachments WHERE id = ?1",
+            "SELECT file_id, file_path FROM file_attachments WHERE id = ?1",
             [attachment_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -1531,42 +1557,72 @@ pub fn delete_attachment(
             other => AppError::Database(other),
         })?;
 
+    // Resolve the expected attachment directory under the current library_root.
+    // We require the stored path to lie under it before any unlink.
+    let containment_ok = match super::library_root(&conn) {
+        Some(root) => {
+            let expected = root
+                .join(".stichman")
+                .join("attachments")
+                .join(file_id.to_string());
+            super::ensure_under(std::path::Path::new(&file_path), &expected).is_ok()
+        }
+        None => false,
+    };
+
     conn.execute("DELETE FROM file_attachments WHERE id = ?1", [attachment_id])?;
 
-    // Best-effort file deletion
-    if let Err(e) = std::fs::remove_file(&file_path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("Failed to remove attachment file {file_path}: {e}");
+    if containment_ok {
+        if let Err(e) = std::fs::remove_file(&file_path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("Failed to remove attachment file {file_path}: {e}");
+            }
         }
+    } else {
+        log::warn!(
+            "delete_attachment: refused to unlink path outside attachment dir: {file_path}"
+        );
     }
 
     Ok(())
 }
 
 /// Open an attachment with the system default application.
+///
+/// Audit Wave 1: enforce containment under the per-file attachment directory
+/// (`<library_root>/.stichman/attachments/<file_id>/`) **and** require the
+/// extension to match the attachment allow-list, so a malicious DB row cannot
+/// trick the OS opener into launching arbitrary binaries.
 #[tauri::command]
 pub fn open_attachment(
     db: State<'_, DbState>,
     attachment_id: i64,
 ) -> Result<(), AppError> {
-    let conn = lock_db(&db)?;
+    let (file_id, file_path, expected_dir) = {
+        let conn = lock_db(&db)?;
 
-    let file_path: String = conn
-        .query_row(
-            "SELECT file_path FROM file_attachments WHERE id = ?1",
-            [attachment_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                AppError::NotFound(format!("Anhang {attachment_id} nicht gefunden"))
-            }
-            other => AppError::Database(other),
-        })?;
+        let (file_id, file_path): (i64, String) = conn
+            .query_row(
+                "SELECT file_id, file_path FROM file_attachments WHERE id = ?1",
+                [attachment_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::NotFound(format!("Anhang {attachment_id} nicht gefunden"))
+                }
+                other => AppError::Database(other),
+            })?;
 
-    drop(conn);
+        let expected = super::library_root(&conn)
+            .ok_or_else(|| AppError::Validation("library_root ist nicht konfiguriert".into()))?
+            .join(".stichman")
+            .join("attachments")
+            .join(file_id.to_string());
 
-    // SEC-001: Validate the path before passing to the OS opener
+        (file_id, file_path, expected)
+    };
+
     super::validate_no_traversal(&file_path)?;
     let path = std::path::Path::new(&file_path);
     if !path.exists() {
@@ -1576,19 +1632,19 @@ pub fn open_attachment(
         return Err(AppError::Validation(format!("Pfad ist keine regulaere Datei: {file_path}")));
     }
 
-    // SEC-002: Verify the file is within the app data directory
-    if let Ok(app_data_dir) = std::env::var("XDG_DATA_HOME")
-        .or_else(|_| dirs::data_dir().map(|d| d.to_string_lossy().to_string()).ok_or(()))
-    {
-        if let (Ok(canonical_path), Ok(_canonical_app)) = (path.canonicalize(), std::path::Path::new(&app_data_dir).canonicalize()) {
-            let canonical_str = canonical_path.to_string_lossy();
-            // Allow files within the app data dir OR files the user chose via dialog
-            // (attach_file copies to app data, so this should always match)
-            if !canonical_str.contains("de.carpeasrael.stichman") && !canonical_str.contains("stichman") {
-                log::warn!("open_attachment: path outside app data: {}", file_path);
-            }
-        }
+    // Enforcing containment check (no longer log-and-continue).
+    super::ensure_under(path, &expected_dir)?;
+
+    // Extension allow-list — defends against `.command`/`.scpt`/`.exe` payloads
+    // that may have ended up in the attachment dir via a hostile import.
+    let ext = super::lower_ext(path);
+    if !super::ATTACHMENT_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Anhang-Format nicht erlaubt zum Oeffnen: .{ext}"
+        )));
     }
+
+    let _ = file_id; // currently only used for the containment computation
 
     #[cfg(target_os = "macos")]
     {

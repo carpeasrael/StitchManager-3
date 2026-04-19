@@ -15,6 +15,14 @@ pub fn read_file_bytes(
 ) -> Result<String, AppError> {
     super::validate_no_traversal(&file_path)?;
 
+    // Audit Wave 1: enforce a viewer-format allow-list before any DB lookup.
+    let ext = super::lower_ext(std::path::Path::new(&file_path));
+    if ext.is_empty() || !super::VIEWER_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Dateityp .{ext} kann im Viewer nicht angezeigt werden"
+        )));
+    }
+
     // Validate the path is known to the application
     let conn = lock_db(&db)?;
     let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| std::path::PathBuf::from(&file_path));

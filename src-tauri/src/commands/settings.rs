@@ -160,6 +160,13 @@ pub fn set_setting(
         ));
     }
 
+    // Audit Wave 1: validate `library_root` so it can never point at the
+    // user's home or a system root, which would expose the entire tree to
+    // viewer/import paths that trust this setting.
+    if key == "library_root" {
+        super::validate_library_root(&value)?;
+    }
+
     let conn = lock_db(&db)?;
 
     conn.execute(

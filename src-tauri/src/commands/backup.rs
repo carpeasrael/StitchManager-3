@@ -253,14 +253,25 @@ pub fn relink_file(
 }
 
 /// Batch re-link files by replacing a path prefix.
+///
+/// Audit Wave 1: validate **both** prefixes for traversal, and ensure every
+/// resolved target path lives under the configured `library_root`. Without
+/// containment, an attacker (or accidentally-typed prefix) can repoint files
+/// at arbitrary on-disk locations that other commands later trust.
 #[tauri::command]
 pub fn relink_batch(
     db: State<'_, DbState>,
     old_prefix: String,
     new_prefix: String,
 ) -> Result<u32, AppError> {
+    super::validate_no_traversal(&old_prefix)?;
     super::validate_no_traversal(&new_prefix)?;
     let conn = lock_db(&db)?;
+
+    let allowed_root = super::library_root(&conn)
+        .ok_or_else(|| AppError::Validation("library_root ist nicht konfiguriert".into()))?;
+    super::ensure_under(Path::new(&new_prefix), &allowed_root)?;
+
     let mut stmt = conn.prepare(
         "SELECT id, filepath FROM embroidery_files WHERE filepath LIKE ?1 AND deleted_at IS NULL"
     )?;
@@ -275,13 +286,19 @@ pub fn relink_batch(
     let mut count: u32 = 0;
     for (id, old_path) in &files {
         let new_path = old_path.replacen(&old_prefix, &new_prefix, 1);
-        if Path::new(&new_path).exists() {
-            conn.execute(
-                "UPDATE embroidery_files SET filepath = ?1, updated_at = datetime('now') WHERE id = ?2 AND deleted_at IS NULL",
-                rusqlite::params![new_path, id],
-            )?;
-            count += 1;
+        let np = Path::new(&new_path);
+        if !np.exists() {
+            continue;
         }
+        if super::ensure_under(np, &allowed_root).is_err() {
+            log::warn!("relink_batch: skipping path outside library_root: {new_path}");
+            continue;
+        }
+        conn.execute(
+            "UPDATE embroidery_files SET filepath = ?1, updated_at = datetime('now') WHERE id = ?2 AND deleted_at IS NULL",
+            rusqlite::params![new_path, id],
+        )?;
+        count += 1;
     }
 
     Ok(count)
@@ -472,20 +489,24 @@ pub fn purge_file(
 }
 
 /// Auto-purge trash items older than the configured retention period.
+///
+/// Audit Wave 1: clamp `retention_days` to a sane positive range so the
+/// modifier string fed to SQLite cannot ever carry an out-of-band value.
 #[tauri::command]
 pub fn auto_purge_trash(
     db: State<'_, DbState>,
 ) -> Result<u32, AppError> {
     let conn = lock_db(&db)?;
 
-    // Get retention days from settings (default 30)
+    // Get retention days from settings (default 30) and clamp to [1, 3650].
     let retention_days: i64 = conn.query_row(
         "SELECT value FROM settings WHERE key = 'trash_retention_days'",
         [],
         |row| row.get::<_, String>(0),
     ).ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(30);
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(30)
+        .clamp(1, 3650);
 
     let threshold = format!("-{retention_days} days");
     let deleted = conn.execute(
@@ -704,9 +725,11 @@ pub fn import_library(
         .and_then(|r| r.as_array())
         .ok_or_else(|| AppError::Validation("Export muss 'records' enthalten".into()))?;
 
+    super::validate_library_root(&new_library_root)?;
     let conn = lock_db(&db)?;
     let mut imported: u32 = 0;
-    let root = new_library_root.trim_end_matches('/').trim_end_matches('\\');
+    let root_path = super::expand_home(new_library_root.trim_end_matches('/').trim_end_matches('\\'));
+    let canon_root = super::canonicalize_or_self(&root_path);
 
     for record in records {
         let rel_path = record.get("relativePath").and_then(|v| v.as_str()).unwrap_or("");
@@ -721,7 +744,14 @@ pub fn import_library(
             continue;
         }
 
-        let abs_path = format!("{}/{}", root, rel_path);
+        let composed = root_path.join(rel_path);
+        // Audit Wave 1: ensure composed path stays under the canonicalised root,
+        // even if the new_library_root resolves through symlinks.
+        if super::ensure_under(&composed, &canon_root).is_err() {
+            log::warn!("import_library: skipped path escaping root: {}", composed.display());
+            continue;
+        }
+        let abs_path = composed.to_string_lossy().to_string();
         let filename = record.get("filename").and_then(|v| v.as_str()).unwrap_or("unknown");
         let unique_id = record.get("uniqueId").and_then(|v| v.as_str());
 
@@ -743,9 +773,10 @@ pub fn import_library(
         ) {
             Ok(id) => id,
             Err(_) => {
+                let root_str = root_path.to_string_lossy().to_string();
                 conn.execute(
                     "INSERT INTO folders (name, path) VALUES ('Importiert', ?1)",
-                    [root],
+                    [&root_str],
                 )?;
                 conn.last_insert_rowid()
             }

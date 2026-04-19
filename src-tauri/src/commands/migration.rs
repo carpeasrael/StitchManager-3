@@ -500,9 +500,18 @@ pub fn migrate_from_2stitch(
             }
         }
 
-        // Fallback: copy 2stitch preview if our generator failed
+        // Fallback: copy 2stitch preview if our generator failed.
+        // Audit Wave 1: validate `hash` strictly as hex before joining into a
+        // path — defends against malicious 2stitch XML staging traversal
+        // sequences in `content_hash`.
         if !thumb_set {
             if let (Some(previews), Some(hash)) = (&previews_dir, content_hash) {
+                let hash_ok = !hash.is_empty()
+                    && hash.len() <= 128
+                    && hash.chars().all(|c| c.is_ascii_hexdigit());
+                if !hash_ok {
+                    continue;
+                }
                 let preview_path = previews.join(format!("{hash}.png"));
                 if preview_path.exists() {
                     let target = thumb_state.0.thumbnail_path(*id);
