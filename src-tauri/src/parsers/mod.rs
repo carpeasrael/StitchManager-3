@@ -71,15 +71,23 @@ pub fn get_parser(extension: &str) -> Option<&'static dyn EmbroideryParser> {
     static PDF_PARSER: pdf::PdfParser = pdf::PdfParser;
     static IMAGE_PARSER: image_parser::ImageParser = image_parser::ImageParser;
 
-    match extension.to_lowercase().as_str() {
-        "pes" => Some(&PES_PARSER),
-        "dst" => Some(&DST_PARSER),
-        "jef" => Some(&JEF_PARSER),
-        "vp3" => Some(&VP3_PARSER),
-        "pdf" => Some(&PDF_PARSER),
-        "png" | "jpg" | "jpeg" | "bmp" => Some(&IMAGE_PARSER),
-        _ => None,
+    // Audit Wave 5 (deferred from Wave 2 perf #22): match without an
+    // intermediate `to_lowercase()` allocation — `eq_ignore_ascii_case`
+    // is allocation-free and equally robust for these short ASCII tokens.
+    let ext = extension;
+    if ext.eq_ignore_ascii_case("pes") { return Some(&PES_PARSER); }
+    if ext.eq_ignore_ascii_case("dst") { return Some(&DST_PARSER); }
+    if ext.eq_ignore_ascii_case("jef") { return Some(&JEF_PARSER); }
+    if ext.eq_ignore_ascii_case("vp3") { return Some(&VP3_PARSER); }
+    if ext.eq_ignore_ascii_case("pdf") { return Some(&PDF_PARSER); }
+    if ext.eq_ignore_ascii_case("png")
+        || ext.eq_ignore_ascii_case("jpg")
+        || ext.eq_ignore_ascii_case("jpeg")
+        || ext.eq_ignore_ascii_case("bmp")
+    {
+        return Some(&IMAGE_PARSER);
     }
+    None
 }
 
 #[cfg(test)]

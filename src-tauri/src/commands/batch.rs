@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -6,6 +7,41 @@ use crate::db::models::EmbroideryFile;
 use crate::db::queries::{FILE_SELECT, FILE_SELECT_LIVE_BY_ID, row_to_file};
 use crate::error::{lock_db, AppError};
 use crate::DbState;
+
+/// Audit Wave 5 (deferred from Wave 3 #4): cooperative cancellation flag for
+/// long-running batch operations. The frontend's BatchDialog cancel button
+/// calls `cancel_batch` which sets this; each batch loop checks
+/// `is_batch_cancelled()` once per iteration and aborts cleanly.
+///
+/// Single global flag is correct here because BatchDialog is a UI singleton
+/// — only one batch can run at a time.
+static BATCH_CANCEL: AtomicBool = AtomicBool::new(false);
+
+fn reset_batch_cancel() {
+    BATCH_CANCEL.store(false, Ordering::SeqCst);
+}
+
+fn is_batch_cancelled() -> bool {
+    BATCH_CANCEL.load(Ordering::Relaxed)
+}
+
+/// Public alias used by sibling modules (e.g. `ai.rs` for batch AI analysis).
+pub fn is_batch_cancelled_public() -> bool {
+    is_batch_cancelled()
+}
+
+/// Public alias for sibling modules to reset the cancel flag at the start
+/// of a new batch run (e.g. ai.rs).
+pub fn reset_batch_cancel_public() {
+    reset_batch_cancel();
+}
+
+#[tauri::command]
+pub fn cancel_batch() -> Result<(), AppError> {
+    BATCH_CANCEL.store(true, Ordering::SeqCst);
+    log::info!("Batch cancellation requested");
+    Ok(())
+}
 
 /// Load multiple files by ID in a single query instead of per-file queries.
 fn batch_load_files(
@@ -140,6 +176,7 @@ pub async fn batch_rename(
     file_ids: Vec<i64>,
     pattern: String,
 ) -> Result<BatchResult, AppError> {
+    reset_batch_cancel();
     let total = file_ids.len() as i64;
     let mut success: i64 = 0;
     let mut failed: i64 = 0;
@@ -173,6 +210,10 @@ pub async fn batch_rename(
     let mut pending_updates: Vec<RenameOp> = Vec::new();
 
     for (i, (file_id, file_opt)) in files.iter().enumerate() {
+        if is_batch_cancelled() {
+            log::info!("batch_rename: cancelled at {}/{}", i, total);
+            break;
+        }
         let result = (|| -> Result<RenameOp, AppError> {
             let file = file_opt.as_ref().ok_or_else(|| {
                 AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
@@ -329,6 +370,7 @@ pub async fn batch_organize(
         std::path::PathBuf::from(&library_root)
     };
 
+    reset_batch_cancel();
     let total = file_ids.len() as i64;
     let mut success: i64 = 0;
     let mut failed: i64 = 0;
@@ -361,6 +403,10 @@ pub async fn batch_organize(
     let mut pending_updates: Vec<MoveOp> = Vec::new();
 
     for (i, (file_id, file_opt)) in files.iter().enumerate() {
+        if is_batch_cancelled() {
+            log::info!("batch_organize: cancelled at {}/{}", i, total);
+            break;
+        }
         let result = (|| -> Result<MoveOp, AppError> {
             let file = file_opt.as_ref().ok_or_else(|| {
                 AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
@@ -529,6 +575,7 @@ pub async fn batch_export_usb(
             .collect()
     };
 
+    reset_batch_cancel();
     let total = file_ids.len() as i64;
     let mut success: i64 = 0;
     let mut failed: i64 = 0;
@@ -537,6 +584,10 @@ pub async fn batch_export_usb(
 
     // Phase 2: Copy files without holding the DB lock
     for (i, (file_id, file_opt)) in files.iter().enumerate() {
+        if is_batch_cancelled() {
+            log::info!("batch_export_usb: cancelled at {}/{}", i, total);
+            break;
+        }
         let result = (|| -> Result<String, AppError> {
             let (filename, filepath) = file_opt.as_ref().ok_or_else(|| {
                 AppError::NotFound(format!("Datei {file_id} nicht gefunden"))

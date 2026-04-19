@@ -27,6 +27,8 @@ import { ManufacturingDialog } from "./components/ManufacturingDialog";
 import { ImportPreviewDialog } from "./components/ImportPreviewDialog";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { InputDialog } from "./components/InputDialog";
+import { HelpDialog } from "./components/HelpDialog";
+import { FolderDialog } from "./components/FolderDialog";
 import * as BackupService from "./services/BackupService";
 import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
@@ -534,7 +536,7 @@ function initEventHandlers(): () => void {
       const settings = await SettingsService.getAllSettings();
       const pattern = settings.rename_pattern || "{name}_{theme}";
 
-      BatchDialog.open("Batch Umbenennen", fileIds.length);
+      const dialog = BatchDialog.open("Batch Umbenennen", fileIds.length);
       try {
         const result = await BatchService.rename(fileIds, pattern);
         if (result.failed > 0) {
@@ -545,6 +547,11 @@ function initEventHandlers(): () => void {
       } catch (e) {
         console.warn("Batch rename failed:", e);
         ToastContainer.show("error", "Batch-Umbenennung fehlgeschlagen");
+      } finally {
+        // Audit Wave 5 follow-up: ensure the dialog leaves the
+        // "Wird abgebrochen…" / busy state even if the backend ended
+        // early via cancel_batch.
+        dialog.markCompleted();
       }
       await reloadFilesAndCounts();
     }),
@@ -556,7 +563,7 @@ function initEventHandlers(): () => void {
       const settings = await SettingsService.getAllSettings();
       const pattern = settings.organize_pattern || "{theme}/{name}";
 
-      BatchDialog.open("Batch Organisieren", fileIds.length);
+      const dialog = BatchDialog.open("Batch Organisieren", fileIds.length);
       try {
         const result = await BatchService.organize(fileIds, pattern);
         if (result.failed > 0) {
@@ -567,6 +574,8 @@ function initEventHandlers(): () => void {
       } catch (e) {
         console.warn("Batch organize failed:", e);
         ToastContainer.show("error", "Batch-Organisation fehlgeschlagen");
+      } finally {
+        dialog.markCompleted();
       }
       await reloadFilesAndCounts();
     }),
@@ -598,13 +607,15 @@ function initEventHandlers(): () => void {
           ToastContainer.show("error", "Export fehlgeschlagen");
         }
       } else {
-        BatchDialog.open("USB-Export", fileIds.length);
+        const dialog = BatchDialog.open("USB-Export", fileIds.length);
         try {
           await BatchService.exportUsb(fileIds, targetPath);
           ToastContainer.show("success", `${fileIds.length} Dateien exportiert`);
         } catch (e) {
           console.warn("Batch export failed:", e);
           ToastContainer.show("error", "Export fehlgeschlagen");
+        } finally {
+          dialog.markCompleted();
         }
       }
     }),
@@ -710,7 +721,7 @@ function initEventHandlers(): () => void {
       const fileIds = appState.get("selectedFileIds");
       if (fileIds.length === 0) return;
 
-      BatchDialog.open("Batch KI-Analyse", fileIds.length);
+      const dialog = BatchDialog.open("Batch KI-Analyse", fileIds.length);
       try {
         const results = await AiService.analyzeBatch(fileIds);
         if (results && results.length > 0) {
@@ -719,6 +730,8 @@ function initEventHandlers(): () => void {
       } catch (e) {
         console.warn("Batch AI analysis failed:", e);
         ToastContainer.show("error", "Batch-KI-Analyse fehlgeschlagen");
+      } finally {
+        dialog.markCompleted();
       }
       await reloadFiles();
     }),
@@ -980,6 +993,24 @@ function initEventHandlers(): () => void {
 
     EventBus.on("shortcut:settings", () => {
       SettingsDialog.open();
+    }),
+
+    EventBus.on("shortcut:help", () => HelpDialog.open()),
+
+    EventBus.on("shortcut:ai", () => {
+      // Audit Wave 5: Ctrl+K wires the README-promised AI shortcut by
+      // delegating to the same toolbar handler the AI button uses.
+      EventBus.emit("toolbar:ai-analyze");
+    }),
+
+    EventBus.on("shortcut:new-folder", () => FolderDialog.open()),
+
+    EventBus.on("shortcut:select-all", () => {
+      const files = appState.getRef("files");
+      if (files.length === 0) return;
+      const ids = files.map((f) => f.id);
+      appState.set("selectedFileIds", ids);
+      appState.set("selectedFileId", ids[ids.length - 1]);
     }),
 
     EventBus.on("shortcut:delete", () => deleteSelectedFiles()),

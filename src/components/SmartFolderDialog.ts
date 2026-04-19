@@ -1,4 +1,5 @@
 import { ToastContainer } from "./Toast";
+import { extractBackendMessage } from "../utils/errors";
 import { trapFocus } from "../utils/focus-trap";
 import { appState } from "../state/AppState";
 import * as SmartFolderService from "../services/SmartFolderService";
@@ -237,10 +238,7 @@ export class SmartFolderDialog {
         ToastContainer.show("success", `"${name}" erstellt`);
         this.close();
       } catch (e) {
-        const msg =
-          e && typeof e === "object" && "message" in e
-            ? (e as { message: string }).message
-            : String(e);
+        const msg = extractBackendMessage(e, "Fehler");
         ToastContainer.show("error", `Fehler: ${msg}`);
         createBtn.disabled = false;
       }

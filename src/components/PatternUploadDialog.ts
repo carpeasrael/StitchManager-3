@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { extractBackendMessage } from "../utils/errors";
 import { ToastContainer } from "./Toast";
 import { trapFocus } from "../utils/focus-trap";
 import * as FileService from "../services/FileService";
@@ -300,7 +301,7 @@ export class PatternUploadDialog {
     footer.appendChild(errorDisplay);
 
     const cancelBtn = document.createElement("button");
-    cancelBtn.className = "dialog-btn";
+    cancelBtn.className = "dialog-btn dialog-btn-secondary";
     cancelBtn.textContent = "Abbrechen";
     cancelBtn.addEventListener("click", () => PatternUploadDialog.dismiss());
     footer.appendChild(cancelBtn);
@@ -345,7 +346,7 @@ export class PatternUploadDialog {
 
         PatternUploadDialog.dismiss();
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : typeof e === "object" && e !== null && "message" in e ? String((e as { message: string }).message) : "Upload fehlgeschlagen";
+        const msg = extractBackendMessage(e, "Upload fehlgeschlagen");
         errorDisplay.textContent = msg;
         uploadBtn.disabled = false;
         uploadBtn.textContent = "Hochladen";

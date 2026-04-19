@@ -1,4 +1,5 @@
 import { ToastContainer } from "./Toast";
+import { extractBackendMessage } from "../utils/errors";
 import { trapFocus } from "../utils/focus-trap";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
@@ -432,10 +433,7 @@ export class ImportPreviewDialog {
           const updatedFolders = await FolderService.getAll();
           appState.set("folders", updatedFolders);
         } catch (e) {
-          const msg =
-            e && typeof e === "object" && "message" in e
-              ? (e as { message: string }).message
-              : String(e);
+          const msg = extractBackendMessage(e, "Fehler");
           ToastContainer.show("error", `Ordner konnte nicht erstellt werden: ${msg}`);
           return;
         }
@@ -503,10 +501,7 @@ export class ImportPreviewDialog {
         );
         this.close();
       } catch (e) {
-        const msg =
-          e && typeof e === "object" && "message" in e
-            ? (e as { message: string }).message
-            : String(e);
+        const msg = extractBackendMessage(e, "Fehler");
         ToastContainer.show("error", `Import fehlgeschlagen: ${msg}`);
         importBtn.disabled = false;
         updateImportBtn();

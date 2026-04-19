@@ -9,6 +9,7 @@ import { ToastContainer } from "./Toast";
 import { TagInput } from "./TagInput";
 import { ImagePreviewDialog } from "./ImagePreviewDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { extractBackendMessage } from "../utils/errors";
 import * as ProjectService from "../services/ProjectService";
 import type { Project } from "../types";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -112,16 +113,16 @@ export class MetadataPanel extends Component {
     }
 
     try {
-      const [file, formats, colors, tags, allTags, customFields, attachments, customFieldValues] = await Promise.all([
-        FileService.getFile(fileId),
-        FileService.getFormats(fileId),
-        FileService.getColors(fileId),
-        FileService.getTags(fileId),
+      // Audit Wave 5 perf #17: combined fetch — 6 file-scoped queries inside
+      // one lock_db acquisition. The 2 global lookups (allTags,
+      // customFields) stay parallel (they're not file-scoped and the
+      // results are cached for the lifetime of the panel).
+      const [combined, allTags, customFields] = await Promise.all([
+        FileService.getFileWithMetadata(fileId),
         FileService.getAllTags(),
         SettingsService.getCustomFields(),
-        FileService.getAttachments(fileId),
-        SettingsService.getCustomFieldValues(fileId),
       ]);
+      const { file, formats, colors, tags, attachments, customFieldValues } = combined;
       this.currentFile = file;
       this.currentTags = tags;
       this.allTags = allTags;
@@ -1898,20 +1899,6 @@ export class MetadataPanel extends Component {
     grid.appendChild(row);
   }
 
-}
-
-/**
- * Pull a human-readable German message out of a Tauri backend error.
- * Tauri serialises `AppError` as `{ code, message }`; pure JS errors expose
- * `e.message`. Falls back to `fallback` if neither field is present.
- */
-function extractBackendMessage(e: unknown, fallback: string): string {
-  if (e && typeof e === "object" && "message" in e) {
-    const m = (e as { message?: unknown }).message;
-    if (typeof m === "string" && m.trim().length > 0) return m;
-  }
-  if (e instanceof Error && e.message) return e.message;
-  return fallback;
 }
 
 /**

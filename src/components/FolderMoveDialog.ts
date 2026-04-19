@@ -1,4 +1,5 @@
 import { ToastContainer } from "./Toast";
+import { extractBackendMessage } from "../utils/errors";
 import { trapFocus } from "../utils/focus-trap";
 import { appState } from "../state/AppState";
 import { buildFolderTree, flattenVisibleTree, getDescendantIds } from "../utils/tree";
@@ -136,10 +137,7 @@ export class FolderMoveDialog {
         ToastContainer.show("success", `"${folder.name}" verschoben`);
         this.close();
       } catch (e) {
-        const msg =
-          e && typeof e === "object" && "message" in e
-            ? (e as { message: string }).message
-            : String(e);
+        const msg = extractBackendMessage(e, "Fehler");
         ToastContainer.show("error", `Verschieben fehlgeschlagen: ${msg}`);
         moveBtn.disabled = false;
       }

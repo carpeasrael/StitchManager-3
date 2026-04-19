@@ -1,4 +1,5 @@
 import { Component } from "./Component";
+import { extractBackendMessage } from "../utils/errors";
 import { appState } from "../state/AppState";
 import { EventBus } from "../state/EventBus";
 import { ToastContainer } from "./Toast";
@@ -408,10 +409,7 @@ export class Sidebar extends Component {
         }
       }
     } catch (e) {
-      const msg =
-        e && typeof e === "object" && "message" in e
-          ? (e as { message: string }).message
-          : String(e);
+      const msg = extractBackendMessage(e, "Fehler");
       ToastContainer.show("error", `Verschieben fehlgeschlagen: ${msg}`);
     } finally {
       this.reordering = false;

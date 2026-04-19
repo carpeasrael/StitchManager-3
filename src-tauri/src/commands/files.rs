@@ -312,8 +312,12 @@ pub(crate) fn query_files_impl(
         format!(" WHERE {}", conditions.join(" AND "))
     };
 
+    // Audit Wave 5 (deferred from Wave 2 perf #15): hard cap on the
+    // unbounded `get_files` to prevent multi-megabyte responses if a future
+    // caller forgets to paginate.
+    const HARD_LIMIT: i64 = 5000;
     let sql = format!(
-        "{FILE_SELECT_ALIASED}{where_clause} {order}"
+        "{FILE_SELECT_ALIASED}{where_clause} {order} LIMIT {HARD_LIMIT}"
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -321,6 +325,12 @@ pub(crate) fn query_files_impl(
     let files = stmt
         .query_map(param_refs.as_slice(), |row| row_to_file(row))?
         .collect::<Result<Vec<_>, _>>()?;
+
+    if files.len() as i64 == HARD_LIMIT {
+        log::warn!(
+            "get_files hit the {HARD_LIMIT} hard limit — caller should paginate"
+        );
+    }
 
     Ok(files)
 }
@@ -1693,6 +1703,145 @@ pub fn open_attachment(
         return Err(AppError::Internal("Plattform nicht unterstützt".to_string()));
     }
     Ok(())
+}
+
+/// Audit Wave 5 (deferred from Wave 2 perf #17): combined per-file metadata
+/// fetch. Replaces 6 separate IPC roundtrips + 6 mutex acquisitions with one
+/// command call inside a single `lock_db`. The frontend `MetadataPanel`
+/// calls this on every selection change.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileWithMetadata {
+    pub file: EmbroideryFile,
+    pub formats: Vec<FileFormat>,
+    pub colors: Vec<FileThreadColor>,
+    pub tags: Vec<Tag>,
+    pub attachments: Vec<FileAttachment>,
+    pub custom_field_values: std::collections::HashMap<i64, String>,
+}
+
+#[tauri::command]
+pub fn get_file_with_metadata(
+    db: State<'_, DbState>,
+    file_id: i64,
+) -> Result<FileWithMetadata, AppError> {
+    let conn = lock_db(&db)?;
+
+    let file: EmbroideryFile = conn
+        .query_row(FILE_SELECT_LIVE_BY_ID, [file_id], row_to_file)
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Datei {file_id} nicht gefunden"))
+            }
+            other => AppError::Database(other),
+        })?;
+
+    let formats: Vec<FileFormat> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, file_id, format, format_version, filepath, file_size_bytes, parsed \
+             FROM file_formats WHERE file_id = ?1 ORDER BY format",
+        )?;
+        let rows = stmt
+            .query_map([file_id], |row| {
+                Ok(FileFormat {
+                    id: row.get(0)?,
+                    file_id: row.get(1)?,
+                    format: row.get(2)?,
+                    format_version: row.get(3)?,
+                    filepath: row.get(4)?,
+                    file_size_bytes: row.get(5)?,
+                    parsed: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+
+    let colors: Vec<FileThreadColor> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, file_id, sort_order, color_hex, color_name, brand, brand_code, is_ai \
+             FROM file_thread_colors WHERE file_id = ?1 ORDER BY sort_order",
+        )?;
+        let rows = stmt
+            .query_map([file_id], |row| {
+                Ok(FileThreadColor {
+                    id: row.get(0)?,
+                    file_id: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    color_hex: row.get(3)?,
+                    color_name: row.get(4)?,
+                    brand: row.get(5)?,
+                    brand_code: row.get(6)?,
+                    is_ai: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+
+    let tags: Vec<Tag> = {
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.name, t.created_at FROM tags t \
+             INNER JOIN file_tags ft ON ft.tag_id = t.id \
+             WHERE ft.file_id = ?1 ORDER BY t.name",
+        )?;
+        let rows = stmt
+            .query_map([file_id], |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+
+    let attachments: Vec<FileAttachment> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, file_id, filename, mime_type, file_path, attachment_type, display_name, sort_order, created_at \
+             FROM file_attachments WHERE file_id = ?1 ORDER BY sort_order, created_at",
+        )?;
+        let rows = stmt
+            .query_map([file_id], |row| {
+                Ok(FileAttachment {
+                    id: row.get(0)?,
+                    file_id: row.get(1)?,
+                    filename: row.get(2)?,
+                    mime_type: row.get(3)?,
+                    file_path: row.get(4)?,
+                    attachment_type: row.get(5)?,
+                    display_name: row.get(6)?,
+                    sort_order: row.get(7)?,
+                    created_at: row.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+
+    let mut custom_field_values = std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT field_id, value FROM custom_field_values WHERE file_id = ?1",
+        )?;
+        let rows = stmt.query_map([file_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (field_id, value) = row?;
+            custom_field_values.insert(field_id, value);
+        }
+    }
+
+    Ok(FileWithMetadata {
+        file,
+        formats,
+        colors,
+        tags,
+        attachments,
+        custom_field_values,
+    })
 }
 
 /// Get attachment count for a file.

@@ -626,10 +626,16 @@ pub async fn ai_analyze_batch(
     app_handle: AppHandle,
     file_ids: Vec<i64>,
 ) -> Result<Vec<AiAnalysisResult>, AppError> {
+    super::batch::reset_batch_cancel_public();
     let total = file_ids.len() as i64;
     let mut results: Vec<AiAnalysisResult> = Vec::new();
 
     for (i, file_id) in file_ids.iter().enumerate() {
+        // Audit Wave 5: cooperative cancellation check.
+        if super::batch::is_batch_cancelled_public() {
+            log::info!("ai_analyze_batch: cancelled at {}/{}", i, total);
+            break;
+        }
         let analyze_result = (|| async {
             // Query DB for prompt data, thumbnail path, and config — then drop lock
             let (prompt, thumbnail_path, config) = {

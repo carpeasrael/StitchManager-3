@@ -107,7 +107,7 @@ export class ProjectListDialog {
 
     // New project button
     const newBtn = document.createElement("button");
-    newBtn.className = "dv-btn";
+    newBtn.className = "dialog-btn dialog-btn-primary";
     newBtn.textContent = "Neues Projekt";
     newBtn.addEventListener("click", () => {
       this.selectedProject = null;
@@ -312,7 +312,7 @@ export class ProjectListDialog {
 
     // Save button
     const saveBtn = document.createElement("button");
-    saveBtn.className = "dv-btn";
+    saveBtn.className = "dialog-btn dialog-btn-primary";
     saveBtn.textContent = "Speichern";
     saveBtn.addEventListener("click", async () => {
       const projectName = nameInput.input.value.trim();
@@ -347,7 +347,7 @@ export class ProjectListDialog {
     pane.appendChild(saveBtn);
 
     const cancelBtn = document.createElement("button");
-    cancelBtn.className = "dv-btn";
+    cancelBtn.className = "dialog-btn dialog-btn-secondary";
     cancelBtn.style.marginLeft = "8px";
     cancelBtn.textContent = "Abbrechen";
     cancelBtn.addEventListener("click", () => {
@@ -393,9 +393,9 @@ export class ProjectListDialog {
 
     // Back to detail view button
     const backBtn = document.createElement("button");
-    backBtn.className = "dv-btn";
+    backBtn.className = "dialog-btn dialog-btn-secondary";
     backBtn.style.marginBottom = "12px";
-    backBtn.textContent = "Zurueck zur Detailansicht";
+    backBtn.textContent = "Zurück zur Detailansicht";
     backBtn.addEventListener("click", async () => {
       const project = this.projects.find((p) => p.id === projectId);
       if (project) {

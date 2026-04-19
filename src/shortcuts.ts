@@ -4,6 +4,10 @@ function isInputFocused(): boolean {
   const el = document.activeElement;
   if (!el) return false;
   const tag = el.tagName.toLowerCase();
+  // Audit Wave 5: also treat contenteditable elements as inputs so the new
+  // Ctrl+A / `?` shortcuts don't hijack the rich-text editors in
+  // MetadataPanel and PatternUploadDialog.
+  if (el instanceof HTMLElement && el.isContentEditable) return true;
   return tag === "input" || tag === "textarea" || tag === "select";
 }
 
@@ -62,6 +66,25 @@ export function initShortcuts(): () => void {
           e.preventDefault();
           EventBus.emit("shortcut:settings");
           return;
+        case "k":
+        case "K":
+          // Audit Wave 5 (deferred from Wave 3 #8): wire the README-promised
+          // Ctrl+K — opens AI analyse for the selected file.
+          e.preventDefault();
+          EventBus.emit("shortcut:ai");
+          return;
+        case "n":
+        case "N":
+          // Audit Wave 5: Ctrl+N → new folder.
+          e.preventDefault();
+          EventBus.emit("shortcut:new-folder");
+          return;
+        case "a":
+        case "A":
+          // Audit Wave 5: Ctrl+A → select all in file list.
+          e.preventDefault();
+          EventBus.emit("shortcut:select-all");
+          return;
       }
     }
 
@@ -81,6 +104,11 @@ export function initShortcuts(): () => void {
       case "ArrowDown":
         e.preventDefault();
         EventBus.emit("shortcut:next-file");
+        break;
+      case "?":
+        // Audit Wave 5: ? → keyboard-shortcut help dialog.
+        e.preventDefault();
+        EventBus.emit("shortcut:help");
         break;
     }
   };

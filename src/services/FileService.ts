@@ -64,6 +64,27 @@ export async function getFile(fileId: number): Promise<EmbroideryFile> {
   return invoke<EmbroideryFile>("get_file", { fileId });
 }
 
+/**
+ * Audit Wave 5 (deferred from Wave 2 perf #17): combined per-file metadata
+ * fetch. Replaces 6 separate IPC roundtrips (`get_file`, `get_file_formats`,
+ * `get_file_colors`, `get_file_tags`, `get_attachments`,
+ * `get_custom_field_values`) with a single command call.
+ */
+export interface FileWithMetadata {
+  file: EmbroideryFile;
+  formats: FileFormat[];
+  colors: ThreadColor[];
+  tags: Tag[];
+  attachments: FileAttachment[];
+  customFieldValues: Record<number, string>;
+}
+
+export async function getFileWithMetadata(
+  fileId: number
+): Promise<FileWithMetadata> {
+  return invoke<FileWithMetadata>("get_file_with_metadata", { fileId });
+}
+
 export async function getFormats(fileId: number): Promise<FileFormat[]> {
   return invoke<FileFormat[]>("get_file_formats", { fileId });
 }

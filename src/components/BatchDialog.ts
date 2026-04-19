@@ -25,6 +25,9 @@ export class BatchDialog {
   private unsubscribers: (() => void)[] = [];
   private releaseFocusTrap: (() => void) | null = null;
   private autoCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Audit Wave 5: tracks whether the operation finished — flips the
+   *  cancel button to "Schließen" and re-enables it. */
+  private completed = false;
 
   constructor(
     private operation: string,
@@ -121,9 +124,25 @@ export class BatchDialog {
 
     this.cancelBtn = document.createElement("button");
     this.cancelBtn.className = "dialog-btn dialog-btn-secondary";
-    this.cancelBtn.textContent = "Schließen";
-    this.cancelBtn.addEventListener("click", () => {
-      this.close();
+    // Audit Wave 5 (deferred from Wave 3 #4): cancel button now actually
+    // requests cancellation while a batch is running, then becomes the
+    // close button once the operation finishes.
+    this.cancelBtn.textContent = "Abbrechen";
+    this.cancelBtn.addEventListener("click", async () => {
+      if (this.completed) {
+        this.close();
+        return;
+      }
+      try {
+        const { cancelBatch } = await import("../services/BatchService");
+        await cancelBatch();
+      } catch (err) {
+        console.warn("Failed to request batch cancellation:", err);
+      }
+      if (this.cancelBtn) {
+        this.cancelBtn.textContent = "Wird abgebrochen…";
+        this.cancelBtn.disabled = true;
+      }
     });
     footer.appendChild(this.cancelBtn);
 
@@ -238,7 +257,19 @@ export class BatchDialog {
     }
   }
 
+  /**
+   * Audit Wave 5 follow-up: public completion hook so toolbar handlers can
+   * mark the dialog finished even when the backend ended early (e.g.
+   * cancel or error). Without this the cancel button would stick at
+   * "Wird abgebrochen…" forever because no progress event hits 100 %.
+   */
+  markCompleted(): void {
+    if (this.completed) return;
+    this.onComplete();
+  }
+
   private onComplete(): void {
+    this.completed = true;
     if (this.cancelBtn) {
       this.cancelBtn.textContent = "Schließen";
       this.cancelBtn.disabled = false;
@@ -251,10 +282,17 @@ export class BatchDialog {
       this.timeLabel.textContent = elapsed ? `${elapsed} — Abgeschlossen` : "Abgeschlossen";
     }
 
-    // Auto-close after 2 seconds
-    this.autoCloseTimer = setTimeout(() => {
-      this.close();
-    }, 2000);
+    // Audit Wave 5 (deferred from Wave 3 #4): only auto-close on a clean
+    // run with no errors. If the user needs to read failures they can
+    // dismiss explicitly. The log entries flag errors with "error: …".
+    const hasErrors = this.logContainer
+      ? this.logContainer.querySelector(".batch-log-error") !== null
+      : false;
+    if (!hasErrors) {
+      this.autoCloseTimer = setTimeout(() => {
+        this.close();
+      }, 2000);
+    }
   }
 
   close(): void {

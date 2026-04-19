@@ -1,4 +1,5 @@
 import { ToastContainer } from "./Toast";
+import { extractBackendMessage } from "../utils/errors";
 import { trapFocus } from "../utils/focus-trap";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appState } from "../state/AppState";
@@ -227,10 +228,7 @@ export class FolderDialog {
         ToastContainer.show("success", `Ordner "${name}" erstellt`);
         this.close();
       } catch (e) {
-        const msg =
-          e && typeof e === "object" && "message" in e
-            ? (e as { message: string }).message
-            : String(e);
+        const msg = extractBackendMessage(e, "Fehler");
         ToastContainer.show("error", `Ordner konnte nicht erstellt werden: ${msg}`);
         createBtn.disabled = false;
       }
