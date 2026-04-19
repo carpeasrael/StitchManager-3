@@ -55,6 +55,11 @@ pub struct AiClient {
 /// (TimedOut / ConnectionReset / DNS / TLS / …) instead of the generic
 /// "error sending request" wrapper. The `is_*` predicates also let us
 /// produce a German hint for the most common failure modes.
+///
+/// Hint priority is important: a TCP-connect timeout makes both
+/// `is_timeout()` and `is_connect()` true, but the actionable advice is
+/// "check the network", NOT "raise ai_timeout_ms". So `is_connect` is
+/// checked first.
 fn describe_reqwest_error(e: &reqwest::Error) -> String {
     let mut parts: Vec<String> = vec![e.to_string()];
     let mut src: Option<&dyn std::error::Error> = e.source();
@@ -63,11 +68,26 @@ fn describe_reqwest_error(e: &reqwest::Error) -> String {
         src = s.source();
     }
     let chain = parts.join(" → ");
+    let chain_lower = chain.to_ascii_lowercase();
 
-    let hint = if e.is_timeout() {
-        " (Zeitüberschreitung — bitte ai_timeout_ms in den Einstellungen erhöhen)"
-    } else if e.is_connect() {
-        " (Verbindung zur Ollama-Adresse fehlgeschlagen — IP, Port, Firewall prüfen)"
+    // Refuse / reset / unreachable / timed-out: all network-side issues.
+    let connect_failure = e.is_connect()
+        || chain_lower.contains("connection refused")
+        || chain_lower.contains("connection reset")
+        || chain_lower.contains("no route to host")
+        || chain_lower.contains("network is unreachable");
+
+    let hint = if connect_failure {
+        " (Verbindung zur Ollama-Adresse fehlgeschlagen — bitte prüfen: \
+            IP/Hostname korrekt, Port erreichbar, Firewall/VPN, Server läuft. \
+            Tipp: 'curl <ai_url>/api/tags' vom selben Rechner sollte antworten)"
+    } else if e.is_timeout() {
+        // True request-completion timeout (server accepted but didn't reply).
+        " (Zeitüberschreitung — Server hat angenommen, aber nicht geantwortet. \
+            ai_timeout_ms in den Einstellungen erhöhen oder ein leichteres \
+            Modell wählen)"
+    } else if chain_lower.contains("dns") {
+        " (DNS-Auflösung fehlgeschlagen — Hostname prüfen)"
     } else if e.is_request() {
         " (Anfrage konnte nicht gesendet werden)"
     } else {
