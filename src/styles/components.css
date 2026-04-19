@@ -310,14 +310,11 @@
   color: var(--color-accent);
 }
 
+/* Audit Wave 4 design: tokenised purple badge — uses --color-secondary
+ * which is theme-aware (defined in aurora.css for both themes). */
 .folder-type-sewing_pattern {
-  background: #f0e6ff;
-  color: #7c3aed;
-}
-
-[data-theme="dunkel"] .folder-type-sewing_pattern {
-  background: #3b235c;
-  color: #c4b5fd;
+  background: var(--color-secondary-bg);
+  color: var(--color-secondary-text);
 }
 
 .folder-type-mixed {
@@ -540,7 +537,7 @@
 /* Context menu */
 .folder-context-menu {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--z-context-menu);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
@@ -624,9 +621,60 @@
   gap: var(--spacing-2);
 }
 
+/*
+ * Audit Wave 4 design: legacy `.btn`/`.btn-primary`/`.btn-secondary`/`.btn-small`
+ * classes used by FolderDialog, FolderMoveDialog, SmartFolderDialog, and
+ * ImportPreviewDialog. Previously only `.btn-small` had a rule — the rest
+ * rendered as bare browser-default buttons. Aligned to the canonical
+ * `.dialog-btn` family below so every dialog's primary/secondary actions
+ * look identical.
+ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  font-family: var(--font-family);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: var(--color-on-status);
+  border-color: var(--color-accent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+}
+
+.btn-secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.btn-secondary:not(:disabled):hover {
+  background: var(--color-bg-hover);
+}
+
 .btn-small {
   font-size: var(--font-size-caption);
-  padding: 2px 8px;
+  padding: 2px var(--spacing-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-button);
   background: var(--color-surface);
@@ -635,7 +683,7 @@
 }
 
 .btn-small:hover {
-  background: var(--color-accent-10);
+  background: var(--color-bg-hover);
 }
 
 .import-preview-header-row,
@@ -883,7 +931,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-md);
-  z-index: 90;
+  z-index: var(--z-popover);
   padding: var(--spacing-3);
   min-width: 360px;
   max-width: 480px;
@@ -1983,7 +2031,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-md);
-  z-index: 90;
+  z-index: var(--z-popover);
   padding: var(--spacing-1) 0;
 }
 
@@ -2121,7 +2169,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-overlay);
 }
 
 .dialog {
@@ -2226,7 +2274,16 @@
   color: var(--color-text);
 }
 
-.dialog-close {
+/*
+ * Audit Wave 4 design: canonical close-button rule. The legacy
+ * `.dialog-close-btn` class (used in 4 dialogs without a CSS rule of its
+ * own — rendered as a bare browser button) is now aliased here. The other
+ * historical close variants (`.dv-close-btn`, `.edit-close-btn`,
+ * `.image-preview-close`, `.text-popup-close-x`) keep their own rules
+ * for now and are flagged for follow-up consolidation.
+ */
+.dialog-close,
+.dialog-close-btn {
   background: none;
   border: none;
   font-size: 20px;
@@ -2236,7 +2293,8 @@
   line-height: 1;
 }
 
-.dialog-close:hover {
+.dialog-close:hover,
+.dialog-close-btn:hover {
   color: var(--color-text);
 }
 
@@ -2766,7 +2824,7 @@
   position: fixed;
   top: var(--spacing-4);
   right: var(--spacing-4);
-  z-index: 200;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-2);
@@ -3164,7 +3222,7 @@ a:focus:not(:focus-visible),
 .drop-zone-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--z-overlay);
   background: rgba(var(--color-accent-rgb, 10, 132, 255), 0.12);
   backdrop-filter: blur(2px);
   display: flex;
@@ -3196,7 +3254,7 @@ a:focus:not(:focus-visible),
 .document-viewer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: var(--z-dialog);
   background: var(--color-bg);
   display: flex;
   flex-direction: column;
@@ -3549,7 +3607,7 @@ a:focus:not(:focus-visible),
 .image-viewer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  z-index: var(--z-dialog);
   background: rgba(0, 0, 0, 0.9);
   display: flex;
   align-items: center;
@@ -3683,7 +3741,7 @@ a:focus:not(:focus-visible),
 .print-preview-overlay {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: var(--z-dialog-fullscreen);
   background: var(--color-bg);
   display: flex;
   flex-direction: column;
@@ -3914,7 +3972,7 @@ a:focus:not(:focus-visible),
 .project-list-overlay {
   position: fixed;
   inset: 0;
-  z-index: 115;
+  z-index: var(--z-dialog-fullscreen);
   background: var(--color-bg);
   display: flex;
   flex-direction: column;
@@ -4038,7 +4096,7 @@ a:focus:not(:focus-visible),
 .mfg-overlay {
   position: fixed;
   inset: 0;
-  z-index: 115;
+  z-index: var(--z-dialog-fullscreen);
   background: var(--color-bg);
   display: flex;
   flex-direction: column;
@@ -4111,14 +4169,10 @@ a:focus:not(:focus-visible),
   color: var(--color-accent);
 }
 
+/* Audit Wave 4 design: tokenised warning badge — theme-aware via Aurora. */
 .mfg-badge-warn {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-[data-theme="dunkel"] .mfg-badge-warn {
-  background: #78350f;
-  color: #fde68a;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
 }
 
 .mfg-create-btn {
@@ -4204,7 +4258,7 @@ a:focus:not(:focus-visible),
 }
 
 .mfg-stock-warn {
-  background: #f59e0b;
+  background: var(--color-warning);
 }
 
 .mfg-stock-low {
@@ -4349,12 +4403,14 @@ a:focus:not(:focus-visible),
   border-bottom: 1px solid var(--color-border-light);
 }
 
+/* Audit Wave 4 design: tokenised row tints — same Aurora source as the
+ * inventory status pill above. */
 .mfg-inv-table tr.mfg-inv-low {
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--color-error-bg);
 }
 
 .mfg-inv-table tr.mfg-inv-warn {
-  background: rgba(245, 158, 11, 0.08);
+  background: var(--color-warning-bg);
 }
 
 .mfg-inv-status {
@@ -4370,32 +4426,15 @@ a:focus:not(:focus-visible),
   color: var(--color-success);
 }
 
+/* Audit Wave 4 design: tokenised inventory status — theme-aware. */
 .mfg-inv-status.mfg-inv-warn {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
 }
 
 .mfg-inv-status.mfg-inv-low {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-[data-theme="dunkel"] .mfg-inv-status.mfg-inv-warn {
-  background: #78350f;
-  color: #fde68a;
-}
-
-[data-theme="dunkel"] .mfg-inv-status.mfg-inv-low {
-  background: #7f1d1d;
-  color: #fca5a5;
-}
-
-[data-theme="dunkel"] .mfg-inv-table tr.mfg-inv-low {
-  background: rgba(239, 68, 68, 0.12);
-}
-
-[data-theme="dunkel"] .mfg-inv-table tr.mfg-inv-warn {
-  background: rgba(245, 158, 11, 0.12);
+  background: var(--color-error-bg);
+  color: var(--color-error);
 }
 
 /* ===== Time Tracking (Manufacturing Dialog) ===== */
@@ -4454,19 +4493,15 @@ a:focus:not(:focus-visible),
   border-radius: var(--radius-pill);
 }
 
+/* Audit Wave 4 design: tokenised over/under-budget badges. */
 .mfg-tt-diff-over {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--color-error-bg);
+  color: var(--color-error);
 }
 
 .mfg-tt-diff-under {
   background: var(--color-success-bg);
   color: var(--color-success);
-}
-
-[data-theme="dunkel"] .mfg-tt-diff-over {
-  background: #7f1d1d;
-  color: #fca5a5;
 }
 
 /* ===== Time & Cost (Project List Dialog) ===== */
@@ -4570,8 +4605,10 @@ a:focus:not(:focus-visible),
 }
 
 .mfg-kalk-total {
-  background: var(--color-accent-bg, rgba(var(--color-accent-rgb, 99, 102, 241), 0.08));
-  border-radius: var(--radius-sm, 4px);
+  /* Audit Wave 4 design: use the existing Aurora accent-10 token (matches
+   * the brand blue in both themes) instead of a literal-fallback chain. */
+  background: var(--color-accent-10);
+  border-radius: var(--radius-sm);
   padding: var(--spacing-1) var(--spacing-2);
   margin: var(--spacing-1) calc(-1 * var(--spacing-2));
 }
@@ -4586,8 +4623,10 @@ a:focus:not(:focus-visible),
 /* Star Rating */
 .star-rating { display: inline-flex; gap: 2px; cursor: pointer; }
 .star-rating .star { font-size: 1.4rem; color: var(--color-text-muted); transition: color 0.15s; user-select: none; }
-.star-rating .star.filled { color: #f5a623; }
-.star-rating .star.hover-fill { color: #f5a623; }
+/* Audit Wave 4 design: star colour now follows --color-warning (yellow-ish
+ * in both themes) — replaces the hard-coded #f5a623. */
+.star-rating .star.filled { color: var(--color-warning); }
+.star-rating .star.hover-fill { color: var(--color-warning); }
 
 /* Rich Text Editor */
 .rt-toolbar { display: flex; gap: 2px; margin-bottom: 4px; }

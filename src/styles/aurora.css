@@ -28,6 +28,21 @@
   --color-on-status: #ffffff;
   --color-on-warning: #333333;
 
+  /* Audit Wave 4 design: aliases + new tokens that close the
+   * undefined-variable findings. Light theme. */
+  --color-text-muted: var(--color-muted);
+  --color-bg-hover: var(--color-accent-10);
+  --color-canvas: #ffffff;
+  --color-danger: var(--color-error);
+  --color-danger-bg: var(--color-error-bg);
+  --color-secondary: #7c3aed;
+  --color-secondary-bg: #f0e6ff;
+  --color-secondary-text: #5b21b6;
+  --color-accent-rgb: 10, 132, 255;
+  --color-scrim-light: rgba(0, 0, 0, 0.5);
+  --color-scrim-strong: rgba(0, 0, 0, 0.85);
+  --color-overlay-medium: rgba(0, 0, 0, 0.7);
+
   /* Typography */
   --font-family: "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
   --font-size-display: 20px;
@@ -48,6 +63,7 @@
   --spacing-12: 48px;
 
   /* Border Radius */
+  --radius-sm: 4px;
   --radius-input: 6px;
   --radius-card: 8px;
   --radius-panel: 8px;
@@ -55,6 +71,21 @@
   --radius-button: 8px;
   --radius-pill: 999px;
   --radius-swatch: 4px;
+
+  /* Audit Wave 4 design: monospace family + z-index scale + icon-button
+   * sizes — replaces magic numbers scattered across components.css. */
+  --font-family-mono: "SF Mono", "Consolas", "Monaco", "Courier New", monospace;
+  --font-size-micro: 9px;
+  --font-size-badge: 10px;
+  --btn-size-sm: 28px;
+  --btn-size-md: 32px;
+  --z-base: 0;
+  --z-popover: 50;
+  --z-overlay: 100;
+  --z-dialog: 110;
+  --z-dialog-fullscreen: 120;
+  --z-context-menu: 200;
+  --z-toast: 1000;
 
   /* Background image */
   --bg-image: none;
@@ -94,6 +125,20 @@
   --color-warning-bg: rgba(255, 193, 7, 0.15);
   --color-on-status: #ffffff;
   --color-on-warning: #1f1f23;
+
+  /* Audit Wave 4 design: dark-theme equivalents for the new tokens. */
+  --color-text-muted: var(--color-muted);
+  --color-bg-hover: var(--color-accent-10);
+  --color-canvas: #ffffff; /* PDF/print canvases stay white */
+  --color-danger: var(--color-error);
+  --color-danger-bg: var(--color-error-bg);
+  --color-secondary: #a78bfa;
+  --color-secondary-bg: rgba(167, 139, 250, 0.18);
+  --color-secondary-text: #c4b5fd;
+  --color-accent-rgb: 45, 127, 249;
+  --color-scrim-light: rgba(0, 0, 0, 0.6);
+  --color-scrim-strong: rgba(0, 0, 0, 0.92);
+  --color-overlay-medium: rgba(0, 0, 0, 0.75);
 
   --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.20);
   --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.30);
