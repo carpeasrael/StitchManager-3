@@ -1,3 +1,20 @@
+/* Inter — single open-source UI font for the whole app.
+ * Licence: SIL Open Font License 1.1 (see src/assets/fonts/OFL.txt).
+ * One upright variable WOFF2 covers weights 100–900; italics are
+ * synthesised by the browser (Markdown emphasis is rare in rendered
+ * README output, so the size saving of dropping the italic face wins). */
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/InterVariable.woff2") format("woff2-variations"),
+       url("../assets/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0100-017F, U+0180-024F, U+1E00-1EFF,
+    U+2000-206F, U+20A0-20CF, U+2100-214F, U+2190-21FF;
+}
+
 :root,
 [data-theme="hell"] {
   /* Colors */
@@ -44,7 +61,7 @@
   --color-overlay-medium: rgba(0, 0, 0, 0.7);
 
   /* Typography */
-  --font-family: "Helvetica Neue", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-size-display: 20px;
   --font-size-heading: 15px;
   --font-size-body: 13px;
@@ -74,7 +91,7 @@
 
   /* Audit Wave 4 design: monospace family + z-index scale + icon-button
    * sizes — replaces magic numbers scattered across components.css. */
-  --font-family-mono: "SF Mono", "Consolas", "Monaco", "Courier New", monospace;
+  --font-family-mono: ui-monospace, "SF Mono", "Consolas", "Roboto Mono", "Cascadia Mono", "Courier New", monospace;
   --font-size-micro: 9px;
   --font-size-badge: 10px;
   --btn-size-sm: 28px;

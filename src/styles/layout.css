@@ -14,6 +14,10 @@
   font-family: var(--font-family);
   font-size: var(--font-size-body);
   border-radius: var(--radius-panel);
+  font-feature-settings: "cv11", "ss01", "ss03";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .app-layout::before {

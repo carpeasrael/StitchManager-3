@@ -34,7 +34,7 @@ import { initShortcuts } from "./shortcuts";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { revealItemInDir, openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import * as FileService from "./services/FileService";
 import * as BatchService from "./services/BatchService";
@@ -45,6 +45,7 @@ import * as FolderService from "./services/FolderService";
 import { applyFontSize } from "./utils/theme";
 import type { ThemeMode, UsbDevice } from "./types/index";
 import { LICENSE_TEXT, README_TEXT } from "./utils/app-texts";
+import { renderMarkdown } from "./utils/markdown";
 
 async function initTheme(): Promise<void> {
   try {
@@ -200,7 +201,11 @@ async function revealSelectedFile(): Promise<void> {
   }
 }
 
-function showTextPopup(title: string, text: string): void {
+function showMarkdownPopup(
+  title: string,
+  markdown: string,
+  options: { plaintext?: boolean } = {}
+): void {
   const overlay = document.createElement("div");
   overlay.className = "dialog-overlay";
   overlay.addEventListener("click", (e) => {
@@ -222,13 +227,52 @@ function showTextPopup(title: string, text: string): void {
   const closeX = document.createElement("button");
   closeX.className = "text-popup-close-x";
   closeX.textContent = "\u00D7";
+  closeX.setAttribute("aria-label", "Schließen");
   closeX.addEventListener("click", () => overlay.remove());
   header.appendChild(closeX);
   dialog.appendChild(header);
 
-  const content = document.createElement("pre");
-  content.className = "text-popup-content";
-  content.textContent = text;
+  const content = document.createElement("div");
+  if (options.plaintext) {
+    content.className = "text-popup-content md-body plaintext";
+    // Untrusted or verbatim text (LICENSE legalese, DB-sourced version history,
+    // filesystem filenames): never hand to marked. Split on blank lines and
+    // wrap each block in a <p> via textContent (XSS-safe) so the reader sees
+    // document-style paragraph spacing instead of one uninterrupted dump.
+    for (const block of markdown.split(/\n{2,}/)) {
+      if (block === "") continue;
+      const p = document.createElement("p");
+      p.textContent = block;
+      content.appendChild(p);
+    }
+  } else {
+    content.className = "text-popup-content md-body";
+    // Only the bundled README string reaches this branch — it is a build-time
+    // literal from the repo, with no user-controlled data in the flow.
+    content.innerHTML = renderMarkdown(markdown);
+    // Tauri webview: raw <a href> clicks would navigate the app window.
+    // Route external URLs through the opener plugin, map a relative LICENSE
+    // link to the license dialog, and let hash anchors pass through.
+    content.querySelectorAll("a[href]").forEach((a) => {
+      const anchor = a as HTMLAnchorElement;
+      const href = anchor.getAttribute("href") || "";
+      if (href.startsWith("#")) return;
+      anchor.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (/^(https?:|mailto:)/i.test(href)) {
+          openUrl(href).catch((err) => {
+            console.warn("openUrl failed", href, err);
+            ToastContainer.show("error", "Link konnte nicht geöffnet werden");
+          });
+        } else if (/^\.?\/?LICENSE(\.md)?$/i.test(href)) {
+          overlay.remove();
+          showMarkdownPopup("LICENSE \u2014 GPL-3.0", LICENSE_TEXT, { plaintext: true });
+        } else {
+          console.debug("unhandled markdown link", href);
+        }
+      });
+    });
+  }
   dialog.appendChild(content);
 
   overlay.appendChild(dialog);
@@ -270,7 +314,7 @@ function showInfoDialog(): void {
   readmeBtn.className = "info-link-btn";
   readmeBtn.textContent = "README anzeigen";
   readmeBtn.addEventListener("click", () => {
-    showTextPopup("README", README_TEXT);
+    showMarkdownPopup("README", README_TEXT);
   });
   linksEl.appendChild(readmeBtn);
 
@@ -278,7 +322,7 @@ function showInfoDialog(): void {
   licenseBtn.className = "info-link-btn";
   licenseBtn.textContent = "Lizenz anzeigen";
   licenseBtn.addEventListener("click", () => {
-    showTextPopup("LICENSE \u2014 GPL-3.0", LICENSE_TEXT);
+    showMarkdownPopup("LICENSE \u2014 GPL-3.0", LICENSE_TEXT, { plaintext: true });
   });
   linksEl.appendChild(licenseBtn);
 
@@ -752,7 +796,11 @@ function initEventHandlers(): () => void {
         const lines = versions.map(
           (v) => `v${v.versionNumber}: ${v.operation} — ${v.createdAt} (${(v.fileSize / 1024).toFixed(0)} KB)`
         );
-        showTextPopup(`Versionshistorie — ${file.name || file.filename}`, lines.join("\n"));
+        showMarkdownPopup(
+          `Versionshistorie — ${file.name || file.filename}`,
+          lines.join("\n"),
+          { plaintext: true }
+        );
       } catch (e) {
         console.warn("Failed to load versions:", e);
         ToastContainer.show("error", "Versionshistorie konnte nicht geladen werden");
